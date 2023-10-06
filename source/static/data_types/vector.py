@@ -127,3 +127,7 @@ class Vector(SingleGenericClass):
     @property
     def uv(self)->'Vector':
         return Vector(self._values[:2])
+
+    @property
+    def _xyz(self) -> 'Vector':
+        return self._values[:3]
