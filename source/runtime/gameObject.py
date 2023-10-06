@@ -1,0 +1,2 @@
+class GameObject:
+    pass
