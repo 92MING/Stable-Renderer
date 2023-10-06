@@ -2,6 +2,7 @@ from OpenGL.GL import *
 from utils.base_clses import NamedObj
 from .enums import ShaderType
 from static.data_types.vector import Vector
+from .data_types.base_types import *
 
 class Shader(NamedObj):
 
@@ -42,5 +43,18 @@ class Shader(NamedObj):
 
     def _getUniformID(self, name:str):
         return glGetUniformLocation(self._programID, name)
-    def setUniform(self, value):
-        pass
+    def setUniform(self, name, value):
+        val_id = self._getUniformID(name)
+        if isinstance(value, Vector):
+            if value.type() == Int:
+                glUniform3i(val_id, value.x, value.y, value.z)
+            elif value.type() == Float:
+                glUniform3f(val_id, value.x, value.y, value.z)
+            elif value.type() == Uint:
+                glUniform3ui(val_id, value.x, value.y, value.z)
+            elif value.type() == Double:
+                glUniform3d(val_id, value.x, value.y, value.z)
+            else:
+                raise RuntimeError(f'Unsupported uniform type: {type(value)}')
+        else:
+            raise RuntimeError(f'Unsupported uniform type: {type(value)}')

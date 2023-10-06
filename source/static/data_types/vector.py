@@ -3,8 +3,8 @@ from utils.base_clses import SingleGenericClass
 from typing import Sequence
 from .base_types import *
 
-class Vector(SingleGenericClass):
-    def __new__(cls, *values):
+class Vector(np.array, SingleGenericClass):
+    def __new__(cls, *args):
         if cls._type is None:
             if len(values) == 0:
                 raise ValueError('Vector must have at least one value')
@@ -34,16 +34,21 @@ class Vector(SingleGenericClass):
     def __repr__(self):
         return f'Vector{self.dimension}<{self._type}>({", ".join(map(str, self._values))})'
     def __str__(self):
-        return self.__repr__()
+        return str(self._values.tolist())
     def __getitem__(self, item):
         return self._values[item]
-
     def __class_getitem__(cls, item):
         if item == int:
             item = Int
         elif item == float:
             item = Float
         return super().__class_getitem__(item)
+
+    @classmethod
+    def Zero(cls, dimension:int):
+        if cls.type() is None:
+            raise ValueError('Cannot create a zero vector with no type')
+        return cls(np.zeros(dimension, dtype=cls._type))
 
     def dot(self, other:'Vector'):
         if self.dimension != other.dimension:
