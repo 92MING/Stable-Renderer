@@ -1,6 +1,6 @@
-from typing import List, Tuple, Dict, Union, Callable
+from typing import List, Tuple, Dict, Callable
 import numpy as np
-from .color import ConstColor
+from static.data_types.color import ConstColor
 from .data_types.vector import Vector
 from .enums import LightType
 
