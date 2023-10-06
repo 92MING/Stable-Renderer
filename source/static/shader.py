@@ -42,8 +42,5 @@ class Shader(NamedObj):
 
     def _getUniformID(self, name:str):
         return glGetUniformLocation(self._programID, name)
-    def setUniform(self, name:str, value):
-        uni_id = self._getUniformID(name)
-        if isinstance(value, Vector):
-            if value.dimension == 1:
-                ...
+    def setUniform(self, value):
+        pass

@@ -1,7 +1,7 @@
 import numpy as np
 from utils.base_clses import SingleGenericClass
 from typing import Sequence
-from .types import *
+from .base_types import *
 
 class Vector(SingleGenericClass):
     def __new__(cls, *values):

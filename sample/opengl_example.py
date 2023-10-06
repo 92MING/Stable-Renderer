@@ -9,6 +9,7 @@ block_VAO = 0
 draw = False
 block_EBO_buffer_len = 0
 
+
 def create_blocks(x: int, y: int, z: int):
     global draw, block_VAO, block_EBO_buffer_len
     if draw:
@@ -34,28 +35,32 @@ def create_blocks(x: int, y: int, z: int):
 
     block_color_buffer += [1.0, 0.0, 1.0, 1.0] * 8
 
-    block_VAO = glGenVertexArrays(1)
-    glBindVertexArray(block_VAO)
-
     block_VBO = glGenBuffers(1)
     glBindBuffer(GL_ARRAY_BUFFER, block_VBO)
     a = numpy.array(block_point_buffer, dtype='float32')
     glBufferData(GL_ARRAY_BUFFER, sys.getsizeof(a), a, GL_STATIC_DRAW)
-    glEnableVertexAttribArray(0)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, None)
 
     color_VBO = glGenBuffers(1)
     glBindBuffer(GL_ARRAY_BUFFER, color_VBO)
     a = numpy.array(block_color_buffer, dtype='float32')
     glBufferData(GL_ARRAY_BUFFER, sys.getsizeof(a), a, GL_STATIC_DRAW)
-    glEnableVertexAttribArray(1)
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, None)
+
+    block_VAO = glGenVertexArrays(1)
+    glBindVertexArray(block_VAO)
 
     block_EBO = glGenBuffers(1)
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, block_EBO)
     a = numpy.array(block_EBO_buffer, dtype='uint32')
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sys.getsizeof(a), a, GL_STATIC_DRAW)
     block_EBO_buffer_len = len(a)
+
+    glBindBuffer(GL_ARRAY_BUFFER, block_VBO)
+    glVertexPointer(3, GL_FLOAT, 0, None)
+    glEnableClientState(GL_VERTEX_ARRAY)
+
+    glBindBuffer(GL_ARRAY_BUFFER, color_VBO)
+    glColorPointer(4, GL_FLOAT, 0, None)
+    glEnableClientState(GL_COLOR_ARRAY)
 
     glBindVertexArray(0)
 
@@ -93,11 +98,6 @@ if __name__ == '__main__':
     glutCreateWindow(b"OpenGL Window")
     create_blocks(0, 0, 0)
     glClearColor(0.0, 0.0, 0.0, 0.0)
-
-    from static.shader import Shader
-    shader = Shader('test', 'vShader.glsl', 'fShader.glsl')
-    shader.useProgram()
-
     glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
     glutDisplayFunc(display)
     glutReshapeFunc(reshape)
