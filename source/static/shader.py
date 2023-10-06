@@ -46,5 +46,4 @@ class Shader(NamedObj):
         uni_id = self._getUniformID(name)
         if isinstance(value, Vector):
             if value.dimension == 1:
-                glUniform2fv(uni_id, 1, value._values)
-                glUniform1f(uni_id, value.x)
+                ...

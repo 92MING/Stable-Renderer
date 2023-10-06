@@ -2,7 +2,7 @@ import numpy as np
 from .vector import Vector
 
 class Vertex:
-    def __init__(self, pos:Vector[3], normal:Vector[3]=None, uv:Vector[2]=None):
+    def __init__(self, pos:Vector, normal:Vector=None, uv:Vector=None):
         self.pos = pos
         self.normal = normal
         self.uv = uv
