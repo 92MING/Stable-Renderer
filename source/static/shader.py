@@ -2,6 +2,7 @@ from OpenGL.GL import *
 from utils.base_clses import NamedObj
 from .enums import ShaderType
 from static.data_types.vector import Vector
+from static.data_types.matrix import Matrix
 from .data_types.base_types import *
 
 class Shader(NamedObj):
@@ -45,16 +46,91 @@ class Shader(NamedObj):
         return glGetUniformLocation(self._programID, name)
     def setUniform(self, name, value):
         val_id = self._getUniformID(name)
-        if isinstance(value, Vector):
-            if value.type() == Int:
-                glUniform3i(val_id, value.x, value.y, value.z)
-            elif value.type() == Float:
-                glUniform3f(val_id, value.x, value.y, value.z)
-            elif value.type() == Uint:
-                glUniform3ui(val_id, value.x, value.y, value.z)
-            elif value.type() == Double:
-                glUniform3d(val_id, value.x, value.y, value.z)
-            else:
-                raise RuntimeError(f'Unsupported uniform type: {type(value)}')
-        else:
+        if isinstance(value, int):
+            return glUniform1i(val_id, value)
+        elif isinstance(value, float):
+            return glUniform1f(val_id, value)
+        elif isinstance(value, bool):
+            return glUniform1i(val_id, int(value))
+        elif isinstance(value, Uint):
+            return glUniform1ui(val_id, value)
+        elif isinstance(value, Double):
+            return glUniform1d(val_id, value)
+        elif isinstance(value, Vector):
+            if value.dimension == 2:
+                if value.dtype == Int:
+                    return glUniform2i(val_id, value.x, value.y)
+                elif value.dtype == Float:
+                    return glUniform2f(val_id, value.x, value.y)
+                elif value.dtype == Uint:
+                    return glUniform2ui(val_id, value.x, value.y)
+                elif value.dtype == Double:
+                    return glUniform2d(val_id, value.x, value.y)
+            elif value.dimension == 3:
+                if value.dtype == Int:
+                    return glUniform3i(val_id, value.x, value.y, value.z)
+                elif value.dtype == Float:
+                    return glUniform3f(val_id, value.x, value.y, value.z)
+                elif value.dtype == Uint:
+                    return glUniform3ui(val_id, value.x, value.y, value.z)
+                elif value.dtype == Double:
+                    return glUniform3d(val_id, value.x, value.y, value.z)
+            elif value.dimension == 4:
+                if value.dtype == Int:
+                    return glUniform4i(val_id, value.x, value.y, value.z, value.w)
+                elif value.dtype == Float:
+                    return glUniform4f(val_id, value.x, value.y, value.z, value.w)
+                elif value.dtype == Uint:
+                    return glUniform4ui(val_id, value.x, value.y, value.z, value.w)
+                elif value.dtype == Double:
+                    return glUniform4d(val_id, value.x, value.y, value.z, value.w)
+        elif isinstance(value, Matrix):
+            if value.shape == (2, 2):
+                if value.dtype == Float:
+                    return glUniformMatrix2fv(val_id, 1, GL_FALSE, value.data)
+                elif value.dtype == Double:
+                    return glUniformMatrix2dv(val_id, 1, GL_FALSE, value.data)
+            elif value.shape == (3, 3):
+                if value.dtype == Float:
+                    return glUniformMatrix3fv(val_id, 1, GL_FALSE, value.data)
+                elif value.dtype == Double:
+                    return glUniformMatrix3dv(val_id, 1, GL_FALSE, value.data)
+            elif value.shape == (2, 3):
+                if value.dtype == Float:
+                    return glUniformMatrix2x3fv(val_id, 1, GL_FALSE, value.data)
+                elif value.dtype == Double:
+                    return glUniformMatrix2x3dv(val_id, 1, GL_FALSE, value.data)
+            elif value.shape == (3, 2):
+                if value.dtype == Float:
+                    return glUniformMatrix3x2fv(val_id, 1, GL_FALSE, value.data)
+                elif value.dtype == Double:
+                    return glUniformMatrix3x2dv(val_id, 1, GL_FALSE, value.data)
+            if value.shape == (4, 4):
+                if value.dtype == Float:
+                    return glUniformMatrix4fv(val_id, 1, GL_FALSE, value.data)
+                elif value.dtype == Double:
+                    return glUniformMatrix4dv(val_id, 1, GL_FALSE, value.data)
+            if value.shape == (2, 4):
+                if value.dtype == Float:
+                    return glUniformMatrix2x4fv(val_id, 1, GL_FALSE, value.data)
+                elif value.dtype == Double:
+                    return glUniformMatrix2x4dv(val_id, 1, GL_FALSE, value.data)
+            if value.shape == (4, 2):
+                if value.dtype == Float:
+                    return glUniformMatrix4x2fv(val_id, 1, GL_FALSE, value.data)
+                elif value.dtype == Double:
+                    return glUniformMatrix4x2dv(val_id, 1, GL_FALSE, value.data)
+            if value.shape == (3, 4):
+                if value.dtype == Float:
+                    return glUniformMatrix3x4fv(val_id, 1, GL_FALSE, value.data)
+                elif value.dtype == Double:
+                    return glUniformMatrix3x4dv(val_id, 1, GL_FALSE, value.data)
+            if value.shape == (4, 3):
+                if value.dtype == Float:
+                    return glUniformMatrix4x3fv(val_id, 1, GL_FALSE, value.data)
+                elif value.dtype == Double:
+                    return glUniformMatrix4x3dv(val_id, 1, GL_FALSE, value.data)
+        if not hasattr(value, 'dtype'):
             raise RuntimeError(f'Unsupported uniform type: {type(value)}')
+        else:
+            raise RuntimeError(f'Unsupported uniform type: {type(value)} with dtype: {value.dtype}')
