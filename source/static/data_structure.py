@@ -1,6 +1,6 @@
-from typing import List, Tuple, Dict, Callable
+from typing import List, Tuple, Dict, Union, Callable
 import numpy as np
-from static.data_types.color import ConstColor
+from .color import ConstColor, Color
 from .data_types.vector import Vector
 from .enums import LightType
 
@@ -59,11 +59,11 @@ class GameTexture:
 
 class SingleLightData:
     def __init__(self):
-        self.lightType = LightType.POINT_LIGHT
+        self.light_type = LightType.POINT
         self.direction = Vector(-1.0, -1.0, -1.0)
         self.position = Vector(0.0, 0.0, 0.0)
         self.cutOff = 30.0
-        self.outerCutOff = 45.0
+        self.outer_cutoff = 45.0
         self.constant = 0.0
         self.linear = 0.0
         self.quadratic = 1.0
@@ -73,35 +73,35 @@ class SingleLightData:
 
 class LightData_SSBO:
     def __init__(self):
-        self.ambientPower = 1.0
-        self.ambientLight = ConstColor.BLACK
-        self.singleLightDataLength = 0
-        self.allSingleLightData: List[SingleLightData] = []
+        self.ambient_power = 1.0
+        self.ambient_light: Color = ConstColor.BLACK
+        self.single_light_data_length = 0
+        self.all_single_light_data: List[SingleLightData] = []
 
 
-class ShadowLightData_PointLight:
+class ShadowLightDataPointLight:
     def __init__(self):
-        self.lightProj = np.eye(4)  # 4x4 identity matrix as placeholder
-        self.lightViews = [np.eye(4) for _ in range(6)]
-        self.frameBuffer_ID = 0
-        self.shadowMap_ID = 0
-        self.farPlane = 0.0
-        self.lightPos = np.array([0.0, 0.0, 0.0])
+        self.light_proj = np.eye(4)  # 4x4 identity matrix as placeholder
+        self.light_views = [np.eye(4) for _ in range(6)]
+        self.frame_buffer_id = 0
+        self.shadow_map_id = 0
+        self.far_plane = 0.0
+        self.light_pos = np.array([0.0, 0.0, 0.0])
 
 
-class ShadowLightData_OtherLight:
+class ShadowLightDataOtherLight:
     def __init__(self):
-        self.lightVP = np.eye(4)
-        self.frameBuffer_ID = 0
-        self.shadowMap_ID = 0
-        self.lightType = ""  # Placeholder
-        self.lightPos_OR_lightDir = Vector(0.0, 0.0, 0.0)
+        self.light_VP = np.eye(4)
+        self.frame_buffer_id = 0
+        self.shadow_map_id = 0
+        self.light_type = ""  # Placeholder
+        self.light_pos_or_light_dir = Vector(0.0, 0.0, 0.0)
 
 
 class FBO_Texture:
     def __init__(self):
-        self.FBO_ID = 0
-        self.shadowMapTexture_ID = 0
+        self.FBO_id = 0
+        self.shadow_map_texture_id = 0
         self.occupied = False
 
 
@@ -125,7 +125,7 @@ class CurrentMaterialData:
         self.shader = None  # Placeholder
         self.allTextureData: List[CurrentTextureData] = []
         self.allVariableData: List[CurrentMaterialVariableData] = []
-        self.emissionColor = ConstColor.BLACK
+        self.emissionColor: Color = ConstColor.BLACK
         self.emissionIntensity = 1.0
         self.receiveShadow = True
 
@@ -144,9 +144,9 @@ class RenderFrameData:
         self.allSingleLights: List[SingleLightData] = []
         self.ambientLight = ConstColor.BLACK
         self.ambientPower = 1.0
-        self.allShadowLights_DirectionalLight: List[ShadowLightData_OtherLight] = []
-        self.allShadowLights_SpotLight: List[ShadowLightData_OtherLight] = []
-        self.allShadowLights_PointLight: List[ShadowLightData_PointLight] = []
+        self.allShadowLights_DirectionalLight: List[ShadowLightDataOtherLight] = []
+        self.allShadowLights_SpotLight: List[ShadowLightDataOtherLight] = []
+        self.allShadowLights_PointLight: List[ShadowLightDataPointLight] = []
         self.allMeshesCastingShadow: List[Tuple[CurrentMeshData, GameTexture]] = []
         self.cameraVPData = None  # Placeholder
         self.cameraBackgroundColor = ConstColor.BLACK
