@@ -40,7 +40,7 @@ class ProjectionType(Enum):
     ORTHOGRAPHIC = 1
 
 class LightType(Enum):
-    DIRECTIONAL_LIGHT = gl.GL_LIGHT0
-    POINT_LIGHT = gl.GL_LIGHT1
-    SPOT_LIGHT = gl.GL_LIGHT2
+    DIRECTIONAL_LIGHT = 0
+    POINT_LIGHT = 1
+    SPOT_LIGHT = 2
 
