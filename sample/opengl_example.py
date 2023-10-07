@@ -3,8 +3,6 @@ from OpenGL.GLU import *
 from OpenGL.GL import *
 import numpy
 
-rotate = [33, 40, 20]
-
 block_VAO = 0
 draw = False
 block_EBO_buffer_len = 0
@@ -57,15 +55,14 @@ def create_blocks(x: int, y: int, z: int):
 
     glBindVertexArray(0)
 
-def display():
+from static.data_types.matrix import Matrix
+rotate = [33.0, 40.0, 20.0]
+def display(shader):
     glMatrixMode(GL_MODELVIEW)
     glClear(GL_COLOR_BUFFER_BIT)
     glLoadIdentity()
-    glTranslatef(0, 0, -4.5)
-    glRotatef(rotate[0], 1, 0.0, 0)
-    glRotatef(rotate[1], 0, 1, 0)
-    glRotatef(rotate[2], 0, 0, 1)
-    glScalef(1, 1, 1)
+    modelMatrix = Matrix.Transformation([0.0, 0.0, -4.5], rotate, [1.0, 1.0, 1.0])
+    shader.setUniform('MVP', modelMatrix)
 
     glBindVertexArray(block_VAO)
     glDrawElements(GL_QUADS, block_EBO_buffer_len, GL_UNSIGNED_INT, None)
@@ -94,8 +91,10 @@ if __name__ == '__main__':
     from static.shader import Shader
     shader = Shader('test', 'vShader.glsl', 'fShader.glsl')
     shader.useProgram()
-    
+
     glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
-    glutDisplayFunc(display)
+    def _display():
+        display(shader)
+    glutDisplayFunc(_display)
     glutReshapeFunc(reshape)
     glutMainLoop()

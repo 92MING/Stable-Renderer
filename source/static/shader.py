@@ -24,7 +24,6 @@ class Shader(NamedObj):
         # check shader compile status
         if glGetShaderiv(shaderID, GL_COMPILE_STATUS, None) == GL_FALSE:
             info_log = glGetShaderInfoLog(shaderID)
-            glDeleteProgram(shaderID)
             raise Exception(f'Failed to compile shader {self.name}. Error msg: {info_log}')
         return shaderID
     def _init_program(self, v_shaderID, f_shaderID):
@@ -35,7 +34,6 @@ class Shader(NamedObj):
         glAttachShader(program, f_shaderID)
         glLinkProgram(program)
         if glGetProgramiv(program, GL_LINK_STATUS, None) == GL_FALSE:
-            glDeleteProgram(program)
             raise RuntimeError(f'Failed to link program when initializing shader: {self.name}')
         return program
 

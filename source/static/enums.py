@@ -26,16 +26,21 @@ class ShaderType(Enum):
     TESS_EVALUATION = gl.GL_TESS_EVALUATION_SHADER
     COMPUTE = gl.GL_COMPUTE_SHADER
 
-# 以下两个类的变量值，需要替换为 GL 的真实值
+class RenderOrder:
+    """
+    Render order of GameObjects.
+    Note that this is not a enum class.
+    """
+    OPAQUE = 1000
+    TRANSPARENT = 2000
+    OVERLAY = 3000
 
-
-class ProjectionType:
+class ProjectionType(Enum):
     PERSPECTIVE = 0
     ORTHOGRAPHIC = 1
 
-class LightType:
+class LightType(Enum):
     DIRECTIONAL_LIGHT = gl.GL_LIGHT0
     POINT_LIGHT = gl.GL_LIGHT1
     SPOT_LIGHT = gl.GL_LIGHT2
 
-__all__ = ['PrimitiveType', 'ShaderType']

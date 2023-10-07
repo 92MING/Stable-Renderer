@@ -12,7 +12,7 @@ class Vector(np.ndarray):
         '''When type is not specified, it will be inferred from the first element of args.'''
         dtype = kwargs.get('dtype', None)
         if dtype is None:
-            if not isinstance(args[0], Sequence):
+            if not isinstance(args[0], (Sequence, np.ndarray)):
                 args = (args,)
             if type(args[0][0])==int:
                 dtype = np.int32
@@ -39,6 +39,9 @@ class Vector(np.ndarray):
     @property
     def dimension(self)->int:
         return len(self)
+
+    def cross(self, other:'Vector')->'Vector':
+        return Vector(np.cross(self, other))
 
     @property
     def x(self)->float:
