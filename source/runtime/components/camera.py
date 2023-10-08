@@ -2,51 +2,50 @@ import numpy as np
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GLUT import *
-from static.data_types.color import Color
+from utils.base_clses import NamedObj
+from static.data_types.color import ConstColor
+from static.data_types.vector import Vector
+from static.data_types.matrix import Matrix
 from static.data_types.vector import Vector
 from static.enums import ProjectionType
-# from utils.global_utils import GetOrAddGlobalValue
-
-# _ALL_CAMERAS: dict = GetOrAddGlobalValue('_ALL_CAMERAS', dict())
-
-
-class CameraVPData:
-    def __init__(self, camera_position, view_matrix, projection_matrix):
-        self.camera_position = camera_position
-        self.view_matrix = view_matrix
-        self.projection_matrix = projection_matrix
+from static.data_structure import CameraVPData
+from runtime.gameObject import GameAttribute
+from static.engine import Engine
 
 
-class Camera:
+class Camera(NamedObj):
     main_cam = None
     all_cams = set()
     active_cams = []
     has_init_UBO = False
     cam_UBO = None
 
-    def __init__(self):
+    def __init__(self, name: str, fov=90.0, near_plane=1.0, far_plane=100.0, ortho_size=1.0, background_color=ConstColor.BLACK, projection_type=ProjectionType.PERSPECTIVE):
+        super().__init__(name)
+        self.fov = fov
+        self.near_plane = near_plane
+        self.far_plane = far_plane
+        self.ortho_size = ortho_size
+        self.background_color = background_color
+        self.projection_type = projection_type
+
         self.all_cams.add(self)
-        self.fov = 90.0
-        self.near_plane = 0.1
-        self.far_plane = 100.0
-        self.ortho_size = 1.0
-        self.background_color = Color.Black
-        self.projection_type = "perspective"
 
     def __del__(self):
-        self.all_cams.remove(self)
         self.change_camera_active_state(False)
+
+        self.all_cams.remove(self)
 
     def change_camera_active_state(self, active):
         if active and not self.is_active_cam():
             self.active_cams.append(self)
             if len(self.active_cams) == 1:
-                self.main_cam = self
+                self.set_as_main_cam()
         elif self.is_active_cam():
             self.active_cams.remove(self)
             if self.main_cam == self:
                 if self.active_cams:
-                    self.main_cam = self.active_cams[0]
+                    self.active_cams[0].set_as_main_cam()
                 else:
                     self.main_cam = None
 
@@ -68,7 +67,7 @@ class Camera:
         return Vector(1.0, 0.0, 0.0)
 
     def get_up(self):
-        return Vector(0.0, 1.0, 0.0)
+        return Vector.up()
 
     def get_scene_width_and_height_near_plane(self, aspect_ratio):
         width = 2 * np.tan(self.fov / 2) * self.near_plane
@@ -76,14 +75,26 @@ class Camera:
         return width, height
 
     def get_view_matrix(self):
-        return gluLookAt(self.get_pos(), self.get_pos() + self.get_forward(), self.get_up())
+        return Matrix.LookAt(self.get_pos(), self.get_pos() + self.get_forward(), self.get_up())
 
-    def get_projection_matrix(self, window_width, window_height, ortho_distance):
+    def get_projection_matrix(self, window_width, window_height, ortho_distance=1.0):
         if self.projection_type == ProjectionType.PERSPECTIVE:
-            return gluPerspective(np.radians(self.fov), window_width / window_height, self.near_plane, self.far_plane)
+            return Matrix.Perspective(
+                self.fov,
+                window_width / window_height,
+                self.near_plane,
+                self.far_plane,
+                radian=False
+            )
         elif self.projection_type == ProjectionType.ORTHOGRAPHIC:
-            screenScale = window_width / window_height * self.ortho_size / 2
-            return glOrtho(-screenScale * ortho_distance, screenScale * ortho_distance, -float(ortho_distance), float(ortho_distance), self.near_plane, self.far_plane)
+            screen_scale = window_width / window_height * self.ortho_size / 2
+            return Matrix.Orthographic(-screen_scale * ortho_distance,
+                                       screen_scale * ortho_distance,
+                                       -float(ortho_distance),
+                                       float(ortho_distance),
+                                       self.near_plane,
+                                       self.far_plane
+                                       )
 
     @staticmethod
     def init_cam_UBO():
