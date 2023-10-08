@@ -16,6 +16,20 @@ class Vector(SingleGenericClass, np.ndarray):
                 values = values[0]
         return np.array(values, dtype=dtype).view(cls)
 
+    # region magic methods
+    def __eq__(self, other):
+        result = super().__eq__(other)
+        if isinstance(result, np.ndarray):
+            return result.all()
+        return result
+    def __repr__(self):
+        '''return as Vector<type>(x, y, z, ...)'''
+        return f'Vector<{self.type()}>{tuple(self)}'
+    def __str__(self):
+        '''return as [x, y, z, ...]'''
+        return str(self.tolist())
+    # endregion
+
     @classmethod
     def type(cls):
         if cls._type is None:

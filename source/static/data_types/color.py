@@ -13,19 +13,20 @@ def _getVal(val):
 
 class Color(Vector[float]):
     def __new__(cls, *values):
-        dtype = cls.type()
         if len(values) == 1:
             if not isinstance(values[0], (Sequence, np.ndarray)):
                 values = (values,)
             else:
                 values = values[0]
-            if not (3<=len(values)<=4):
-                raise ValueError('Color must have 3-4 values')
-            if type(values[0]) == int:
-                values = [_getVal(val) for val in values]
-            if len(values) == 3:
-                values = tuple(values) + (1.0,)
-        return np.array(values, dtype=dtype).view(cls)
+        if not ((3<=len(values)<=4) or len(values)==1):
+            raise ValueError('Color must have 1, 3 or 4 values')
+        if type(values[0]) == int:
+            values = [_getVal(val) for val in values]
+        if len(values) == 1:
+            values = tuple(values) * 3 + (1.0,)
+        elif len(values) == 3:
+            values = tuple(values) + (1.0,)
+        return np.array(values, dtype=cls.type()).view(cls)
 
     def _tidy_rgba(self):
         self.r = _getVal(self.r)
@@ -34,20 +35,33 @@ class Color(Vector[float]):
         self.a = _getVal(self.a)
 
     @property
-    def rgb(self):
-        return np.array([self.r, self.g, self.b])
-
+    def r(self):
+        return self[0]
+    @r.setter
+    def r(self, val):
+        self[0] = _getVal(val)
     @property
-    def rgba(self):
-        '''return rgba color in tuple(r, g, b, a)'''
-        return tuple([self.r, self.g, self.b, self.a])
-
+    def g(self):
+        return self[1]
+    @g.setter
+    def g(self, val):
+        self[1] = _getVal(val)
     @property
-    def argb(self):
-        '''return argb color in tuple(a, r, g, b)'''
-        return tuple([self.a, self.r, self.g, self.b])
-
-    def get_hsv(self):
+    def b(self):
+        return self[2]
+    @b.setter
+    def b(self, val):
+        self[2] = _getVal(val)
+    @property
+    def a(self):
+        return self[3]
+    @a.setter
+    def a(self, val):
+        self[3] = _getVal(val)
+    @property
+    def rgb(self)->Vector[float]:
+        return Vector[self.type()](self[:3])
+    def hsv(self):
         '''return hsv color in tuple(h, s, v)'''
         h, s, v = 0.0, 0.0, 0.0
         max_val = max(self.r, self.g, self.b)
@@ -66,9 +80,8 @@ class Color(Vector[float]):
         s = 0 if max_val == 0 else (max_val - min_val) / max_val
         v = max_val
 
-        return h, s, v
-
-    def set_color_from_hsv(self, hsv: Vector, a=1.0):
+        return Vector[self.type()](h, s, v)
+    def set_from_hsv(self, hsv: Vector, a=1.0):
         h, s, v = hsv[:3]
         if s == 0:
             self.r, self.g, self.b = v, v, v
@@ -94,82 +107,10 @@ class Color(Vector[float]):
         self.a = a
         self._tidy_rgba()
 
-    def __eq__(self, color):
-        return self.r == color.r and self.g == color.g and self.b == color.b and self.a == color.a
-
-    def __ne__(self, color):
-        return not self == color
-
-    def __add__(self, color):
-        return Color(self.r + color.r, self.g + color.g, self.b + color.b, self.a + color.a)
-
-    def __sub__(self, color):
-        return Color(self.r - color.r, self.g - color.g, self.b - color.b, self.a - color.a)
-
-    def __mul__(self, value):
-        if isinstance(value, Color):
-            return Color(self.r * value.r, self.g * value.g, self.b * value.b, self.a * value.a)
-        elif isinstance(value, (float, int)):
-            return Color(self.r * value, self.g * value, self.b * value, self.a * value)
-        # Add cases for vec3 and vec4 if needed
-
-    def __truediv__(self, value):
-        if isinstance(value, Color):
-            return Color(self.r / value.r, self.g / value.g, self.b / value.b, self.a / value.a)
-        elif isinstance(value, (float, int)):
-            return Color(self.r / value, self.g / value, self.b / value, self.a / value)
-        # Add cases for vec3 and vec4 if needed
-
-    def __iadd__(self, color):
-        self.r += color.r
-        self.g += color.g
-        self.b += color.b
-        self.a += color.a
-        self._tidy_rgba()
-        return self
-
-    def __isub__(self, color):
-        self.r -= color.r
-        self.g -= color.g
-        self.b -= color.b
-        self.a -= color.a
-        self._tidy_rgba()
-        return self
-
-    def __imul__(self, value):
-        if isinstance(value, Color):
-            self.r *= value.r
-            self.g *= value.g
-            self.b *= value.b
-            self.a *= value.a
-        elif isinstance(value, (float, int)):
-            self.r *= value
-            self.g *= value
-            self.b *= value
-            self.a *= value
-        # Add cases for vec3 and vec4 if needed
-        self._tidy_rgba()
-        return self
-
-    def __itruediv__(self, value):
-        if isinstance(value, Color):
-            self.r /= value.r
-            self.g /= value.g
-            self.b /= value.b
-            self.a /= value.a
-        elif isinstance(value, (float, int)):
-            self.r /= value
-            self.g /= value
-            self.b /= value
-            self.a /= value
-        # Add cases for vec3 and vec4 if needed
-        self._tidy_rgba()
-        return self
-
     def __repr__(self):
-        return "Color({},{},{},{})".format(self.r, self.g, self.b, self.a)
+        return f"Color({self.r:.2f}, {self.g:.2f}, {self.b:.2f}, {self.a:.2f})"
     def __str__(self):
-        return self.__repr__()
+        return f"[{self.r:.2f}, {self.g:.2f}, {self.b:.2f}, {self.a:.2f}]"
 
 BLACK = Color(0, 0, 0)
 WHITE = Color(255, 255, 255)
