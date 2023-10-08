@@ -1,8 +1,5 @@
 import numpy as np
-from functools import partial
-from typing import Sequence
 from static.data_types.vector import Vector
-import warnings
 from utils.base_clses import SingleGenericClass
 
 
@@ -87,8 +84,6 @@ class Matrix(SingleGenericClass, np.matrix):
     @classmethod
     def Rotation(cls, x, y, z, radian=False):
         '''rotation order is z, x, y. Note that this is 4x4 matrix'''
-        if not radian:
-            z, x, y = np.radians(z), np.radians(x), np.radians(y)
         return cls.RotationZ(z, radian=radian) @ cls.RotationX(x, radian=radian) @ cls.RotationY(y, radian=radian)
 
     @classmethod
@@ -96,8 +91,8 @@ class Matrix(SingleGenericClass, np.matrix):
         '''rotation around axis'''
         if not radian:
             angle = np.radians(angle)
-        axis = Vector(axis, dtype=cls.type())
-        axis = axis.normalized()
+        axis = Vector[cls.type()](axis)
+        axis = axis.normalize
         x, y, z = axis
         c = np.cos(angle)
         s = np.sin(angle)
@@ -159,19 +154,24 @@ class Matrix(SingleGenericClass, np.matrix):
         :return: 4x4 View matrix
         '''
         if isinstance(eye, (list, tuple)):
-            eye = np.array(eye)
+            eye = Vector(eye)
         if isinstance(center, (list, tuple)):
-            center = np.array(center)
+            center = Vector(center)
         if isinstance(up, (list, tuple)):
-            up = np.array(up)
-        f = (center - eye).view(Vector).normalize
-        s = f.cross(up).view(Vector).normalize
-        u = s.cross(f)
-        return cls([[s[0], s[1], s[2], -s @ eye],
-                    [u[0], u[1], u[2], -u @ eye],
-                    [-f[0], -f[1], -f[2], f @ eye],
+            up = Vector(up)
+        zaxis = (eye - center).view(Vector).normalize
+        xaxis = up.cross(zaxis).view(Vector).normalize
+        yaxis = zaxis.cross(xaxis).view(Vector).normalize
+        return cls([[xaxis.x, xaxis.y, xaxis.z, -xaxis.dot(eye)],
+                    [yaxis.x, yaxis.y, yaxis.z, -yaxis.dot(eye)],
+                    [zaxis.x, zaxis.y, zaxis.z, -zaxis.dot(eye)],
                     [0, 0, 0, 1]], dtype=cls.type())
     # endregion
 
 
 __all__ = ['Matrix']
+
+if __name__ == '__main__':
+    modelMatrix = Matrix.Transformation([0.0, 0.0, -5], [0, 90, 0], [1.0, 1.0, 1.0])
+    m = (Vector([0,0,0,1]) * modelMatrix)
+    print(m, m.shape)

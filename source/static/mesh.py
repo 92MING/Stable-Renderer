@@ -155,10 +155,9 @@ class Mesh:
             return _ALL_MESHES[name]
         else:
             return super().__new__(cls)
-    def __init__(self, name):
+    def __init__(self, name, data:MeshData=None):
         self._name = name
-        self._meshData :MeshData = None
-        self._drawMode = None
+        self._meshData :MeshData = data
         self._format = None # obj, stl, etc.
 
     # region properties
@@ -169,9 +168,9 @@ class Mesh:
     @property
     def drawMode(self):
         '''draw mode of the mesh, e.g. gl.GL_TRIANGLES, gl.GL_QUADS, etc.'''
-        if self._drawMode is None:
+        if self._meshData is None:
             raise ValueError('MeshData is not loaded')
-        return self._drawMode
+        return self._meshData.drawMode
     @property
     def format(self):
         '''file format of the mesh, e.g. obj, stl, etc.'''
@@ -179,7 +178,6 @@ class Mesh:
             raise ValueError('MeshData is not loaded')
         return self._meshData.format
     # endregion
-
 
     def sendToGPU(self):
         if self._meshData is None:
@@ -196,12 +194,12 @@ class Mesh:
         '''
         if name is None:
             name = path
-        if not path.endswith(_SUPPORTED_FORMAT):
-            raise ValueError(f'unsupported format: {os.path.basename(path)}. Currently only support {str(_SUPPORTED_FORMAT)[1:-1]}')
-        mesh = Mesh(name)
-        if path.endswith('.obj'):
-            mesh._loadObj(path)
-            mesh._format = 'obj'
+        if '.' not in name:
+            raise ValueError('name must contain file extension')
+        ext = name.split('.')[-1]
+        data = MeshData[ext]()
+        data.load(path)
+        mesh = Mesh(name, data)
         _ALL_MESHES[name] = mesh
         return mesh
 

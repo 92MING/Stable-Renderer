@@ -23,8 +23,9 @@ class Vector(SingleGenericClass, np.ndarray):
             return result.all()
         return result
     def __repr__(self):
+        type_name = self.type().__qualname__.split('.')[-1] if hasattr(self.type(), '__qualname__') else self.type().__name__.split('.')[-1]
         '''return as Vector<type>(x, y, z, ...)'''
-        return f'Vector<{self.type()}>{tuple(self)}'
+        return f'Vector<{type_name}>{tuple(self)}'
     def __str__(self):
         '''return as [x, y, z, ...]'''
         return str(self.tolist())
