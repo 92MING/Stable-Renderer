@@ -107,8 +107,10 @@ class Matrix(SingleGenericClass, np.matrix):
                      [0, 0, -2 / (far - near), -(far + near) / (far - near)],
                      [0, 0, 0, 1]], dtype=cls.type())
     @classmethod
-    def Perspective(cls, fov, aspect, near, far):
-        f = 1 / np.tan(np.radians(fov / 2))
+    def Perspective(cls, fov, aspect, near, far, radian=False):
+        if not radian:
+            fov = np.radians(fov)
+        f = 1 / np.tan(fov / 2)
         return cls([[f / aspect, 0, 0, 0],
                      [0, f, 0, 0],
                      [0, 0, (far + near) / (near - far), 2 * far * near / (near - far)],

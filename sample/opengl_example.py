@@ -2,6 +2,8 @@ from OpenGL.GLUT import *
 from OpenGL.GLU import *
 from OpenGL.GL import *
 import numpy
+from static.data_types.vector import Vector
+from static.data_types.matrix import Matrix
 
 block_VAO = 0
 draw = False
@@ -55,23 +57,23 @@ def create_blocks(x: int, y: int, z: int):
 
     glBindVertexArray(0)
 
-from static.data_types.matrix import Matrix
 rotate = [33.0, 40.0, 20.0]
 def display(shader):
     glMatrixMode(GL_MODELVIEW)
     glClear(GL_COLOR_BUFFER_BIT)
-    glLoadIdentity()
+
     modelMatrix = Matrix.Transformation([0.0, 0.0, -4.5], rotate, [1.0, 1.0, 1.0])
-    shader.setUniform('MVP', modelMatrix)
+    viewMatrix = Matrix.LookAt([0.0, 0.0, 0.0], [0.0, 0.0, -20], Vector.up())
+    projectionMatrix = Matrix.Perspective(45.0, 400/350, 0.5, 20.0)
+    shader.setUniform('MVP', projectionMatrix * viewMatrix * modelMatrix)
 
     glBindVertexArray(block_VAO)
     glDrawElements(GL_QUADS, block_EBO_buffer_len, GL_UNSIGNED_INT, None)
-    glBindVertexArray(0)
-    rotate[1] += 0.1
+
+    rotate[1] += 10.0
 
     glutSwapBuffers()
     glutPostRedisplay()
-
 
 def reshape(width, height):
     glViewport(0, 0, width, height)
@@ -82,7 +84,7 @@ def reshape(width, height):
 
 if __name__ == '__main__':
     glutInit(sys.argv)
-    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB)
+    glutInitDisplayMode(GLUT_SINGLE | GLUT_RGBA)
     glutInitWindowSize(400, 350)
     glutCreateWindow(b"OpenGL Window")
     create_blocks(0, 0, 0)
@@ -96,5 +98,5 @@ if __name__ == '__main__':
     def _display():
         display(shader)
     glutDisplayFunc(_display)
-    glutReshapeFunc(reshape)
+    #glutReshapeFunc(reshape)
     glutMainLoop()

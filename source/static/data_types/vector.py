@@ -30,6 +30,7 @@ class Vector(SingleGenericClass, np.ndarray):
         return str(self.tolist())
     # endregion
 
+    # region class methods
     @classmethod
     def type(cls):
         if cls._type is None:
@@ -42,6 +43,32 @@ class Vector(SingleGenericClass, np.ndarray):
         elif cls._type == int:
             return np.int32
         return cls._type
+    @classmethod
+    def up(cls):
+        return cls([0, 1, 0])
+    @classmethod
+    def down(cls):
+        return cls([0, -1, 0])
+    @classmethod
+    def left(cls):
+        return cls([-1, 0, 0])
+    @classmethod
+    def right(cls):
+        return cls([1, 0, 0])
+    @classmethod
+    def forward(cls):
+        return cls([0, 0, 1])
+    @classmethod
+    def backward(cls):
+        return cls([0, 0, -1])
+    @classmethod
+    def zero(cls, dimension:int):
+        return cls(np.zeros(dimension, dtype=cls.type()))
+    @classmethod
+    def one(cls, dimension:int):
+        return cls(np.ones(dimension, dtype=cls.type()))
+
+    # endregion
 
     @property
     def size(self):
@@ -62,6 +89,7 @@ class Vector(SingleGenericClass, np.ndarray):
             raise ValueError('Cross product is only defined for 3D vectors')
         return Vector[self.type()](np.cross(self, other))
 
+    # region values
     @property
     def x(self):
         return self[0]
@@ -128,5 +156,6 @@ class Vector(SingleGenericClass, np.ndarray):
     def uv(self) -> 'Vector':
         return Vector[self.type()](self[:2])
 
+    # endregion
 
 __all__ = ['Vector']
