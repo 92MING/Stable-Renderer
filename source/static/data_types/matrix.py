@@ -1,15 +1,9 @@
 import numpy as np
-from functools import partial
-from typing import Sequence
 from static.data_types.vector import Vector
-import warnings
 from utils.base_clses import SingleGenericClass
 
-def _getMatrix(type, *args):
-    return np.matrix(*args, dtype=type).view(Matrix)
-
 class Matrix(SingleGenericClass, np.matrix):
-    '''Default type is np.float32'''
+    '''Default type is np.float32. You can use Matrix[type] to define the type.'''
     DEFAULT_TYPE = np.float32
 
     def __new__(cls, *args, **kwargs):
@@ -21,10 +15,10 @@ class Matrix(SingleGenericClass, np.matrix):
                 dtype = np.float32
             args = list(args)
             args[1] = dtype
-            return np.array(*args, **kwargs).view(cls)
+            return np.matrix(*args, **kwargs).view(cls)
         else:
             dtype = kwargs.pop('dtype', cls.type())
-            return np.array(*args, dtype=dtype, **kwargs).view(cls)
+            return np.matrix(*args, dtype=dtype, **kwargs).view(cls)
 
     @classmethod
     def type(cls):

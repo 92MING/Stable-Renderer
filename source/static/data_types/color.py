@@ -1,30 +1,37 @@
 import numpy as np
 from static.data_types.vector import Vector
+from typing import Sequence
 
+def _getVal(val):
+    if isinstance(val, int):
+        val = val / 255.0
+    if isinstance(val, float):
+        val = max(0.0, min(1.0, val))
+    else:
+        raise TypeError('val must be int or float')
+    return val
 
-class Color:
-    def __init__(self, r=0.0, g=0.0, b=0.0, a=1.0):
-        self.r, self.g, self.b, self.a = r, g, b, a
-        self._tidy_rgba()
-
-    @staticmethod
-    def from_vec(vector: Vector):
-        if len(vector) == 3:
-            return Color(*vector[:3], a=1.0)
-        elif len(vector) == 4:
-            return Color(*vector[:4])
-        else:
-            raise ValueError('Vector must have 3 or 4 elements')
-
-    @staticmethod
-    def from_int(r, g, b, a=255):
-        return Color(r / 255.0, g / 255.0, b / 255.0, a / 255.0)
+class Color(Vector[float]):
+    def __new__(cls, *values):
+        dtype = cls.type()
+        if len(values) == 1:
+            if not isinstance(values[0], (Sequence, np.ndarray)):
+                values = (values,)
+            else:
+                values = values[0]
+            if not (3<=len(values)<=4):
+                raise ValueError('Color must have 3-4 values')
+            if type(values[0]) == int:
+                values = [_getVal(val) for val in values]
+            if len(values) == 3:
+                values = tuple(values) + (1.0,)
+        return np.array(values, dtype=dtype).view(cls)
 
     def _tidy_rgba(self):
-        self.r = max(0.0, min(1.0, self.r))
-        self.g = max(0.0, min(1.0, self.g))
-        self.b = max(0.0, min(1.0, self.b))
-        self.a = max(0.0, min(1.0, self.a))
+        self.r = _getVal(self.r)
+        self.g = _getVal(self.g)
+        self.b = _getVal(self.b)
+        self.a = _getVal(self.a)
 
     @property
     def rgb(self):
@@ -32,13 +39,16 @@ class Color:
 
     @property
     def rgba(self):
-        return np.array([self.r, self.g, self.b, self.a])
+        '''return rgba color in tuple(r, g, b, a)'''
+        return tuple([self.r, self.g, self.b, self.a])
 
     @property
     def argb(self):
-        return np.array([self.a, self.r, self.g, self.b])
+        '''return argb color in tuple(a, r, g, b)'''
+        return tuple([self.a, self.r, self.g, self.b])
 
     def get_hsv(self):
+        '''return hsv color in tuple(h, s, v)'''
         h, s, v = 0.0, 0.0, 0.0
         max_val = max(self.r, self.g, self.b)
         min_val = min(self.r, self.g, self.b)
@@ -51,14 +61,12 @@ class Color:
             h = 60 * (self.b - self.r) / (max_val - min_val) + 120
         elif max_val == self.b:
             h = 60 * (self.r - self.g) / (max_val - min_val) + 240
-
         if h < 0:
             h += 360
-
         s = 0 if max_val == 0 else (max_val - min_val) / max_val
         v = max_val
 
-        return Vector(h, s, v)
+        return h, s, v
 
     def set_color_from_hsv(self, hsv: Vector, a=1.0):
         h, s, v = hsv[:3]
@@ -158,21 +166,20 @@ class Color:
         self._tidy_rgba()
         return self
 
+    def __repr__(self):
+        return "Color({},{},{},{})".format(self.r, self.g, self.b, self.a)
     def __str__(self):
-        return "Color(r={}, g={}, b={}, a={})".format(self.r, self.g, self.b, self.a)
+        return self.__repr__()
 
-
-class ConstColor:
-    # constant colors
-    BLACK = Color(0, 0, 0)
-    WHITE = Color(255, 255, 255)
-    RED = Color(255, 0, 0)
-    GREEN = Color(0, 255, 0)
-    BLUE = Color(0, 0, 255)
-    YELLOW = Color(255, 255, 0)
-    ORANGE = Color(255, 165, 0)
-    PURPLE = Color(128, 0, 128)
-    CYAN = Color(0, 255, 255)
-    MAGENTA = Color(255, 0, 255)
-    GRAY = Color(128, 128, 128)
-    CLEAR = Color(0, 0, 0, 0)
+BLACK = Color(0, 0, 0)
+WHITE = Color(255, 255, 255)
+RED = Color(255, 0, 0)
+GREEN = Color(0, 255, 0)
+BLUE = Color(0, 0, 255)
+YELLOW = Color(255, 255, 0)
+ORANGE = Color(255, 165, 0)
+PURPLE = Color(128, 0, 128)
+CYAN = Color(0, 255, 255)
+MAGENTA = Color(255, 0, 255)
+GRAY = Color(128, 128, 128)
+CLEAR = Color(0, 0, 0, 0)

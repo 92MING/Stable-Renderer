@@ -5,13 +5,6 @@ from .data_types.vector import Vector
 from .enums import LightType
 
 
-class Vertex:
-    def __init__(self, position, uv, normal):
-        self.position = position
-        self.uv = uv
-        self.normal = normal
-
-
 class KeyCallbackData:
     def __init__(self, key: int, action: int):
         self.key = key
@@ -59,7 +52,7 @@ class GameTexture:
 
 class SingleLightData:
     def __init__(self):
-        self.light_type = LightType.POINT
+        self.light_type = LightType.POINT_LIGHT
         self.direction = Vector(-1.0, -1.0, -1.0)
         self.position = Vector(0.0, 0.0, 0.0)
         self.cutOff = 30.0

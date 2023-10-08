@@ -10,10 +10,10 @@ class SingleGenericClass:
 
     def __class_getitem__(cls, item):
         if not isinstance(item, type):
-            raise TypeError(f'{cls.__name__} only accepts type as generic type')
+            raise TypeError(f'{cls.__qualname__} only accepts type as generic type, got {type(item)}')
         if item not in cls._genericClses:
             itemName = item.__qualname__.split('.')[-1] if hasattr(item, '__qualname__') else item.__name__.split('.')[-1]
-            newCls = type(f'{cls.__name__}_{itemName}', (cls,), {'__slots__':()})
+            newCls = type(f'{cls.__qualname__}<{itemName}>', (cls,), {'__slots__':()})
             newCls._type = item
             cls._genericClses[item] = newCls
         return cls._genericClses[item]
@@ -23,7 +23,7 @@ class SingleGenericClass:
         if cls._type is None:
             if cls.DEFAULT_TYPE is not None:
                 return cls.DEFAULT_TYPE
-            raise TypeError(f'{cls.__name__} has no generic type. Please use {cls.__name__}[type] to get a generic class')
+            raise TypeError(f'{cls.__qualname__} has no generic type. Please use {cls.__qualname__}[type] to get a generic class')
         return cls._type
 
 class MultiGenericClass:
@@ -36,7 +36,8 @@ class MultiGenericClass:
     def __class_getitem__(cls, item):
         item = tuple(item)
         if item not in cls._genericClses:
-            newCls = type(f'{cls.__name__}{item}', (cls,), {'__slots__':()})
+            itemName = item.__qualname__.split('.')[-1] if hasattr(item, '__qualname__') else item.__name__.split('.')[-1]
+            newCls = type(f'{cls.__qualname__}<{itemName}>', (cls,), {'__slots__':()})
             newCls._types = item
             cls._genericClses[item] = newCls
         return cls._genericClses[item]
@@ -46,7 +47,7 @@ class MultiGenericClass:
         if cls._types is None:
             if cls.DEFAULT_TYPES is not None:
                 return cls.DEFAULT_TYPES
-            raise TypeError(f'{cls.__name__} has no generic types. Please use {cls.__name__}[types] to get a generic class')
+            raise TypeError(f'{cls.__qualname__} has no generic types. Please use {cls.__qualname__}[types] to get a generic class')
         return cls._types
 
 
