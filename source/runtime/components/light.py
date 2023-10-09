@@ -3,19 +3,19 @@ from typing import List
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GLUT import *
-from .engine import Engine
-from .data_types.vector import Vector
-from .color import Color
-from .camera import Camera
-from .enums import LightType
-from .data_structure import (
+from static.engine import Engine
+from static.data_types.vector import Vector
+from static.data_types.matrix import Matrix
+from static.data_types.color import Color
+from runtime.components.camera import Camera
+from static.enums import LightType
+from static.data_structure import (
     SingleLightData,
     FBO_Texture,
     ShadowLightDataPointLight,
     ShadowLightDataOtherLight,
     LightData_SSBO
 )
-from .data_types.matrix import Matrix
 
 
 class Light:
@@ -71,7 +71,7 @@ class Light:
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
         Light.has_init_SSBO = True
 
-    def pre_init_framebuffer_and_texture():
+    def pre_init_frame_buffer_and_texture():
         if not Light.has_init_frame_buffer_and_texture:
             # init point lights
             max_size = Engine.get_shadow_map_texture_size()
@@ -222,7 +222,7 @@ class Light:
             return
         self.far_plane_point_light = farPlane
 
-    def isShadowLight(self):
+    def is_shadow_light(self):
         return self.cast_shadow
 
     @ staticmethod
