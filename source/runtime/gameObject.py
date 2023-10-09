@@ -2,21 +2,19 @@
 
 import numpy as np
 from abc import abstractmethod
-from source.static.data_types.vector import Vector
-from source.static.data_types.matrix import Matrix
+from static.data_types.vector import Vector
+from static.data_types.matrix import Matrix
+from utils.base_clses import NamedObj
 
 from enum import Enum
 
 
-class GameObject:
-    game_object_name_search_map = {}  # Map from name to GameObject
+class GameObject(NamedObj):
     game_object_tag_search_map = {}  # Map from tag to GameObject
     root_game_objects = []
 
     def __init__(self, name="", active=True, parent=None):
-        if name not in GameObject.game_object_name_search_map:
-            GameObject.game_object_name_search_map[name] = set()
-        GameObject.game_object_name_search_map[name].add(self)
+        super().__init__(name)
 
         self.active = active
         self.name = name
@@ -48,32 +46,25 @@ class GameObject:
                     else:
                         att.on_enable()
 
-    def set_name(self, new_name):
-        GameObject.game_object_name_search_map[self.name].remove(self)
-        if new_name not in GameObject.game_object_name_search_map:
-            GameObject.game_object_name_search_map[new_name] = set()
-        GameObject.game_object_name_search_map[new_name].add(self)
-        self.name = new_name
-
     def get_name(self):
         return self.name
 
-    def has_tag(self, tag):
-        return tag in self.tags
+    # def has_tag(self, tag):
+    #     return tag in self.tags
 
-    def add_tag(self, tag):
-        if self.has_tag(tag):
-            return
-        self.tags.add(tag)
-        if tag not in GameObject.game_object_tag_search_map:
-            GameObject.game_object_tag_search_map[tag] = set()
-        GameObject.game_object_tag_search_map[tag].add(self)
+    # def add_tag(self, tag):
+    #     if self.has_tag(tag):
+    #         return
+    #     self.tags.add(tag)
+    #     if tag not in GameObject.game_object_tag_search_map:
+    #         GameObject.game_object_tag_search_map[tag] = set()
+    #     GameObject.game_object_tag_search_map[tag].add(self)
 
-    def remove_tag(self, tag):
-        if not self.has_tag(tag):
-            return
-        self.tags.remove(tag)
-        GameObject.game_object_tag_search_map[tag].remove(self)
+    # def remove_tag(self, tag):
+    #     if not self.has_tag(tag):
+    #         return
+    #     self.tags.remove(tag)
+    #     GameObject.game_object_tag_search_map[tag].remove(self)
 
     def destroy(self):
         if self.parent is not None:
@@ -87,6 +78,9 @@ class GameObject:
             child.destroy()
 
     def set_parent(self, new_parent):
+        """
+        Set parent object. If `new_parent` is None, this object will be moved to root object list.
+        """
         if new_parent == self.parent:
             return
         if self.parent is not None:
@@ -112,8 +106,6 @@ class GameObject:
         return self.children
 
     def get_child(self, index):
-        if index >= len(self.children):
-            return None
         return self.children[index]
 
     def child_count(self):
