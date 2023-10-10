@@ -1,15 +1,13 @@
 import numpy as np
 from OpenGL.GL import *
-from OpenGL.GLU import *
 from OpenGL.GLUT import *
 from utils.base_clses import NamedObj
-from static.data_types.color import ConstColor
-from static.data_types.vector import Vector
+from static.color import ConstColor
 from static.data_types.matrix import Matrix
 from static.data_types.vector import Vector
 from static.enums import ProjectionType
 from static.data_structure import CameraVPData
-from runtime.gameObject import GameAttribute
+from runtime.game_object import GameAttribute
 from static.engine import Engine
 
 

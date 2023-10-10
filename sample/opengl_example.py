@@ -3,9 +3,6 @@ from OpenGL.GLUT import *
 from OpenGL.GLU import *
 from OpenGL.GL import *
 import numpy
-from static.data_types.vector import Vector
-from static.data_types.matrix import Matrix
-from static.data_types.base_types import *
 
 block_VAO = 0
 draw = False

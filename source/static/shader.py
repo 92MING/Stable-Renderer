@@ -105,9 +105,9 @@ class Shader(NamedObj):
                     return glUniformMatrix3x2dv(val_id, 1, GL_FALSE, value.data)
             if value.shape == (4, 4):
                 if value.dtype == Float:
-                    return glUniformMatrix4fv(val_id, 1, GL_TRUE, value.data)
+                    return glUniformMatrix4fv(val_id, 1, GL_FALSE, value.data)
                 elif value.dtype == Double:
-                    return glUniformMatrix4dv(val_id, 1, GL_TRUE, value.data)
+                    return glUniformMatrix4dv(val_id, 1, GL_FALSE, value.data)
             if value.shape == (2, 4):
                 if value.dtype == Float:
                     return glUniformMatrix2x4fv(val_id, 1, GL_FALSE, value.data)
