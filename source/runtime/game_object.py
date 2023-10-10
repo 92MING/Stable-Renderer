@@ -1,31 +1,39 @@
 '''GameObject is the class contains components and behaviors.'''
-
 import numpy as np
 from abc import abstractmethod
-from static.data_types.vector import Vector
-from static.data_types.matrix import Matrix
 from utils.base_clses import NamedObj
-
+from utils.global_utils import GetOrAddGlobalValue
+from runtime.runtime_engine_obj import RuntimeEngineObj
 from enum import Enum
+from typing import Union
 
+_engine_singleton = GetOrAddGlobalValue("_ENGINE_SINGLETON", None)
+_gameObj_tags = GetOrAddGlobalValue("_GAMEOBJ_TAGS", {}) # tag: set of gameObj
+_root_gameObjs = GetOrAddGlobalValue("_ROOT_GAMEOBJS", set()) # set of gameObj
+class GameObject(RuntimeEngineObj, NamedObj):
 
-class GameObject(NamedObj):
-    game_object_tag_search_map = {}  # Map from tag to GameObject
-    root_game_objects = []
+    # region class methods
+    @staticmethod
+    def RootObjs():
+        return _root_gameObjs
+    @staticmethod
+    def GetGameObjsWithTag(tag):
+        return _gameObj_tags.get(tag, set())
+    # endregion
 
-    def __init__(self, name="", active=True, parent=None):
+    def __init__(self, name, active=True, parent=None, tags:Union[str, list, tuple, set]=None):
+        if _engine_singleton is None:
+            raise RuntimeError("Engine is not initialized.")
         super().__init__(name)
 
-        self.active = active
-        self.name = name
-        self.tags = set()
-        self.parent = parent
-        self.children = []
-        self.attributes = {}
-        self._transform = None
+        self._active = active
+        self._tags = set()
+        self._parent = parent
+        self._children = []
+        self._components = []
 
         if parent is None:
-            GameObject.root_game_objects.append(self)
+            GameObject.root_game_objects.add(self)
         else:
             self.parent.children.append(self)
 
