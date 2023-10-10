@@ -17,8 +17,12 @@ class GameObject(RuntimeEngineObj, NamedObj):
     def RootObjs():
         return _root_gameObjs
     @staticmethod
-    def GetGameObjsWithTag(tag):
+    def FindObjs_ByTag(tag):
         return _gameObj_tags.get(tag, set())
+    @classmethod
+    def FindObj_ByName(cls, name):
+        '''Return None if not found'''
+        return cls.GetInstance(name)
     # endregion
 
     def __init__(self, name, active=True, parent=None, tags:Union[str, list, tuple, set]=None):
@@ -33,15 +37,21 @@ class GameObject(RuntimeEngineObj, NamedObj):
         self._components = []
 
         if parent is None:
-            GameObject.root_game_objects.add(self)
+            _root_gameObjs.add(self)
         else:
-            self.parent.children.append(self)
+            self.parent.children.append(self) if self not in self.parent.children else None
 
-    def is_active(self):
-        return self.active
+        if isinstance(tags, str):
+            tags = [tags]
+        for tag in tags:
+            self.addTag(tag)
 
-    def set_active(self, set_val):
-        if set_val == self.active:
+    @property
+    def active(self):
+        return self._active
+    @active.setter
+    def active(self, value:bool):
+        if self._active == value:
             return
         for child in self.children:
             child.set_active(set_val)

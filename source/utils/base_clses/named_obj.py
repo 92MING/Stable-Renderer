@@ -10,7 +10,6 @@ class NamedObj(CrossModuleClass):
         For NamedObj, the first argument is always the name of the instance. If instance with the same name is created, raise error.
         Name is not case sensitive.
         '''
-        name = name.lower()
         if cls._instances is None:
             cls._instances = {}
         if name in cls._instances:
@@ -20,7 +19,7 @@ class NamedObj(CrossModuleClass):
             cls._instances[name] = ins
         return ins
     def __init__(self, name:str, *args, **kwargs):
-        self._name = name.lower()
+        self._name = name
 
     @classmethod
     def GetInstance(cls, ins_name):
@@ -36,5 +35,15 @@ class NamedObj(CrossModuleClass):
     @property
     def name(self)->str:
         return self._name
+    @name.setter
+    def name(self, value:str):
+        if value == self._name:
+            return
+        if value in self._instances:
+            raise Exception(f'Instance with name {value} already exists, can not change name to it.')
+        else:
+            del self._instances[self._name]
+            self._instances[value] = self
+            self._name = value
 
 __all__ = ['NamedObj']
