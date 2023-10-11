@@ -1,4 +1,4 @@
-from runtime.runtime_engine_obj import RuntimeEngineObj
+from runtime.engineObj import EngineObj
 from utils.global_utils import GetOrAddGlobalValue
 
 _COMPONENT_CLSES = GetOrAddGlobalValue("_COMPONENT_CLSES", {})
@@ -11,7 +11,7 @@ class ComponentMeta(type):
             cls = super().__new__(cls, *args, **kwargs)
             _COMPONENT_CLSES[clsname] = cls
             return cls
-class Component(RuntimeEngineObj, metaclass=ComponentMeta):
+class Component(EngineObj, metaclass=ComponentMeta):
     '''Base cls of all components, e.g. Camera, Light, etc.'''
 
     # region cls properties
@@ -26,6 +26,12 @@ class Component(RuntimeEngineObj, metaclass=ComponentMeta):
     '''
     Override this property to change the uniqueness of this component.
     If this property is True, there can be only one component of this type in a GameObject.
+    '''
+
+    RequireComponent = ()
+    '''
+    Override this property to change the required components of this component. You can input Component cls or str(cls name).
+    e.g. Camera.RequireComponent = (Transform, )
     '''
 
     @classmethod
@@ -51,10 +57,6 @@ class Component(RuntimeEngineObj, metaclass=ComponentMeta):
         self._enable = enable
         self._started = False
         self._awaked = False
-        if self.enable:
-            self._awaked = True
-            self.awake()
-            self.onEnable()
     def __ge__(self, other):
         return self.Priority >= other.Priority
     def __gt__(self, other):
@@ -71,19 +73,28 @@ class Component(RuntimeEngineObj, metaclass=ComponentMeta):
         '''Called when this component runs for the first time'''
         pass
 
+    def _tryAwake(self):
+        if self.enable:
+            if not self._awaked :
+                self._awaked = True
+                self.awake()
+            self.onEnable()
     def _tryStart(self):
         if not self._started and self.enable and self._awaked:
             self._started = True
             self.start()
+    def _checkAwakeAndStart(self):
+        self._tryAwake()
+        self._tryStart()
     def fixedUpdate(self):
         '''Called every fixed frame'''
-        self._tryStart()
+        self._checkAwakeAndStart()
     def update(self):
         '''Called every frame'''
-        self._tryStart()
+        self._checkAwakeAndStart()
     def lateUpdate(self):
         '''Called every frame after update'''
-        self._tryStart()
+        self._checkAwakeAndStart()
 
     def onEnable(self):
         '''Called when this component is enabled. onEnable will not follow the priority rule.'''
@@ -111,13 +122,12 @@ class Component(RuntimeEngineObj, metaclass=ComponentMeta):
         return self._enable and self._gameObj.active
     @enable.setter
     def enable(self, value):
+        self.setEnable(value)
+    def setEnable(self, value):
         if self._enable != value:
             self._enable = value
             if self._gameObj.active:
                 if value:
-                    if not self._awaked:
-                        self._awaked = True
-                        self.awake()
-                    self.onEnable()
+                    self._tryAwake()
                 else:
                     self.onDisable()

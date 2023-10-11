@@ -129,7 +129,7 @@ class Transform(Component):
         self._localRot = quatLookAt(newForward, newUp)
     def lookAt(self, globalTarget:Union['Transform','GameObject', vec3, Sequence]):
         '''rotate transform to make forward direction point to globalTarget, and up direction point to up'''
-        from runtime.game_object import GameObject
+        from runtime.gameObj import GameObject
         if isinstance(globalTarget, GameObject):
             globalTarget = globalTarget.transform.globalPos
         elif isinstance(globalTarget, Transform):

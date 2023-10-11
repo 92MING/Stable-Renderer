@@ -6,6 +6,10 @@ from utils.global_utils import *
 from static.scene import *
 import numpy as np
 np.set_printoptions(suppress=True)
+import glm
+from OpenGL.GL import *
+import OpenGL.GLU as glu
+import heapq
 
 class DelayEvent(Event):
     '''
@@ -38,6 +42,18 @@ class TaskList:
         for task in self._tasks:
             task()
         self._tasks.clear()
+class AutoSortTaskList(list):
+    def append(self, task:callable, priority:int=0):
+        heapq.heappush(self, (priority, task))
+    def extend(self, tasks:iter, priorities:iter=None):
+        if priorities is None:
+            priorities = [0] * len(tasks)
+        for task, priority in zip(tasks, priorities):
+            self.append(task, priority)
+    def execute(self):
+        for _, task in self:
+            task()
+        self.clear()
 
 _engine_singleton = GetOrAddGlobalValue("_ENGINE_SINGLETON", None)
 class Engine:
@@ -55,7 +71,6 @@ class Engine:
             SetGlobalValue("_ENGINE_SINGLETON", e)
             _engine_singleton = e
             return e
-
     def __init__(self,
                  scene: Scene = None,
                  winTitle=None,
@@ -75,15 +90,17 @@ class Engine:
         self._init_glfw(self._winTitle, self._winSize)
 
         self._onNextLoopStart = TaskList()
-        self._renderTasks = TaskList()
+        self._renderTasks = AutoSortTaskList()
         self._onNextLoopStart.addTask(lambda: gl.glViewport(0, 0, *self._winSize))
         self._onNextLoopStart.addTask(lambda: gl.glClearColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a))
         self._onNextLoopStart.addTask(lambda: gl.glEnable(gl.GL_DEPTH_TEST))
         self._onNextLoopStart.addTask(lambda: gl.glEnable(gl.GL_CULL_FACE))
 
         self._init_callbacks()
+        self._init_opengl()
 
     def _init_glfw(self, winTitle, winSize):
+        print(f'Initializing GLFW ...')
         glfw.init()
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
@@ -100,6 +117,7 @@ class Engine:
             exit()
         glfw.make_context_current(self.window)
     def _init_callbacks(self):
+        print(f'Initializing callbacks ...')
         self.window_resize_event = DelayEvent(int, int)
 
         def resizeCallback(window, width, height):
@@ -114,35 +132,88 @@ class Engine:
         glfw.set_cursor_pos_callback(self.window, lambda window, xpos, ypos: print(xpos, ypos))
         glfw.set_framebuffer_size_callback(self.window, lambda window, width, height: print(width, height))
         glfw.set_input_mode(self.window, glfw.STICKY_KEYS, 1)
+    def _init_opengl(self):
+        print(f'Initializing OpenGL ...')
+        self._matrixUBO = glGenBuffers(1)
+        self._UBO_modelMatrix = glm.mat4(1.0)
+        self._UBO_viewMatrix = glm.mat4(1.0)
+        self._UBO_projectionMatrix = glm.mat4(1.0)
+        self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_viewMatrix * self._UBO_modelMatrix
+        glBindBuffer(GL_UNIFORM_BUFFER, self.matrixUBO)
+        glBufferData(GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), None, GL_DYNAMIC_DRAW)
+        glBindBufferBase(GL_UNIFORM_BUFFER, self.matrixUBO_BindingPoint, self.matrixUBO)
+        glBufferSubData(GL_UNIFORM_BUFFER, 0, glm.sizeof(glm.mat4),  glm.value_ptr(self._UBO_modelMatrix))
+        glBufferSubData(GL_UNIFORM_BUFFER, glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_viewMatrix))
+        glBufferSubData(GL_UNIFORM_BUFFER, 2 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_projectionMatrix))
+        glBufferSubData(GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP)) # MVP
+
+    # region UBO
+    @property
+    def UBO_modelMatrix(self):
+        return self._UBO_modelMatrix
+    @property
+    def UBO_viewMatrix(self):
+        return self._UBO_viewMatrix
+    @property
+    def UBO_projectionMatrix(self):
+        return self._UBO_projectionMatrix
+    def updateUBO_modelMatrix(self, modelMatrix: glm.mat4):
+        self._UBO_modelMatrix = modelMatrix
+        self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_viewMatrix * self._UBO_modelMatrix
+        glBindBuffer(GL_UNIFORM_BUFFER, self.matrixUBO)
+        glBufferSubData(GL_UNIFORM_BUFFER, 0, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_modelMatrix))
+        glBufferSubData(GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))
+    def updateUBO_viewMatrix(self, viewMatrix: glm.mat4):
+        self._UBO_viewMatrix = viewMatrix
+        self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_viewMatrix * self._UBO_modelMatrix
+        glBindBuffer(GL_UNIFORM_BUFFER, self.matrixUBO)
+        glBufferSubData(GL_UNIFORM_BUFFER, glm.sizeof(glm.mat4), glm.sizeof(glm.mat4),  glm.value_ptr(self._UBO_viewMatrix))
+        glBufferSubData(GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))
+    def updateUBO_projectionMatrix(self, projectionMatrix: glm.mat4):
+        self._UBO_projectionMatrix = projectionMatrix
+        self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_viewMatrix * self._UBO_modelMatrix
+        glBindBuffer(GL_UNIFORM_BUFFER, self.matrixUBO)
+        glBufferSubData(GL_UNIFORM_BUFFER, 2 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4),  glm.value_ptr(self._UBO_projectionMatrix))
+        glBufferSubData(GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))
+    # endregion
 
     # region properties
     @property
     def winTitle(self):
         return self._winTitle
-
     @property
     def winSize(self):
         return self._winSize
-
     @winSize.setter
     def winSize(self, value):
         self._winSize = value
         self._onNextLoopStart.addTask(lambda: glfw.set_window_size(self.window, *self._winSize))
-
+    @property
+    def aspectRatio(self):
+        return self.winSize[0] / self.winSize[1]
     @property
     def bgColor(self):
         return self._bgColor
-
     @bgColor.setter
     def bgColor(self, value):
         self._bgColor = value
         self._onNextLoopStart.addTask(
             lambda: gl.glClearColor(self._bgColor.r, self._bgColor.g, self._bgColor.b, self._bgColor.a))
-
+    @property
+    def matrixUBO(self):
+        return self._matrixUBO
+    @property
+    def matrixUBO_BindingPoint(self):
+        return 0
     # endregion
 
-    def addRenderTask(self, task):
-        self._renderTasks.addTask(task)
+    def printOpenGLError(self):
+        err = glGetError()
+        if (err != GL_NO_ERROR):
+            print('GL ERROR: ', glu.gluErrorString(err))
+
+    def addRenderTask(self, task:callable, priority:int=0):
+        self._renderTasks.append(task, priority)
 
     def prepare(self):
         '''You can override this method to do some prepare work'''
@@ -157,10 +228,8 @@ class Engine:
                 self.prepare()
             except NotImplementedError:
                 raise Exception('You must override "prepare" method or set "scene" to prepare data.')
-
     def _run_logic(self):
         pass
-
     def run(self):
         self._prepare()
         while not glfw.window_should_close(self.window):

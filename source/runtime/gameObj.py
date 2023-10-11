@@ -1,7 +1,7 @@
 '''GameObject is the class contains components and behaviors.'''
 from utils.base_clses import NamedObj
 from utils.global_utils import GetOrAddGlobalValue
-from runtime.runtime_engine_obj import RuntimeEngineObj
+from runtime.engineObj import EngineObj
 from typing import Union, List, Optional
 import heapq
 from runtime.component import Component, ComponentMeta
@@ -16,7 +16,7 @@ class AutoSortList(list):
 
 _gameObj_tags = GetOrAddGlobalValue("_GAMEOBJ_TAGS", {}) # tag: set of gameObj
 _root_gameObjs = GetOrAddGlobalValue("_ROOT_GAMEOBJS", []) # list of root gameObj(no parent)
-class GameObject(RuntimeEngineObj, NamedObj):
+class GameObject(EngineObj, NamedObj):
 
     # region class methods
     @staticmethod
@@ -174,80 +174,141 @@ class GameObject(RuntimeEngineObj, NamedObj):
             result.extend(child.childComponents(enableOnly))
         result.extend(self.components(enableOnly))
         return result
-    def hasComponent(self, comp: ComponentMeta, enableOnly=False):
+    def hasComponent(self, comp: Union[ComponentMeta, str, Component], enableOnly=False):
         '''
         whether it has component of type `comp`. If there exist a subclass of `comp`, also return True
-        :param comp: Subclass of Component
+        :param comp: Subclass of Component / component instance / component name
         :param enableOnly: whether only search enabled components
-        :return:
+        :return: bool
         '''
-        if not isinstance(comp, ComponentMeta):
-            raise TypeError("comp must be a subclass of Component")
-        return any(isinstance(c, comp) for c in self.components(enableOnly=enableOnly))
-    def getComponent(self, comp: ComponentMeta, enableOnly=False)->Optional[Component]:
+        if isinstance(comp, ComponentMeta):
+            return any(isinstance(c, comp) for c in self.components(enableOnly=enableOnly))
+        elif isinstance(comp, str):
+            return any(c.ComponentName == comp for c in self.components(enableOnly=enableOnly))
+        elif isinstance(comp, Component):
+            return comp in self.components(enableOnly=enableOnly)
+        else:
+            raise TypeError("comp must be a subclass of Component, or a component instance, or component name")
+    def getComponent(self, comp: Union[ComponentMeta, str, Component], enableOnly=False)->Optional[Component]:
         '''
         return the first component of type `comp`
-        :param comp: Subclass of Component
+        :param comp: Subclass of Component / component instance / component name
         :param enableOnly: whether only search enabled components
-        :return: component or None
+        :return: component or None if not found
         '''
-        if not isinstance(comp, ComponentMeta):
-            raise TypeError("comp must be a subclass of Component")
-        for c in self.components(enableOnly=enableOnly):
-            if isinstance(c, comp):
-                return c
+        if not isinstance(comp, (ComponentMeta, str, Component)):
+            raise TypeError("comp must be a subclass of Component, or a component instance, or component name")
+        if isinstance(comp, str):
+            for c in self.components(enableOnly=enableOnly):
+                if c.ComponentName == comp:
+                    return c
+        elif isinstance(comp, Component):
+            for c in self.components(enableOnly=enableOnly):
+                if c == comp:
+                    return c
+        else:
+            for c in self.components(enableOnly=enableOnly):
+                if isinstance(c, comp):
+                    return c
         return None
-    def getComponents(self, comp: ComponentMeta, enableOnly=False):
+    def getComponents(self, comp: Union[ComponentMeta, str, Component], enableOnly=False):
         '''
         return all components of type `comp`
-        :param comp: Subclass of Component
+        :param comp: Subclass of Component / component instance / component name
         :param enableOnly: whether only search enabled components
-        :return:
+        :return: list of components
         '''
-        if not isinstance(comp, ComponentMeta):
-            raise TypeError("comp must be a subclass of Component")
-        return [c for c in self.components(enableOnly=enableOnly) if isinstance(c, comp)]
-    def removeComponent(self, comp: ComponentMeta, enableOnly=False):
+        if not isinstance(comp, (ComponentMeta, str, Component)):
+            raise TypeError("comp must be a subclass of Component, or a component instance, or component name")
+        if isinstance(comp, ComponentMeta):
+            return [c for c in self.components(enableOnly=enableOnly) if isinstance(c, comp)]
+        elif isinstance(comp, str):
+            return [c for c in self.components(enableOnly=enableOnly) if c.ComponentName == comp]
+        elif isinstance(comp, Component):
+            return [c for c in self.components(enableOnly=enableOnly) if c == comp]
+    def removeComponent(self, comp: Union[ComponentMeta, str, Component], enableOnly=False):
         '''
         remove the first component of type `comp`
-        :param comp: Subclass of Component
-        :return:
+        :param comp: Subclass of Component / component instance / component name
         '''
-        if not isinstance(comp, ComponentMeta):
-            raise TypeError("comp must be a subclass of Component")
-        for c in self.components(enableOnly=enableOnly):
-            if isinstance(c, comp):
-                c.onDisable() # call onDisable before destroy
-                c.onDestory()
-                return
-    def removeComponents(self, comp: ComponentMeta, enableOnly=False):
+        if not isinstance(comp, (ComponentMeta, str, Component)):
+            raise TypeError("comp must be a subclass of Component, or a component instance, or component name")
+        if isinstance(comp, str):
+            for c in self.components(enableOnly=enableOnly):
+                if c.ComponentName == comp:
+                    c.onDisable()
+                    c.onDestory()
+                    return
+        elif isinstance(comp, Component):
+            for c in self.components(enableOnly=enableOnly):
+                if c == comp:
+                    c.onDisable()
+                    c.onDestory()
+                    return
+        else:
+            for c in self.components(enableOnly=enableOnly):
+                if isinstance(c, comp):
+                    c.onDisable() # call onDisable before destroy
+                    c.onDestory()
+                    return
+    def removeComponents(self, comp: Union[ComponentMeta, str, Component], enableOnly=False):
         '''
         remove all components of type `comp`
-        :param comp: Subclass of Component
-        :return:
+        :param comp: Subclass of Component / component instance / component name
         '''
-        if not isinstance(comp, ComponentMeta):
+        if not isinstance(comp, (ComponentMeta, str, Component)):
             raise TypeError("comp must be a subclass of Component")
-        for c in self.components(enableOnly=enableOnly):
-            if isinstance(c, comp):
-                c.onDisable() # call onDisable before destroy
-                c.onDestory()
-    def addComponent(self, comp: ComponentMeta, enable=True, *args, **kwargs)->Optional[Component]:
+        if isinstance(comp, str):
+            for c in self.components(enableOnly=enableOnly):
+                if c.ComponentName == comp:
+                    c.onDisable()
+                    c.onDestory()
+        elif isinstance(comp, Component):
+            for c in self.components(enableOnly=enableOnly):
+                if c == comp:
+                    c.onDisable()
+                    c.onDestory()
+        else:
+            for c in self.components(enableOnly=enableOnly):
+                if isinstance(c, comp):
+                    c.onDisable() # call onDisable before destroy
+                    c.onDestory()
+    def addComponent(self, comp: Union[ComponentMeta, str, Component], enable=True, *args, **kwargs)->Optional[Component]:
         '''
         add a component of type `comp`
-        :param comp: Subclass of Component
+        :param comp: Subclass of Component / component instance / component name
         :param enable: whether enable the component
         :param args: args for the constructor of `comp`
         :param kwargs: kwargs for the constructor of `comp`
         :return: the component added
         '''
-        if not isinstance(comp, ComponentMeta):
+        if not isinstance(comp, (ComponentMeta, str, Component)):
             raise TypeError("comp must be a subclass of Component")
-        if comp.Unique and self.hasComponent(comp):
-            return None # already has a unique component
-        c = comp(self, enable, *args, **kwargs)
-        self._components.append(c)
-        return c
+        if isinstance(comp, (ComponentMeta, str)):
+            comp = Component.FindComponentCls(comp) if isinstance(comp, str) else comp
+            if comp.Unique and self.hasComponent(comp):
+                return None # already has a unique component
+            for require in comp.RequireComponent:
+                if not self.hasComponent(require):
+                    newComp = self.addComponent(require, enable=enable, )
+                    if newComp is None:
+                        raise RuntimeError(f"GameObject: {self.name} has no component: {require}. Auto add failed")
+            c = comp(self, enable, *args, **kwargs)
+            self._components.append(c)
+            c._tryAwake() # call awake if the gameobject is active and the component is enabled
+            return c
+        else: # comp is a component instance
+            if comp.gameObj != self:
+                raise RuntimeError(f"Component: {comp} is not belong to GameObject: {self.name}. Can't add")
+            if comp.Unique and self.hasComponent(comp):
+                return None
+            for require in comp.RequireComponent:
+                if not self.hasComponent(require):
+                    newComp = self.addComponent(require, enable=enable, )
+                    if newComp is None:
+                        raise RuntimeError(f"GameObject: {self.name} has no component: {require}. Auto add failed")
+            self._components.append(comp)
+            comp._tryAwake()  # call awake if the gameobject is active and the component is enabled
     @property
     def transform(self) -> Transform:
         t = self.getComponent(Transform)
