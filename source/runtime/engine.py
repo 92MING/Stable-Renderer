@@ -43,6 +43,7 @@ _engine_singleton = GetOrAddGlobalValue("_ENGINE_SINGLETON", None)
 class Engine:
 
     def __new__(cls, *args, **kwargs):
+        global _engine_singleton
         if _engine_singleton is not None:
             clsName = _engine_singleton.__class__.__qualname__
             if clsName != cls.__qualname__:
@@ -50,7 +51,10 @@ class Engine:
             _engine_singleton.__init__ = lambda *a, **kw: None  # 防止再次初始化
             return _engine_singleton
         else:
-            return super().__new__(cls)
+            e = super().__new__(cls)
+            SetGlobalValue("_ENGINE_SINGLETON", e)
+            _engine_singleton = e
+            return e
 
     def __init__(self,
                  scene: Scene = None,
@@ -78,10 +82,6 @@ class Engine:
         self._onNextLoopStart.addTask(lambda: gl.glEnable(gl.GL_CULL_FACE))
 
         self._init_callbacks()
-
-        self.component_enable_tasks = TaskList()
-        self.component_disable_tasks = TaskList()
-        self.component_destroy_tasks = TaskList()
 
     def _init_glfw(self, winTitle, winSize):
         glfw.init()
@@ -171,10 +171,6 @@ class Engine:
             # handle events (release all late events)
             glfw.poll_events()
             self.window_resize_event.release()
-
-            self.component_enable_tasks.execute()
-            self.component_disable_tasks.execute()
-            self.component_destroy_tasks.execute()
             # endregion
 
             # region run logic

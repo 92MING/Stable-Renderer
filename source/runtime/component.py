@@ -22,6 +22,12 @@ class Component(RuntimeEngineObj, metaclass=ComponentMeta):
     Note that the priority of a component is only for the components in the same GameObject.
     '''
 
+    Unique = False
+    '''
+    Override this property to change the uniqueness of this component.
+    If this property is True, there can be only one component of this type in a GameObject.
+    '''
+
     @classmethod
     def ComponentName(cls):
         return cls.__qualname__
@@ -44,17 +50,29 @@ class Component(RuntimeEngineObj, metaclass=ComponentMeta):
         self._gameObj = gameObj
         self._enable = enable
         self._started = False
-        self.awake()
+        self._awaked = False
+        if self.enable:
+            self._awaked = True
+            self.awake()
+            self.onEnable()
+    def __ge__(self, other):
+        return self.Priority >= other.Priority
+    def __gt__(self, other):
+        return self.Priority > other.Priority
+    def __le__(self, other):
+        return self.Priority <= other.Priority
+    def __lt__(self, other):
+        return self.Priority < other.Priority
 
     def awake(self):
-        '''Called when this component is added to a GameObject. Awake do not follow the priority rule & will be called immediately.'''
+        '''Called when this component is added to a GameObject (in case it is enabled). Awake does not follow the priority rule & will be called immediately.'''
         pass
     def start(self):
         '''Called when this component runs for the first time'''
         pass
 
     def _tryStart(self):
-        if not self._started and self._enable:
+        if not self._started and self.enable and self._awaked:
             self._started = True
             self.start()
     def fixedUpdate(self):
@@ -71,13 +89,17 @@ class Component(RuntimeEngineObj, metaclass=ComponentMeta):
         '''Called when this component is enabled. onEnable will not follow the priority rule.'''
         pass
     def onDisable(self):
-        '''Called when this component is disabled. onDisable will not follow the priority rule.'''
+        '''
+        Called when this component is disabled. onDisable will not follow the priority rule.
+        When destroy a GameObject, onDisable will be called before onDestroy.
+        '''
         pass
     def onDestroy(self):
         '''
         Called when this component is destroyed.
         Component can only be destroyed by GameObject.removeComponent
         onDestroy will not follow the priority rule.
+        onDisable will be called before onDestroy.
         '''
         pass
 
@@ -86,12 +108,16 @@ class Component(RuntimeEngineObj, metaclass=ComponentMeta):
         return self._gameObj
     @property
     def enable(self):
-        return self._enable
+        return self._enable and self._gameObj.active
     @enable.setter
     def enable(self, value):
         if self._enable != value:
             self._enable = value
-            if value:
-                self.engine.component_enable_tasks.addTask(self.onEnable)
-            else:
-                self.engine.component_disable_tasks.addTask(self.onDisable)
+            if self._gameObj.active:
+                if value:
+                    if not self._awaked:
+                        self._awaked = True
+                        self.awake()
+                    self.onEnable()
+                else:
+                    self.onDisable()
