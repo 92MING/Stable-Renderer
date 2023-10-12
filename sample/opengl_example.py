@@ -45,6 +45,7 @@ def create_blocks(x: int, y: int, z: int):
     a = numpy.array(vertex_buffer, dtype='float32')
     print(sys.getsizeof(a), a.nbytes)
     glBufferData(GL_ARRAY_BUFFER, a.nbytes, a, GL_STATIC_DRAW)
+
     glEnableVertexAttribArray(0)
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 7 * 4, None)
     glEnableVertexAttribArray(1)
@@ -83,6 +84,7 @@ def display(shader):
     mvp = projectionMatrix * viewMatrix * modelMatrix
     glUniformMatrix4fv(shader._getUniformID("MVP"), 1, GL_FALSE, glm.value_ptr(mvp))
     glDrawElements(GL_QUADS, block_EBO_buffer_len, GL_UNSIGNED_INT, None)
+
     rotate[0] += 0.2
     rotate[1] += 0.2
     rotate[2] += 0.2

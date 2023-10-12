@@ -81,12 +81,12 @@ class Camera(Component):
         if self.projection_type == ProjectionType.PERSPECTIVE:
             return glm.perspective(
                 self.fov,
-                self.engine.aspectRatio,
+                self.engine.WindowManager.AspectRatio,
                 self.near_plane,
                 self.far_plane,
             )
         elif self.projection_type == ProjectionType.ORTHOGRAPHIC:
-            screen_scale = self.engine.aspectRatio * self.ortho_size / 2
+            screen_scale = self.engine.WindowManager.AspectRatio * self.ortho_size / 2
             return glm.ortho(
                 -screen_scale,
                 screen_scale,
@@ -101,7 +101,7 @@ class Camera(Component):
             if self.engine.bgColor != self.bgColor:
                 self.engine.bgColor = self.bgColor
             viewMatrix, projectionMatrix = self.viewMatrix, self.projectionMatrix
-            if self.engine.UBO_viewMatrix != viewMatrix:
-                self.engine.updateUBO_viewMatrix(viewMatrix)
-            if self.engine.UBO_projectionMatrix != projectionMatrix:
-                self.engine.updateUBO_projectionMatrix(projectionMatrix)
+            if self.engine.RenderManager.UBO_ViewMatrix != viewMatrix:
+                self.engine.RenderManager.UpdateUBO_ViewMatrix(viewMatrix)
+            if self.engine.RenderManager.UBO_ProjMatrix != projectionMatrix:
+                self.engine.RenderManager.UpdateUBO_ProjMatrix(projectionMatrix)

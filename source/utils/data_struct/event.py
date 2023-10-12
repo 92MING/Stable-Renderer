@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 '''事件类，用于实现事件机制。比PYQT原生Signal輕量，不需要QObject。當QObject被刪除後，invoke event時，對應的監聽方法在運行到RuntimeError的時候，會自動刪除。'''
-
+import heapq
 import functools
 from PySide2.QtCore import QObject, Signal
 from types import FunctionType, MethodType
@@ -251,12 +251,16 @@ class Event:
             self._events.add(listener)
         else:
             raise TypeError("Listener must be callable, or iterable of callable")
-    def addTempListener(self, listener:Callable):
+    def addTempListener(self, listener:Union[callable, Iterable[callable]]):
         '''add a temp listener to event'''
-        self._checkListener(listener)
-        if isinstance(listener,MethodType):
-            if isinstance(listener.__self__, QObject):
-                listener.__self__.destroyed.connect(functools.partial(self._removeDestroyedTempListener, listener))
+        if isinstance(listener, Iterable):
+            for l in listener:
+                self.addTempListener(l)
+        elif isinstance(listener, Callable):
+            self._checkListener(listener)
+            if isinstance(listener,MethodType):
+                if isinstance(listener.__self__, QObject):
+                    listener.__self__.destroyed.connect(functools.partial(self._removeDestroyedTempListener, listener))
         self._tempEvents.add(listener)
 
     def removeListener(self, listener:Callable, throwError=True):
@@ -353,5 +357,146 @@ class Event:
         self._events.clear()
         self._tempEvents.clear()
 
+class DelayEvent(Event):
+    '''
+    When invoke delay event, it will not be executed immediately, but params will be save and execute later by calling "release".
+    '''
 
-__all__ = ["Event", "ListenerNotFoundError", "NoneTypeNotSupportedError"]
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._last_param = None
+
+    def invoke(self, *args):
+        self._check_invoke_params(*args)
+        self._last_param = args
+
+    def release(self):
+        if self._last_param is not None:
+            super().invoke(*self._last_param)
+        self._last_param = None
+
+class Tasks(Event):
+    '''
+    Tasks is a subclass of Event, which will clear all tasks after invoke.
+    Type of tasks must be callable.
+    When create, the init params will be the input types of tasks.
+    '''
+    def _checkTask(self, task):
+        if not isinstance(task, Callable):
+            raise TypeError("Task must be callable")
+    def addTasks(self, tasks:Union[Callable, Iterable[Callable]]):
+        if isinstance(tasks, Iterable):
+            for task in tasks:
+                self._checkTask(task)
+                self.addTempListener(task)
+        else:
+            self._checkTask(tasks)
+            self.addTempListener(tasks)
+    def removeTasks(self, tasks:Union[Callable, Iterable[Callable]]):
+        if isinstance(tasks, Iterable):
+            for task in tasks:
+                self._checkTask(task)
+                self.removeTempListener(task)
+        else:
+            self._checkTask(tasks)
+            self.removeTempListener(tasks)
+    def addForeverTasks(self, tasks:Union[Callable, Iterable[Callable]]):
+        if isinstance(tasks, Iterable):
+            for task in tasks:
+                self._checkTask(task)
+                self.addListener(task)
+        else:
+            self._checkTask(tasks)
+            self.addListener(tasks)
+    def removeForeverTasks(self, tasks:Union[Callable, Iterable[Callable]]):
+        if isinstance(tasks, Iterable):
+            for task in tasks:
+                self._checkTask(task)
+                self.removeListener(task)
+        else:
+            self._checkTask(tasks)
+            self.removeListener(tasks)
+    def execute(self, *args):
+        self.invoke(*args)
+
+class AutoSortTask(Tasks):
+    '''Tasks will be cleared after execute. Tasks will be sorted by order.'''
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._tempEvents = [] # for heapq
+        self._events = [] # for heapq
+    def addListener(self, listener:Union[callable, Iterable[callable]], order:int=0):
+        self._checkListener(listener)
+        heapq.heappush(self._events, (order, listener))
+    def addTempListener(self, listener:Union[callable, Iterable[callable]], order:int=0):
+        self._checkListener(listener)
+        heapq.heappush(self._tempEvents, (order, listener))
+    def removeListener(self, listener, throwError:bool=False):
+        if isinstance(listener, Iterable):
+            for l in listener:
+                self.removeListener(l)
+        else:
+            for i, l in enumerate(self._events):
+                if l[1] == listener:
+                    self._events.pop(i)
+                    break
+    def removeTempListener(self, listener, throwError:bool=False):
+        if isinstance(listener, Iterable):
+            for l in listener:
+                self.removeTempListener(l)
+        else:
+            for i, l in enumerate(self._tempEvents):
+                if l[1] == listener:
+                    self._tempEvents.pop(i)
+                    break
+
+    def addTask(self, task:Callable, order:int=0):
+        self._checkTask(task)
+        self.addTempListener(task, order)
+    def addTasks(self, tasks:Union[Callable, Iterable[Callable]], orders:Union[int, Iterable[int]]=0):
+        if not isinstance(tasks, Iterable):
+            tasks = [tasks]
+        if isinstance(orders, int):
+            orders = [orders] * len(tasks)
+        for task, order in zip(tasks, orders):
+            self.addTask(task, order)
+    def addForeverTasks(self, tasks:Union[Callable, Iterable[Callable]], orders:Union[int, Iterable[int]]=0):
+        if not isinstance(tasks, Iterable):
+            tasks = [tasks]
+        if isinstance(orders, int):
+            orders = [orders] * len(tasks)
+        for task, order in zip(tasks, orders):
+            self.addForeverTask(task, order)
+    def addForeverTask(self, task:Callable, order:int=0):
+        self._checkTask(task)
+        self.addListener(task, order)
+
+    def _invoke(self, *args):
+        if self._hasEmitted:
+            return # when use QtSignal, sometimes it will emit twice with unknown reason
+        self._hasEmitted = True
+        if self.acceptNone and self.useQtSignal:
+            args = list(args)
+            for index in self._noneIndexes:
+                args[index] = None
+        for order, event in self.events:
+            try:
+                event(*args)
+            except RuntimeError as e:
+                if 'deleted' in str(e):
+                    # C/C++ object has been deleted(usually occurs in PYQT)
+                    self.removeListener(event)
+                else:
+                    raise e
+        for order, event in self.tempEvents:
+            try:
+                event(*args)
+            except RuntimeError as e:
+                if 'deleted' in str(e):
+                    # C/C++ object has been deleted(usually occurs in PYQT)
+                    continue
+                else:
+                    raise e
+        self._tempEvents.clear()
+
+__all__ = ["Event", "ListenerNotFoundError", "NoneTypeNotSupportedError", "DelayEvent", "Tasks", "AutoSortTask"]

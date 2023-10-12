@@ -339,4 +339,19 @@ class GameObject(EngineObj, NamedObj):
             comp.update()
         for child in self.children:
             child._update()
+    @staticmethod
+    def _RunFixedUpdate():
+        '''internal use for fixedUpdate and components'''
+        for obj in _root_gameObjs:
+            obj._fixedUpdate()
+    @staticmethod
+    def _RunLateUpdate():
+        '''internal use for lateUpdate and components'''
+        for obj in _root_gameObjs:
+            obj._lateUpdate()
+    @staticmethod
+    def _RunUpdate():
+        '''internal use for update and components'''
+        for obj in _root_gameObjs:
+            obj._update()
     # endregion
