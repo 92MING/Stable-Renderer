@@ -2,30 +2,20 @@
 '''this module contains enums, constants, etc.'''
 from enum import Enum
 import OpenGL.GL as gl
-import OpenGL.GLUT as glut
 
-class PrimitiveType(Enum):
-    """Primitive drawing types of OpenGL"""
-    POINTS = gl.GL_POINTS
-    LINES = gl.GL_LINES
-    LINE_STRIP = gl.GL_LINE_STRIP
-    LINE_LOOP = gl.GL_LINE_LOOP
-    TRIANGLES = gl.GL_TRIANGLES
-    TRIANGLE_STRIP = gl.GL_TRIANGLE_STRIP
-    TRIANGLE_FAN = gl.GL_TRIANGLE_FAN
-    QUADS = gl.GL_QUADS
-    QUAD_STRIP = gl.GL_QUAD_STRIP
-    POLYGON = gl.GL_POLYGON
+# region opengl
+class DepthFunc(Enum):
+    NEVER = gl.GL_NEVER
+    LESS = gl.GL_LESS
+    EQUAL = gl.GL_EQUAL
+    LEQUAL = gl.GL_LEQUAL
+    GREATER = gl.GL_GREATER
+    NOTEQUAL = gl.GL_NOTEQUAL
+    GEQUAL = gl.GL_GEQUAL
+    ALWAYS = gl.GL_ALWAYS
+# endregion
 
-class ShaderType(Enum):
-    """Shader types of OpenGL"""
-    VERTEX = gl.GL_VERTEX_SHADER
-    FRAGMENT = gl.GL_FRAGMENT_SHADER
-    GEOMETRY = gl.GL_GEOMETRY_SHADER
-    TESS_CONTROL = gl.GL_TESS_CONTROL_SHADER
-    TESS_EVALUATION = gl.GL_TESS_EVALUATION_SHADER
-    COMPUTE = gl.GL_COMPUTE_SHADER
-
+# region render
 class RenderOrder:
     """
     Render order of GameObjects.
@@ -43,18 +33,9 @@ class LightType(Enum):
     DIRECTIONAL_LIGHT = 0
     POINT_LIGHT = 1
     SPOT_LIGHT = 2
+# endregion
 
-class DepthFunc(Enum):
-    NEVER = gl.GL_NEVER
-    LESS = gl.GL_LESS
-    EQUAL = gl.GL_EQUAL
-    LEQUAL = gl.GL_LEQUAL
-    GREATER = gl.GL_GREATER
-    NOTEQUAL = gl.GL_NOTEQUAL
-    GEQUAL = gl.GL_GEQUAL
-    ALWAYS = gl.GL_ALWAYS
-
-# region mouse & keyboard
+# region input
 class _FindableEnum(Enum):
     @classmethod
     def GetEnum(cls, value):
@@ -165,5 +146,70 @@ class Key(_FindableEnum):
     F10 = 299
     F11 = 300
     F12 = 301
+# endregion
 
+# region resource
+class TextureWrap(Enum):
+    REPEAT = gl.GL_REPEAT
+    MIRRORED_REPEAT = gl.GL_MIRRORED_REPEAT
+    MIRROR_CLAMP_TO_EDGE = gl.GL_MIRROR_CLAMP_TO_EDGE
+    CLAMP_TO_EDGE = gl.GL_CLAMP_TO_EDGE
+    CLAMP_TO_BORDER = gl.GL_CLAMP_TO_BORDER
+class TextureFilter(Enum):
+    NEAREST = gl.GL_NEAREST
+    LINEAR = gl.GL_LINEAR
+    NEAREST_MIPMAP_NEAREST = gl.GL_NEAREST_MIPMAP_NEAREST
+    LINEAR_MIPMAP_NEAREST = gl.GL_LINEAR_MIPMAP_NEAREST
+    NEAREST_MIPMAP_LINEAR = gl.GL_NEAREST_MIPMAP_LINEAR
+    LINEAR_MIPMAP_LINEAR = gl.GL_LINEAR_MIPMAP_LINEAR
+class TextureFormat(Enum):
+    RED = gl.GL_RED
+    RG = gl.GL_RG
+    RGB = gl.GL_RGB
+    BGR = gl.GL_BGR
+    RGBA = gl.GL_RGBA
+    BGRA = gl.GL_BGRA
+    DEPTH_COMPONENT = gl.GL_DEPTH_COMPONENT
+    DEPTH_STENCIL = gl.GL_DEPTH_STENCIL
+class TextureType(Enum):
+    UNSIGNED_BYTE = gl.GL_UNSIGNED_BYTE
+    BYTE = gl.GL_BYTE
+    UNSIGNED_SHORT = gl.GL_UNSIGNED_SHORT
+    SHORT = gl.GL_SHORT
+    UNSIGNED_INT = gl.GL_UNSIGNED_INT
+    INT = gl.GL_INT
+    FLOAT = gl.GL_FLOAT
+    UNSIGNED_BYTE_3_3_2 = gl.GL_UNSIGNED_BYTE_3_3_2
+    UNSIGNED_BYTE_2_3_3_REV = gl.GL_UNSIGNED_BYTE_2_3_3_REV
+    UNSIGNED_SHORT_5_6_5 = gl.GL_UNSIGNED_SHORT_5_6_5
+    UNSIGNED_SHORT_5_6_5_REV = gl.GL_UNSIGNED_SHORT_5_6_5_REV
+    UNSIGNED_SHORT_4_4_4_4 = gl.GL_UNSIGNED_SHORT_4_4_4_4
+    UNSIGNED_SHORT_4_4_4_4_REV = gl.GL_UNSIGNED_SHORT_4_4_4_4_REV
+    UNSIGNED_SHORT_5_5_5_1 = gl.GL_UNSIGNED_SHORT_5_5_5_1
+    UNSIGNED_SHORT_1_5_5_5_REV = gl.GL_UNSIGNED_SHORT_1_5_5_5_REV
+    UNSIGNED_INT_8_8_8_8 = gl.GL_UNSIGNED_INT_8_8_8_8
+    UNSIGNED_INT_8_8_8_8_REV = gl.GL_UNSIGNED_INT_8_8_8_8_REV
+    UNSIGNED_INT_10_10_10_2 = gl.GL_UNSIGNED_INT_10_10_10_2
+    UNSIGNED_INT_2_10_10_10_REV = gl.GL_UNSIGNED_INT_2_10_10_10_REV
+
+class PrimitiveType(Enum):
+    """Primitive drawing types of OpenGL"""
+    POINTS = gl.GL_POINTS
+    LINES = gl.GL_LINES
+    LINE_STRIP = gl.GL_LINE_STRIP
+    LINE_LOOP = gl.GL_LINE_LOOP
+    TRIANGLES = gl.GL_TRIANGLES
+    TRIANGLE_STRIP = gl.GL_TRIANGLE_STRIP
+    TRIANGLE_FAN = gl.GL_TRIANGLE_FAN
+    QUADS = gl.GL_QUADS
+    QUAD_STRIP = gl.GL_QUAD_STRIP
+    POLYGON = gl.GL_POLYGON
+class ShaderType(Enum):
+    """Shader types of OpenGL"""
+    VERTEX = gl.GL_VERTEX_SHADER
+    FRAGMENT = gl.GL_FRAGMENT_SHADER
+    GEOMETRY = gl.GL_GEOMETRY_SHADER
+    TESS_CONTROL = gl.GL_TESS_CONTROL_SHADER
+    TESS_EVALUATION = gl.GL_TESS_EVALUATION_SHADER
+    COMPUTE = gl.GL_COMPUTE_SHADER
 # endregion

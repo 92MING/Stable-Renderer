@@ -10,9 +10,10 @@ class RuntimeManager(Manager):
     def __init__(self, fixedUpdateMaxFPS=60):
         super().__init__()
         self._fixedUpdateMaxFPS = fixedUpdateMaxFPS
-        self._maxFixedUpdateDeltaTime = 1.0 / fixedUpdateMaxFPS
+        self._minFixedUpdateDeltaTime = 1.0 / fixedUpdateMaxFPS
         self._deltaTime = 0.0
         self._startTime = 0.0
+        self._firstFrame = True
 
     @property
     def FixedUpdateMaxFPS(self):
@@ -20,7 +21,7 @@ class RuntimeManager(Manager):
     @FixedUpdateMaxFPS.setter
     def FixedUpdateMaxFPS(self, value):
         self._fixedUpdateMaxFPS = value
-        self._maxFixedUpdateDeltaTime = 1.0 / value
+        self._minFixedUpdateDeltaTime = 1.0 / value
     @property
     def DeltaTime(self):
         return self._deltaTime
@@ -28,11 +29,14 @@ class RuntimeManager(Manager):
     def _onFrameBegin(self):
         self._startTime = glfw.get_time()
     def _onFrameRun(self):
-        if self.DeltaTime < self._maxFixedUpdateDeltaTime:
+        if self._firstFrame or self.DeltaTime >= self._minFixedUpdateDeltaTime:
             GameObject._RunFixedUpdate()
         GameObject._RunUpdate()
         GameObject._RunLateUpdate()
+        if self.DeltaTime >= self._minFixedUpdateDeltaTime:
+            self._deltaTime = 0.0
+        self._firstFrame = False
     def _onFrameEnd(self):
-        self._deltaTime = glfw.get_time() - self._startTime
+        self._deltaTime += (glfw.get_time() - self._startTime)
 
 __all__ = ['RuntimeManager']

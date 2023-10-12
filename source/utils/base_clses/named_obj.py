@@ -27,6 +27,12 @@ class NamedObj(CrossModuleClass):
         if cls._instances is None:
             cls._instances = {}
         return cls._instances.get(ins_name, None)
+    @classmethod
+    def AllInstances(cls):
+        '''return a list of all instances'''
+        if cls._instances is None:
+            cls._instances = {}
+        return list(cls._instances.values())
 
     def __class_getitem__(cls, item):
         '''NamedObj['name'] will return the instance with name "name". Equivalent to NamedObj.GetInstance('name')'''

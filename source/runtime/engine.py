@@ -35,6 +35,7 @@ class Engine:
         self._runtimeManager = RuntimeManager()
         self._renderManager = RenderManager()
         self._sceneManager = SceneManager(self._scene)
+        self._resourceManager = ResourcesManager()
         # endregion
 
     @property
@@ -53,13 +54,17 @@ class Engine:
     def RenderManager(self)->RenderManager:
         '''Manager of Renderers, Shaders, UBO, ... etc.'''
         return self._renderManager
+    @property
+    def SceneManager(self)->SceneManager:
+        return self._sceneManager
+    @property
+    def ResourcesManager(self)->ResourcesManager:
+        return self._resourceManager
 
     def prepare(self):
         '''You can override this method to do some prepare work'''
         raise NotImplementedError
 
-    def _run_logic(self):
-        pass
     def run(self):
         Manager._RunPrepare() # prepare work, mainly for sceneManager to build scene, load resources, etc.
         while not glfw.window_should_close(self.WindowManager.Window):
