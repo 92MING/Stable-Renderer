@@ -80,13 +80,13 @@ class Engine:
         while not glfw.window_should_close(self.WindowManager.Window):
 
             self.beforeFrameBegin()
-            Manager._RunFrameBegin()  # input events, etc.
+            Manager._RunFrameBegin()  # input events / clear buffers / etc.
 
             self.beforeFrameRun()
-            Manager._RunFrameRun()
+            Manager._RunFrameRun() # update gameobjs, components, etc.
 
             self.beforeFrameEnd()
-            Manager._RunFrameEnd()
+            Manager._RunFrameEnd() # render / swap buffers / time count / etc.
 
         self.beforeRelease()
         Manager._RunRelease()

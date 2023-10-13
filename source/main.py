@@ -20,8 +20,6 @@ if __name__ == '__main__':
             self.RenderManager.UpdateUBO_ViewMatrix(view)
 
         def beforeFrameRun(self):
-            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-
             modelM = self.RenderManager.UBO_ModelMatrix
             modelM = glm.rotate(modelM, glm.radians(0.05), glm.vec3(0.0, 1.0, 0.0))
             self.RenderManager.UpdateUBO_ModelMatrix(modelM)

@@ -81,6 +81,8 @@ class RenderManager(Manager):
     def RenderTasks(self):
         return self._renderTasks
 
+    def _onFrameBegin(self):
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
     def _onFrameRun(self):
         self._renderTasks.execute()
 
