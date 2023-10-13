@@ -20,6 +20,7 @@ def main():
         use_safetensors=True,
         scheduler_type="euler-ancestral"
     )
+    pipe.to(config.device)
 
     prompt = "best quality, masterpiece, 1boy, solo, male focus, highres"
     neg_prompt = "low quality, bad anatomy"
@@ -37,7 +38,7 @@ def main():
 
     # Prepare torch generator
     seed = random.randint(0, 9999999999)  # Random seed
-    generator = torch.Generator(device="cuda").manual_seed(seed)
+    generator = torch.Generator(device=config.device).manual_seed(seed)
 
     # 2. Prepare images
     n = 8  # Number of frames to utilize

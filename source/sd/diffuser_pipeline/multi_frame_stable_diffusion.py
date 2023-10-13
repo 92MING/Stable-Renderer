@@ -908,11 +908,13 @@ def load_pipe(
             scheduler_type=scheduler_type,
         )
 
-    pipe = pipe.to("cuda")
     pipe.safety_checker = None
 
     # Enable XFormers
-    pipe.enable_xformers_memory_efficient_attention(attention_op=None)
+    try:
+        pipe.enable_xformers_memory_efficient_attention(attention_op=None)
+    except ModuleNotFoundError:
+        print("[INFO] xformer not found.")
     # pipe.enable_model_cpu_offload()
     return pipe
 

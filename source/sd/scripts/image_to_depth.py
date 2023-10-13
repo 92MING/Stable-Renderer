@@ -1,3 +1,6 @@
+import sys, os
+sys.path.append(os.getcwd())
+
 import torch
 import torchvision.transforms as transforms
 import cv2
@@ -10,7 +13,10 @@ if __name__ == '__main__':
     # 1. 加载预训练模型
     model_type = "DPT_Large"   # 这只是一个选择，也可以选择其他的模型类型
     model = torch.hub.load("intel-isl/MiDaS", model_type)
-    model.to("cuda")
+    device = ("cuda" if torch.cuda.is_available() else 
+             "mps" if torch.backends.mps.is_available() else
+             "cpu")
+    model.to(device)
     model.eval()
 
     img_dir = Path('test/groups/group_7')
@@ -27,7 +33,7 @@ if __name__ == '__main__':
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ]
         )
-        img_tensor = transform(img).unsqueeze(0).to("cuda")  # add a batch dimension
+        img_tensor = transform(img).unsqueeze(0).to(device)  # add a batch dimension
 
         with torch.no_grad():
             depth = model(img_tensor)
