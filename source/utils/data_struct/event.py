@@ -2,7 +2,13 @@
 '''事件类，用于实现事件机制。比PYQT原生Signal輕量，不需要QObject。當QObject被刪除後，invoke event時，對應的監聽方法在運行到RuntimeError的時候，會自動刪除。'''
 import heapq
 import functools
-from PySide2.QtCore import QObject, Signal
+try:
+    # Default option
+    from PySide2.QtCore import QObject, Signal
+except ModuleNotFoundError:
+    # Compatability with Python 3.10
+    print("[INFO] PySide2 not found, attempting PySide6")
+    from PySide6.QtCore import QObject, Signal
 from types import FunctionType, MethodType
 from typing import ForwardRef, get_origin, get_args, Union, Iterable, Literal
 from inspect import getfullargspec, signature, getmro
