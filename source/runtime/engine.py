@@ -1,9 +1,9 @@
-import glfw
+import glfw, time
 from utils.global_utils import *
 from static.scene import *
 import numpy as np
 np.set_printoptions(suppress=True)
-from .managers import *
+from runtime.managers import *
 
 _engine_singleton = GetOrAddGlobalValue("_ENGINE_SINGLETON", None)
 class Engine:
@@ -61,17 +61,36 @@ class Engine:
     def ResourcesManager(self)->ResourcesManager:
         return self._resourceManager
 
-    def prepare(self):
-        '''You can override this method to do some prepare work'''
-        raise NotImplementedError
+    # region overridable methods
+    def beforePrepare(self):...
+    def afterPrepare(self):...
+    def beforeFrameBegin(self):...
+    def beforeFrameRun(self):...
+    def beforeFrameEnd(self):...
+    def beforeRelease(self):...
+    def afterRelease(self):...
+    # endregion
 
     def run(self):
-        Manager._RunPrepare() # prepare work, mainly for sceneManager to build scene, load resources, etc.
+
+        self.beforePrepare()
+        Manager._RunPrepare()  # prepare work, mainly for sceneManager to build scene, load resources, etc.
+        self.afterPrepare()
+
         while not glfw.window_should_close(self.WindowManager.Window):
-            Manager._RunFrameBegin() # input events, etc.
-            Manager._RunFrameRun() # run logic / render, etc.
-            Manager._RunFrameEnd() # swap buffers, etc.
+
+            self.beforeFrameBegin()
+            Manager._RunFrameBegin()  # input events, etc.
+
+            self.beforeFrameRun()
+            Manager._RunFrameRun()
+
+            self.beforeFrameEnd()
+            Manager._RunFrameEnd()
+
+        self.beforeRelease()
         Manager._RunRelease()
+        self.afterRelease()
 
     @classmethod
     def Run(cls):

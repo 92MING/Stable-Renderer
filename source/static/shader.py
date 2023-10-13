@@ -18,7 +18,7 @@ class Shader(NamedObj, EngineObj):
     def _init_shader(self, source:str, type:ShaderType):
         shaderID = glCreateShader(type.value)
         if shaderID == 0:
-            self.engine.printOpenGLError()
+            self.engine.RenderManager.printOpenGLError()
             raise RuntimeError(f'Failed to create shader {self.name}')
         glShaderSource(shaderID, source)
         glCompileShader(shaderID)
@@ -30,15 +30,19 @@ class Shader(NamedObj, EngineObj):
     def _init_program(self, v_shaderID, f_shaderID):
         program = glCreateProgram()
         if program == 0:
-            self.engine.printOpenGLError()
+            self.engine.RenderManager.printOpenGLError()
             raise RuntimeError(f'Failed to create program when initializing shader: {self.name}')
         glAttachShader(program, v_shaderID)
         glAttachShader(program, f_shaderID)
         glLinkProgram(program)
         if glGetProgramiv(program, GL_LINK_STATUS, None) == GL_FALSE:
             raise RuntimeError(f'Failed to link program when initializing shader: {self.name}')
+
+        # try to bind uniform blocks
         matrixBlockIndex = glGetUniformBlockIndex(program, "Matrices")
-        glUniformBlockBinding(program, matrixBlockIndex, self.engine.matrixUBO_BindingPoint)
+        if matrixBlockIndex != GL_INVALID_INDEX:
+            glUniformBlockBinding(program, matrixBlockIndex, self.engine.RenderManager.MatrixUBO_BindingPoint)
+
         return program
 
     # region properties
@@ -60,12 +64,14 @@ class Shader(NamedObj, EngineObj):
     # endregion
 
     def useProgram(self):
-        glUseProgram(self._programID)
+        if glUseProgram(self._programID):
+            self.engine.RenderManager.printOpenGLError()
 
-    def _getUniformID(self, name:str):
+    def getUniformID(self, name:str):
         return glGetUniformLocation(self._programID, name)
     def setUniform(self, name, value):
-        val_id = self._getUniformID(name)
+        self.useProgram()
+        val_id = self.getUniformID(name)
         if isinstance(value, (tuple, list)):
             if len(value) == 1:
                 value = value[0]

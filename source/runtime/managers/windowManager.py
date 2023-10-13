@@ -1,14 +1,20 @@
 from .manager import Manager
+from .renderManager import RenderManager
 from utils.data_struct import DelayEvent, Event
 import glfw
 import OpenGL.GL as gl
 
 class WindowManager(Manager):
+
+    _FrameEndFuncOrder = RenderManager._FrameEndFuncOrder + 1 # swap buffer should be called after render
+    _ReleaseFuncOrder = 999 # terminate glfw should be called at the end
+
     def __init__(self, title, size):
         super().__init__()
         self._init_glfw(title, size)
-        self._onWindowResize = DelayEvent()
+        self._onWindowResize = DelayEvent(int, int)
         self._onWindowResize.addListener(lambda width, height: gl.glViewport(0, 0, width, height))
+
     def _init_glfw(self, winTitle, winSize):
         self._title = winTitle
         self._size = winSize
@@ -33,6 +39,8 @@ class WindowManager(Manager):
 
     def _onFrameBegin(self):
         self._onWindowResize.release()
+    def _onFrameEnd(self):
+        glfw.swap_buffers(self._window)
     def _release(self):
         glfw.terminate()
 

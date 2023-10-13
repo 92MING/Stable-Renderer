@@ -1,4 +1,5 @@
 from utils.global_utils import GetOrAddGlobalValue, GetGlobalValue
+import time
 
 _MANAGERS = GetOrAddGlobalValue('_ENGINE_MANAGERS', set())
 _MANAGER_FUNCS = GetOrAddGlobalValue('_ENGINE_MANAGER_FUNCS', dict())
@@ -46,30 +47,45 @@ class Manager:
         if 'prepare' not in _MANAGER_FUNCS:
             _MANAGER_FUNCS['prepare'] = sorted(_MANAGERS, key=lambda m: m._PrepareFuncOrder)
         for manager in _MANAGER_FUNCS['prepare']:
-            manager._prepare()
+            try:
+                manager._prepare()
+            except Exception as e:
+                print(f'Warning: Error when running "_prepare" of {manager.__class__.__qualname__}. Err msg: {e}')
     @staticmethod
     def _RunFrameBegin():
         if 'begin' not in _MANAGER_FUNCS:
             _MANAGER_FUNCS['begin'] = sorted(_MANAGERS, key=lambda m: m._FrameBeginFuncOrder)
         for manager in _MANAGER_FUNCS['begin']:
-            manager._onFrameBegin()
+            try:
+                manager._onFrameBegin()
+            except Exception as e:
+                print(f'Warning: Error when running "_onFrameBegin" of {manager.__class__.__qualname__}. Err msg: {e}')
     @staticmethod
     def _RunFrameRun():
         if 'run' not in _MANAGER_FUNCS:
             _MANAGER_FUNCS['run'] = sorted(_MANAGERS, key=lambda m: m._FrameRunFuncOrder)
         for manager in _MANAGER_FUNCS['run']:
-            manager._onFrameRun()
+            try:
+                manager._onFrameRun()
+            except Exception as e:
+                print(f'Warning: Error when running "_onFrameRun" of {manager.__class__.__qualname__}. Err msg: {e}')
     @staticmethod
     def _RunFrameEnd():
         if 'end' not in _MANAGER_FUNCS:
             _MANAGER_FUNCS['end'] = sorted(_MANAGERS, key=lambda m: m._FrameEndFuncOrder)
         for manager in _MANAGER_FUNCS['end']:
-            manager._onFrameEnd()
+            try:
+                manager._onFrameEnd()
+            except Exception as e:
+                print(f'Warning: Error when running "_onFrameEnd" of {manager.__class__.__qualname__}.Err msg: {e}')
     @staticmethod
     def _RunRelease():
         if 'release' not in _MANAGER_FUNCS:
             _MANAGER_FUNCS['release'] = sorted(_MANAGERS, key=lambda m: m._ReleaseFuncOrder)
         for manager in _MANAGERS:
-            manager._release()
+            try:
+                manager._release()
+            except Exception as e:
+                print(f'Warning: Error when running "_release" of {manager.__class__.__qualname__}. Err msg: {e}')
 
 __all__ = ['Manager']

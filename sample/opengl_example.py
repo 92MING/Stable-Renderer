@@ -82,7 +82,7 @@ def display(shader):
     modelMatrix = glm.translate(modelMatrix, glm.vec3(0.0, 0.0, 0))
     #shader.setUniform('MVP', projectionMatrix * viewMatrix * modelMatrix)
     mvp = projectionMatrix * viewMatrix * modelMatrix
-    glUniformMatrix4fv(shader._getUniformID("MVP"), 1, GL_FALSE, glm.value_ptr(mvp))
+    glUniformMatrix4fv(shader.getUniformID("MVP"), 1, GL_FALSE, glm.value_ptr(mvp))
     glDrawElements(GL_QUADS, block_EBO_buffer_len, GL_UNSIGNED_INT, None)
 
     rotate[0] += 0.2

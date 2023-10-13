@@ -1,34 +1,33 @@
-import numpy as np
-from OpenGL.GL import *
-from OpenGL.GLU import *
-from OpenGL.GLUT import *
+import os.path
+import glm
+from runtime.engine import Engine
+from static.texture import Texture
+from static.shader import Shader
+from static.mesh import Mesh
+from utils.path_utils import RESOURCES_DIR
+import OpenGL.GL as gl
 
-class Demo:
-    def __init__(self):
-        # self.geometry = geometry
-        glutInit()  # 启动glut
-        glutInitDisplayMode(GLUT_SINGLE | GLUT_RGBA)
-        glutInitWindowSize(400, 400)
-        glutCreateWindow(b"Hello OpenGL")  # 设定窗口标题
-        glutDisplayFunc(self.draw_geometry)  # 调用函数绘制
-        self.init_condition()  # 设定背景
-        glutMainLoop()
+if __name__ == '__main__':
+    class Sample(Engine):
+        def beforePrepare(self):
+            boatDir = os.path.join(RESOURCES_DIR, 'boat')
+            self.boat = Mesh.Load(os.path.join(boatDir, 'boat.obj'))
+            self.boatShader = Shader('boat_shader',os.path.join(boatDir, 'boat_vs.glsl'), os.path.join(boatDir, 'boat_fs.glsl'))
+            self.boatDiffuseTex = Texture.Load(os.path.join(boatDir, 'boatColor.png'), 'boat_diffuse')
+            proj = glm.perspective(glm.radians(45.0), self.WindowManager.AspectRatio, 0.1, 1000.0)
+            view = glm.lookAt(glm.vec3(4, 4, -3), glm.vec3(0, 0, 0), glm.vec3(0, 1, 0))
+            self.RenderManager.UpdateUBO_ProjMatrix(proj)
+            self.RenderManager.UpdateUBO_ViewMatrix(view)
 
-    def init_condition(self):
-        glClearColor(1.0, 1.0, 1.0, 1.0)  # 定义背景为白色
-        gluOrtho2D(-8.0, 8.0, -8.0, 8.0)  # 定义xy轴范围
-    def render(self):
-        pass
-    def draw_geometry(self):
-        glClear(GL_COLOR_BUFFER_BIT)
-        glColor3f(1.0, 0.0, 0.0)  # 设定颜色RGB
-        glBegin(GL_QUADS)
-        glVertex2f(-2, 2)
-        glVertex2f(-2, 5)
-        glVertex2f(-5, 5)
-        glVertex2f(-5, 2)
-        glEnd()
-        glFlush()  # 执行绘图
+        def beforeFrameRun(self):
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
 
-if __name__ == "__main__":
-    Demo()
+            modelM = self.RenderManager.UBO_ModelMatrix
+            modelM = glm.rotate(modelM, glm.radians(0.05), glm.vec3(0.0, 1.0, 0.0))
+            self.RenderManager.UpdateUBO_ModelMatrix(modelM)
+
+            self.boatShader.useProgram()
+            self.boatDiffuseTex.bind(0, self.boatShader.getUniformID('boatDiffuseTex'))
+            self.boat.draw()
+
+    Sample().run()

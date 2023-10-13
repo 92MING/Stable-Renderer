@@ -163,34 +163,28 @@ class TextureFilter(Enum):
     NEAREST_MIPMAP_LINEAR = gl.GL_NEAREST_MIPMAP_LINEAR
     LINEAR_MIPMAP_LINEAR = gl.GL_LINEAR_MIPMAP_LINEAR
 class TextureFormat(Enum):
-    RED = gl.GL_RED
-    RG = gl.GL_RG
     RGB = gl.GL_RGB
-    BGR = gl.GL_BGR
     RGBA = gl.GL_RGBA
-    BGRA = gl.GL_BGRA
     DEPTH_COMPONENT = gl.GL_DEPTH_COMPONENT
     DEPTH_STENCIL = gl.GL_DEPTH_STENCIL
-class TextureType(Enum):
-    UNSIGNED_BYTE = gl.GL_UNSIGNED_BYTE
-    BYTE = gl.GL_BYTE
-    UNSIGNED_SHORT = gl.GL_UNSIGNED_SHORT
-    SHORT = gl.GL_SHORT
-    UNSIGNED_INT = gl.GL_UNSIGNED_INT
-    INT = gl.GL_INT
-    FLOAT = gl.GL_FLOAT
-    UNSIGNED_BYTE_3_3_2 = gl.GL_UNSIGNED_BYTE_3_3_2
-    UNSIGNED_BYTE_2_3_3_REV = gl.GL_UNSIGNED_BYTE_2_3_3_REV
-    UNSIGNED_SHORT_5_6_5 = gl.GL_UNSIGNED_SHORT_5_6_5
-    UNSIGNED_SHORT_5_6_5_REV = gl.GL_UNSIGNED_SHORT_5_6_5_REV
-    UNSIGNED_SHORT_4_4_4_4 = gl.GL_UNSIGNED_SHORT_4_4_4_4
-    UNSIGNED_SHORT_4_4_4_4_REV = gl.GL_UNSIGNED_SHORT_4_4_4_4_REV
-    UNSIGNED_SHORT_5_5_5_1 = gl.GL_UNSIGNED_SHORT_5_5_5_1
-    UNSIGNED_SHORT_1_5_5_5_REV = gl.GL_UNSIGNED_SHORT_1_5_5_5_REV
-    UNSIGNED_INT_8_8_8_8 = gl.GL_UNSIGNED_INT_8_8_8_8
-    UNSIGNED_INT_8_8_8_8_REV = gl.GL_UNSIGNED_INT_8_8_8_8_REV
-    UNSIGNED_INT_10_10_10_2 = gl.GL_UNSIGNED_INT_10_10_10_2
-    UNSIGNED_INT_2_10_10_10_REV = gl.GL_UNSIGNED_INT_2_10_10_10_REV
+    def get_PIL_convert_mode(self):
+        if self == TextureFormat.RGB:
+            return 'RGB'
+        elif self == TextureFormat.RGBA:
+            return 'RGBA'
+        elif self == TextureFormat.DEPTH_COMPONENT:
+            return 'L'
+        elif self == TextureFormat.DEPTH_STENCIL:
+            return 'L'
+    def get_default_internal_format(self):
+        if self == TextureFormat.RGB:
+            return gl.GL_RGB
+        elif self == TextureFormat.RGBA:
+            return gl.GL_RGBA
+        elif self == TextureFormat.DEPTH_COMPONENT:
+            return gl.GL_DEPTH_COMPONENT16
+        elif self == TextureFormat.DEPTH_STENCIL:
+            return gl.GL_DEPTH24_STENCIL8
 
 class PrimitiveType(Enum):
     """Primitive drawing types of OpenGL"""

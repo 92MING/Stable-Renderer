@@ -1,4 +1,4 @@
-from utils.global_utils import GetOrAddGlobalValue
+from utils.global_utils import GetOrAddGlobalValue, GetGlobalValue
 import os
 
 _RESOURCES_CLSES = GetOrAddGlobalValue('_RESOURCES_CLSES', dict()) #cls_name: cls
@@ -14,8 +14,8 @@ class ResourcesObjMeta(type):
         if cls._Format_Clses is None:
             cls._Format_Clses = {}
         else:
-            if cls.Format is not None and cls.Format not in cls._Format_Clses:
-                cls._Format_Clses[cls.Format] = cls
+            if cls.Format() is not None and cls.Format() not in cls._Format_Clses:
+                cls._Format_Clses[cls.Format()] = cls
         _RESOURCES_CLSES[cls_name] = cls
         return cls
 
@@ -66,7 +66,10 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
         return cls._Instances.get(name, None)
     @classmethod
     def AllInstances(cls):
+        if cls._Instances is None:
+            cls._Instances = {}
         return cls._Instances.values()
+
     @classmethod
     def _GetPathAndName(cls, path, name=None):
         '''Get proper path & name for cls.Load()'''
@@ -104,9 +107,17 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
     @property
     def name(self):
         return self._name
+    @property
+    def engine(self)->'Engine':
+        return GetGlobalValue('_ENGINE_SINGLETON')
 
+    # region abstract methods
     def sendToGPU(self):
         '''Override this to send the data to GPU'''
-        pass
+        print(f'sending {self.BaseClsName()}: {self.name} to GPU...')
+    def clear(self):
+        '''Override this to clear the data from GPU'''
+        print(f'clearing {self.BaseClsName()}: {self.name} from GPU...')
+    # endregion
 
 __all__ = ['ResourcesObj', 'ResourcesObjMeta']

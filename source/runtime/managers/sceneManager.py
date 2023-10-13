@@ -20,12 +20,7 @@ class SceneManager(Manager):
         pass
 
     def _prepare(self):
-        if self.MainScene is None:
-            try:
-                self.engine.prepare()
-            except:
-                raise Exception('You must set a scene, or override "prepare" method of Engine.')
-        else:
+        if self.MainScene is not None:
             self.MainScene.prepare()
 
 __all__ = ['SceneManager']

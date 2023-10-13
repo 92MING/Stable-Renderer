@@ -7,14 +7,12 @@ class Mesh(ResourcesObj):
     def load(self, path:str):
         '''Load data from file. Override this function to implement loading data from file'''
         raise NotImplementedError
-    def clear(self):
-        '''Clear all data and release GPU memory if it has been loaded'''
-        raise NotImplementedError
     def draw(self):
         '''Draw the mesh'''
         raise NotImplementedError
+
     @classmethod
-    def Load(cls, path: str, name=None):
+    def Load(cls, path: str, name=None)->'Mesh':
         '''
         load a mesh from file
         :param path: path of the mesh file

@@ -2,19 +2,17 @@
 //vertex shader for shadow cube map (point light)
 
 in layout (location = 0) vec3 position;
-in layout (location = 1) vec2 uv;
-in layout (location = 2) vec3 normal;
+in layout (location =2) vec2 uv;
 
-uniform int hasDiffuseTex;
-uniform sampler2D diffuseTex;
-uniform vec3 lightPos;
 uniform mat4 modelMatrix;
-uniform mat4 lightVP;
-uniform float farPlane;
-out vec4 worldPos; //for FS
+uniform mat4 lightSpaceMatrix;
+
+out vec2 texCoords;
+out vec4 fragPos;
 
 void main()
 {
-    worldPos = modelMatrix * vec4(position, 1.0);
-    gl_Position = lightVP * worldPos;
+    texCoords = uv;
+    fragPos = modelMatrix * vec4(position, 1.0);
+    gl_Position = lightSpaceMatrix * fragPos ;
 }
