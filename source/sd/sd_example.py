@@ -2,11 +2,11 @@ import random
 import torch
 from PIL import Image
 from pathlib import Path
-from diffuser_pipeline.multi_frame_stable_diffusion import (
+from .modules import utils, config
+from .modules.diffuser_pipelines.multi_frame_stable_diffusion import (
     StableDiffusionImg2VideoPipeline,
     load_pipe,
 )
-from modules import utils, config
 
 
 def main():
