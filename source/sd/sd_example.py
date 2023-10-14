@@ -7,7 +7,10 @@ from modules.diffuser_pipelines.multi_frame_stable_diffusion import (
     load_pipe,
 )
 from modules import utils, config
+<<<<<<< HEAD
 from sys import platform
+=======
+>>>>>>> refs/remotes/origin/main
 
 
 def main():
