@@ -8,6 +8,7 @@ from .modules.diffuser_pipelines.multi_frame_stable_diffusion import (
     load_pipe,
 )
 <<<<<<< HEAD
+from modules import utils, config
 from sys import platform
 =======
 >>>>>>> refs/remotes/origin/main
