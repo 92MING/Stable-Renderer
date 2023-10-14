@@ -62,7 +62,7 @@ def main():
         prompt=prompt,
         negative_prompt=neg_prompt,
         images=frames,
-        masks=masks,  # Optional: mask images
+        # masks=masks,  # Optional: mask images
         control_images=control_images,
         width=width,
         height=height,
