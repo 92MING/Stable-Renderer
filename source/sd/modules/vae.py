@@ -1,6 +1,5 @@
 import torch
 import numpy
-import numpy as np
 import cv2
 from PIL import Image
 from diffusers import AutoencoderKL
@@ -16,14 +15,14 @@ def preprocess_image(image: Union[Image.Image, numpy.ndarray, torch.Tensor], bat
         w, h = image.size
         w, h = (x - x % 8 for x in (w, h))  # resize to integer multiple of 8
         image = image.resize((w, h), resample=PIL_INTERPOLATION["lanczos"])
-    elif isinstance(image, np.ndarray):
+    elif isinstance(image, numpy.ndarray):
         w, h = image.shape[:2] if len(image.shape) == 3 else image.shape[1:3]
         w, h = (x - x % 8 for x in (w, h))
         image = cv2.resize(image, (w, h), interpolation=cv2.INTER_LANCZOS4)
     elif isinstance(image, torch.Tensor):
         pass
-    image = np.array(image).astype(np.float32) / 255.0
-    image = np.vstack([image[None].transpose(0, 3, 1, 2)] * batch_size)
+    image = numpy.array(image).astype(numpy.float32) / 255.0
+    image = numpy.vstack([image[None].transpose(0, 3, 1, 2)] * batch_size)
     image = torch.from_numpy(image)
     return 2.0 * image - 1.0
 

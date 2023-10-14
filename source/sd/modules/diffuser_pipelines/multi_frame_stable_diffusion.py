@@ -16,14 +16,14 @@ from diffusers import (
     StableDiffusionControlNetInpaintPipeline,
     AutoencoderKL,
     UNet2DConditionModel,
-    DiffusionPipeline
+    DiffusionPipeline,
 )
 from diffusers.configuration_utils import FrozenDict
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.utils import deprecate, logging
 from transformers import CLIPTextModel, CLIPTokenizer
 from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, preprocess_image, preprocess_mask
-from modules.vae import encode, decode
+from ..vae import encode, decode
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -300,37 +300,6 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
             if end > 1.0:
                 raise ValueError(f"control guidance end: {end} can't be larger than 1.0.")
 
-    # Copied from diffusers.pipelines.controlnet.pipeline_controlnet.StableDiffusionControlNetPipeline.prepare_image
-    def prepare_control_image(
-        self,
-        image,
-        width,
-        height,
-        batch_size,
-        num_images_per_prompt,
-        device,
-        dtype,
-        do_classifier_free_guidance=False,
-        guess_mode=False,
-    ):
-        image = self.control_image_processor.preprocess(image, height=height, width=width).to(dtype=torch.float32)
-        image_batch_size = image.shape[0]
-
-        if image_batch_size == 1:
-            repeat_by = batch_size
-        else:
-            # image batch size is the same as prompt batch size
-            repeat_by = num_images_per_prompt
-
-        image = image.repeat_interleave(repeat_by, dim=0)
-
-        image = image.to(device=device, dtype=dtype)
-
-        if do_classifier_free_guidance and not guess_mode:
-            image = torch.cat([image] * 2)
-
-        return image
-
     @torch.no_grad()
     def __call__(
         self,
@@ -518,6 +487,10 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         else:
             batch_size = prompt_embeds.shape[0]
 
+        is_img2img = images is not None
+        is_inpainting = masks is not None
+        use_controlnet = control_images is not None
+
         device = self._execution_device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
         # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
@@ -548,7 +521,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         dtype = prompt_embeds.dtype
 
         # 6. Preprocess image and mask
-        if images is not None:
+        if is_img2img:
             for i, image in enumerate(images):
                 if isinstance(image, PIL.Image.Image):
                     image = image.resize((width, height), resample=Image.Resampling.LANCZOS)
@@ -558,7 +531,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                     image = None
                 images[i] = image
 
-        if masks is not None:
+        if is_inpainting:
             for i, mask_image in enumerate(masks):
                 if isinstance(mask_image, PIL.Image.Image):
                     mask_image = mask_image.resize((width, height), resample=Image.Resampling.LANCZOS)
@@ -572,7 +545,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 masks[i] = mask
 
         # 7. Prepare control image
-        if control_images is None:
+        if not use_controlnet:
             pass
         elif isinstance(controlnet, ControlNetModel):
             for i, control_image in enumerate(control_images):
@@ -591,15 +564,11 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 control_images[i] = control_image
 
         elif isinstance(controlnet, MultiControlNetModel):
-            all_control_images = []
-            for control_image in control_images:
-
-                control_images_ = []
-
-                for control_image_ in control_image:
-                    control_image_ = control_image_.resize((width, height), resample=Image.Resampling.LANCZOS)
-                    control_image_ = self.prepare_control_image(
-                        image=control_image_,
+            for i, control_image_list in enumerate(control_images):
+                for j, control_image in enumerate(control_image_list):
+                    control_image = control_image.resize((width, height), resample=Image.Resampling.LANCZOS)
+                    control_image = self.prepare_control_image(
+                        image=control_image,
                         width=width,
                         height=height,
                         batch_size=batch_size * num_images_per_prompt,
@@ -609,14 +578,10 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                         do_classifier_free_guidance=do_classifier_free_guidance,
                         guess_mode=guess_mode,
                     )
-
-                    control_images_.append(control_image_)
-
-                all_control_images.append(control_images_)
-
-            control_images: List[List] = all_control_images
+                    control_image_list[j] = control_image
+                control_images[i] = control_image_list
         else:
-            assert False
+            raise ValueError(f"Invalid controlnet type: {type(controlnet)}")
 
         # 8. Set timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -624,16 +589,16 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         latent_timestep = timesteps[:1].repeat(batch_size * num_images_per_prompt)
 
         # 9. Prepare latent variables
-        if images or control_images:
+        if is_img2img or use_controlnet:
             num_images = len(images) if images is not None else 0
-            if control_images:
+            if use_controlnet:
                 num_images = max(num_images, len(control_images))
 
             latents_list = []
             init_latents_orig_list = []
             noise_list = []
             for i in range(num_images):
-                image = images[i] if images is not None and i < len(images) else None
+                image = images[i] if is_img2img and i < len(images) else None
                 init_latents, init_latents_orig, noise = self.prepare_latents(
                     image,
                     latent_timestep,
@@ -699,17 +664,13 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 for j in tqdm.tqdm(range(num_images), desc="Denoising", leave=False):
                     latents_frame = latents_list[j]
 
-                    if control_images and j < len(control_images):
-                        control_image = control_images[j]
-                    else:
-                        control_image = None
-
                     # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
                     latent_model_input = torch.cat([latents_frame] * 2) if do_classifier_free_guidance else latents_frame
                     latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
-                    # controlnet(s) inference
-                    if control_image:
+                    if use_controlnet and j < len(control_images):
+                        control_image = control_images[j]
+
                         if guess_mode and do_classifier_free_guidance:
                             # Infer ControlNet only for the conditional batch.
                             control_model_input = latents_frame
@@ -736,20 +697,14 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                             down_block_res_samples = [torch.cat([torch.zeros_like(d), d]) for d in down_block_res_samples]
                             mid_block_res_sample = torch.cat([torch.zeros_like(mid_block_res_sample), mid_block_res_sample])
 
-                        unet_extra_input = dict(
-                            down_block_additional_residuals=down_block_res_samples,
-                            mid_block_additional_residual=mid_block_res_sample,
-                        )
-                    else:
-                        unet_extra_input = dict()
-
                     # predict the noise residual
                     noise_pred = self.unet(
                         latent_model_input,
                         t,
                         encoder_hidden_states=prompt_embeds,
                         cross_attention_kwargs=cross_attention_kwargs,
-                        **unet_extra_input,
+                        down_block_additional_residuals=down_block_res_samples,
+                        mid_block_additional_residual=mid_block_res_sample,
                     ).sample
 
                     # perform guidance
