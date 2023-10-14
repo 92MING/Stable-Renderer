@@ -7,6 +7,7 @@ from diffuser_pipeline.multi_frame_stable_diffusion import (
     load_pipe,
 )
 from modules import utils, config
+from sys import platform
 
 
 def main():
@@ -18,7 +19,8 @@ def main():
             "lllyasviel/sd-controlnet-depth"  # Depth model
         ],
         use_safetensors=True,
-        scheduler_type="euler-ancestral"
+        scheduler_type="euler-ancestral",
+        no_half=(platform == 'darwin'),
     )
     pipe.to(config.device)
 
