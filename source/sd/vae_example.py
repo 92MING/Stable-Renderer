@@ -2,11 +2,11 @@ import random
 import torch
 from diffusers import AutoencoderKL
 from PIL import Image
-from modules import config
-from modules.vae import encode, decode
+from .modules import config
+from .modules.vae import encode, decode
 
 if __name__ == '__main__':
-    img_path = 'test/groups/group_7/frame_132.png'
+    img_path = config.test_dir / 'groups/group_7/frame_132.png'
     image = Image.open(img_path)
 
     # Prepare torch generator

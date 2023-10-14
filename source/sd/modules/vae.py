@@ -11,6 +11,9 @@ from typing import Union
 
 
 def preprocess_image(image: Union[Image.Image, numpy.ndarray, torch.Tensor], batch_size: int = 1):
+    """
+    Preprocess an image to be compatible with the UNet and VAE model.
+    """
     if isinstance(image, Image.Image):
         w, h = image.size
         w, h = (x - x % 8 for x in (w, h))  # resize to integer multiple of 8
@@ -38,8 +41,7 @@ def encode(vae: AutoencoderKL, image: Union[torch.Tensor, Image.Image, numpy.nda
     :param generator: torch generator
     :return: latent vector
     """
-    if isinstance(image, Image.Image):
-        image = preprocess_image(image)
+    image = preprocess_image(image)
     image = image.to(device=device, dtype=dtype)
     latent_dist = vae.encode(image).latent_dist
     latents = latent_dist.sample(generator=generator)

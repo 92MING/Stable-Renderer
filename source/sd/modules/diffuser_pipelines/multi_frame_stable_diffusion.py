@@ -5,10 +5,10 @@ import cv2
 import torch.nn.functional as F
 import tqdm
 from PIL import Image
-from pathlib import Path
 from packaging import version
 from typing import List, Dict, Callable, Union, Optional, Any, Tuple
 from diffusers.image_processor import PipelineImageInput, VaeImageProcessor
+from diffusers.utils import PIL_INTERPOLATION
 from diffusers.utils.torch_utils import is_compiled_module
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from diffusers.models.controlnet import ControlNetModel
@@ -22,10 +22,45 @@ from diffusers.configuration_utils import FrozenDict
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.utils import deprecate, logging
 from transformers import CLIPTextModel, CLIPTokenizer
-from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, preprocess_image, preprocess_mask
-from ..vae import encode, decode
+from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, preprocess_image
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+
+
+def preprocess_mask(mask, batch_size, scale_factor=8, blur_radius=0):
+    if not isinstance(mask, torch.FloatTensor):
+        mask = mask.convert("L")
+        w, h = mask.size
+        w, h = (x - x % 8 for x in (w, h))  # resize to integer multiple of 8
+        mask = mask.resize((w // scale_factor, h // scale_factor), resample=PIL_INTERPOLATION["nearest"])
+        mask = numpy.array(mask).astype(numpy.float32)
+        if blur_radius:  # Blur mask edges
+            if blur_radius % 2 == 0:
+                blur_radius += 1  # must be odd
+            mask = cv2.GaussianBlur(mask, (blur_radius, blur_radius), sigmaX=0)
+        mask /= 255.0
+        mask = numpy.tile(mask, (4, 1, 1))
+        mask = numpy.vstack([mask[None]] * batch_size)
+        mask = 1 - mask  # repaint white, keep black
+        mask = torch.from_numpy(mask)
+        return mask
+
+    else:
+        valid_mask_channel_sizes = [1, 3]
+        # if mask channel is fourth tensor dimension, permute dimensions to pytorch standard (B, C, H, W)
+        if mask.shape[3] in valid_mask_channel_sizes:
+            mask = mask.permute(0, 3, 1, 2)
+        elif mask.shape[1] not in valid_mask_channel_sizes:
+            raise ValueError(
+                f"Mask channel dimension of size in {valid_mask_channel_sizes} should be second or fourth dimension,"
+                f" but received mask of shape {tuple(mask.shape)}"
+            )
+        # (potentially) reduce mask channel dimension from 3 to 1 for broadcasting to latent shape
+        mask = mask.mean(dim=1, keepdim=True)
+        h, w = mask.shape[-2:]
+        h, w = (x - x % 8 for x in (h, w))  # resize to integer multiple of 8
+        mask = torch.nn.functional.interpolate(mask, (h // scale_factor, w // scale_factor))
+        return mask
 
 
 class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipeline, StableDiffusionControlNetInpaintPipeline, DiffusionPipeline):
@@ -535,9 +570,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
             for i, mask_image in enumerate(masks):
                 if isinstance(mask_image, PIL.Image.Image):
                     mask_image = mask_image.resize((width, height), resample=Image.Resampling.LANCZOS)
-                    if blur_radius:  # Blur mask edges
-                        mask_image = cv2.GaussianBlur(mask_image, (blur_radius, blur_radius), sigmaX=0)
-                    mask = preprocess_mask(mask_image, batch_size, self.vae_scale_factor)
+                    mask = preprocess_mask(mask_image, batch_size, self.vae_scale_factor, blur_radius)
                     mask = mask.to(device=self.device, dtype=dtype)
                     mask = torch.cat([mask] * num_images_per_prompt)
                 else:
@@ -737,19 +770,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                     self.scheduler._step_index += 1
 
                 # TODO: Do overlapping using some algorithm
-                for i, latents_frame in enumerate(denoised_latents_frame_list):
-                    if (True):
-                        latents_list[i].zero_()
-                        count = 0
-                        max_dis = 2
-                        for j in range(num_images):
-                            distance = abs(i - j)
-                            weight = 1 if distance <= max_dis else 0
-                            latents_list[i] += denoised_latents_frame_list[j] * weight
-                            count += weight
-                        latents_list[i] /= count
-                    else:
-                        latents_list[i] = denoised_latents_frame_list[i]
+                # self.overlap(latents_list, corr_map=None, generator=generator)
 
                 # call the callback, if provided
                 if s == len(timesteps) - 1 or ((s + 1) > num_warmup_steps and (s + 1) % self.scheduler.order == 0):
@@ -789,20 +810,42 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         return StableDiffusionPipelineOutput(images=images, nsfw_content_detected=None)
 
     # TODO: Complete this function
-    def overlap(self, latents_list: List, corr_map: Dict):
+    def overlap(self, latents_list: List[torch.Tensor], corr_map: Dict, generator: torch.Generator):
         """
         Do multi-diffusion overlapping on a list of frame latents according to the corresponding map.
+        :param latents_list: A list of frame latents. Each element is a tensor of shape [B, C, H, W].
+        :param corr_map: A dictionary of correspondence map. Each vertex id (key) is a dictionary of the following format:
+            {
+                'position': [x, y],  # The pixel position of the vertex in the image
+            }
+        :param generator: A torch generator used to sample latent dist.
+        :return: A list of overlapped frame latents.
         """
-        images = [self.decode_latents(latents) for latents in latents_list]
-        value = [numpy.zeros_like(img) for img in images]
+        def _encode(image):
+            latent_dist = self.vae.encode(image).latent_dist
+            latents = latent_dist.sample(generator=generator)
+            latents = self.vae.config.scaling_factor * latents
+            return latents
+
+        def _decode(latents):
+            latents = 1 / self.vae.config.scaling_factor * latents
+            image = self.vae.decode(latents).sample
+            return image
+
+        images = [_decode(latents) for latents in latents_list]  # [B, C, H, W]
+        value = [torch.zeros_like(img) for img in images]  # [B, C, H, W]
         count = value.copy()
-        for id, msg in corr_map.items():
-            for i, pos in enumerate(msg['position']):
-                value[i][:, pos[0], pos[1], :] += images[i][:, pos[0], pos[1], :]
-                count[i][:, pos[0], pos[1], :] += 1
+        screen_h, screen_w = images[0].shape[:2]
+        for id, msg in corr_map.items():  # For each vertex in the correspondence map
+            for i, pos in enumerate(msg['position']):  # For each frame position of the vertex
+                w, h = pos
+                if w >= 0 and w < screen_w and h >= 0 and h < screen_h:
+                    value[i][:, :, h, w] += images[i][:, :, h, w]
+                    count[i][:, :, h, w] += 1
+
         for i in len(value):
-            value[i] /= count[i]
-            value[i] = encode(self.vae, value[i], self.device, torch.float16, torch.Generator().manual_seed(42))
+            value[i] = torch.where(count[i] > 0, value[i] / count[i], value[i])
+            value[i] = _encode(value[i])
         return value
 
 
@@ -818,60 +861,6 @@ def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
     # mix with the original results from guidance by factor guidance_rescale to avoid "plain looking" images
     noise_cfg = guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg
     return noise_cfg
-
-
-def load_pipe(
-    model_path="runwayml/stable-diffusion-v1-5",
-    control_net_model_paths=["lllyasviel/sd-controlnet-depth"],
-    use_safetensors=True,
-    scheduler_type="euler-ancestral"
-) -> StableDiffusionImg2VideoPipeline:
-    """
-    Load a Stable Diffusion pipeline with some controlnets.
-    """
-
-    if isinstance(control_net_model_paths, str):
-        controlnet = ControlNetModel.from_pretrained(
-            control_net_model_paths,
-            torch_dtype=torch.float16
-        )
-    elif isinstance(control_net_model_paths, list):
-        controlnets = []
-        for control_net_model_path in control_net_model_paths:
-            controlnet = ControlNetModel.from_pretrained(
-                control_net_model_path,
-                torch_dtype=torch.float16
-            )
-            controlnets.append(controlnet)
-        controlnet = MultiControlNetModel(controlnets)
-
-    if Path(model_path).is_file():
-        pipe = StableDiffusionImg2VideoPipeline.from_single_file(
-            model_path,
-            local_files_only=True,
-            controlnet=controlnet,
-            torch_dtype=torch.float16,
-            use_safetensors=use_safetensors,
-            scheduler_type=scheduler_type,
-        )
-    else:
-        pipe: StableDiffusionImg2VideoPipeline = StableDiffusionImg2VideoPipeline.from_pretrained(
-            model_path,
-            controlnet=controlnet,
-            torch_dtype=torch.float16,
-            use_safetensors=use_safetensors,
-            scheduler_type=scheduler_type,
-        )
-
-    pipe.safety_checker = None
-
-    # Enable XFormers
-    try:
-        pipe.enable_xformers_memory_efficient_attention(attention_op=None)
-    except ModuleNotFoundError:
-        print("[INFO] xformer not found.")
-    # pipe.enable_model_cpu_offload()
-    return pipe
 
 
 def make_inpaint_condition(image, image_mask):
