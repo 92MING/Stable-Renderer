@@ -9,15 +9,16 @@ class WindowManager(Manager):
     _FrameEndFuncOrder = RenderManager._FrameEndFuncOrder + 1 # swap buffer should be called after render
     _ReleaseFuncOrder = 999 # terminate glfw should be called at the end
 
-    def __init__(self, title, size):
+    def __init__(self, title, size, windowResizable = False):
         super().__init__()
-        self._init_glfw(title, size)
+        self._init_glfw(title, size, windowResizable)
         self._onWindowResize = DelayEvent(int, int)
         self._onWindowResize.addListener(lambda width, height: gl.glViewport(0, 0, width, height))
 
-    def _init_glfw(self, winTitle, winSize):
+    def _init_glfw(self, winTitle, winSize, winResizable):
         self._title = winTitle
         self._size = winSize
+        self._resizable = winResizable
         glfw.init()
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
@@ -33,17 +34,23 @@ class WindowManager(Manager):
             glfw.terminate()
             exit()
         glfw.make_context_current(self._window)
+        glfw.set_window_attrib(self._window, glfw.RESIZABLE, winResizable)
         glfw.set_window_size_callback(self._window, self._resizeCallback)
     def _resizeCallback(self, window, width, height):
         self._onWindowResize.invoke(width, height)
 
     def _onFrameBegin(self):
         self._onWindowResize.release()
-    def _onFrameEnd(self):
-        glfw.swap_buffers(self._window)
     def _release(self):
         glfw.terminate()
 
+    @property
+    def WindowResizable(self):
+        return self._resizable
+    @WindowResizable.setter
+    def WindowResizable(self, value):
+        self._resizable = value
+        glfw.set_window_attrib(self._window, glfw.RESIZABLE, value)
     @property
     def OnWindowResize(self)->Event:
         return self._onWindowResize
@@ -71,4 +78,5 @@ class WindowManager(Manager):
     @property
     def AspectRatio(self):
         return self._size[0] / self._size[1]
+
 __all__ = ['WindowManager']

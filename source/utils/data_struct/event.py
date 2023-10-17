@@ -1,7 +1,14 @@
 # -*- coding: utf-8 -*-
 '''事件类，用于实现事件机制。比PYQT原生Signal輕量，不需要QObject。當QObject被刪除後，invoke event時，對應的監聽方法在運行到RuntimeError的時候，會自動刪除。'''
-import heapq
-import functools
+# region imports
+import heapq, functools
+from types import FunctionType, MethodType
+from typing import ForwardRef, get_origin, get_args, Union, Iterable, Literal
+from inspect import getfullargspec, signature, getmro
+from enum import Enum
+from collections.abc import Callable
+from utils.base_clses.cross_module_enum import CrossModuleEnum
+from utils.type_utils import valueTypeCheck, subClassCheck
 try:
     # Default option
     from PySide2.QtCore import QObject, Signal
@@ -9,15 +16,9 @@ except ModuleNotFoundError:
     # Compatability with Python 3.10
     print("[INFO] PySide2 not found, attempting PySide6")
     from PySide6.QtCore import QObject, Signal
-from types import FunctionType, MethodType
-from typing import ForwardRef, get_origin, get_args, Union, Iterable, Literal
-from inspect import getfullargspec, signature, getmro
-from enum import Enum
-from collections.abc import Callable
+# endregion
 
-from utils.base_clses.cross_module_enum import CrossModuleEnum
-from utils.type_utils import valueTypeCheck, subClassCheck
-
+# region helper functions
 def _SignalWrapper(*args):
     class SignalWrapperCls(QObject):
         signal = Signal(*args)
@@ -67,6 +68,7 @@ def _findMostSuitableInputType(possibleInputs, values, acceptNone):
     mostSuitableDistances = [_totalMroDistance(values, suitableInput, acceptNone) for suitableInput in suitableInputs]
     mostSuitableDistance = min(mostSuitableDistances)
     return suitableInputs[mostSuitableDistances.index(mostSuitableDistance)]
+# endregion
 
 class ListenerNotFoundError(Exception):
     pass
@@ -74,24 +76,17 @@ class NoneTypeNotSupportedError(Exception):
     pass
 
 class Event:
-    def __init__(self, *args, useQtSignal=False, acceptNone=False, noCheck=False):
-        '''
-        :param args: 事件的参数类型（1個或多個），可以是 类型 或 类型名稱 。支持所有utils.TypeUtils.simpleTypeCheck的類型。
-        :param useQtSignal: 是否使用Qt的Signal作為事件機制。一般在QT需要跨線程時使用。如果使用此參數，則需要明確定義所有可能的參數類型,
-                    e.g: A繼承B, 如果A和B都可能作為參數類型，則需要Event(Union[A, B], useQtSignal=True), 否則QT的Siganl會
-                    導致類型坍塌為基類。
-        :param acceptNone: 是否接受None作為參數。如果args中有None，則acceptNone會強制設置為True(僅限useQtSignal模式)。
-        :param noCheck: addListener/invoke 時不檢查參數數量/類型是否正確
-        '''
+    def _init_params(self, *args, useQtSignal=False, acceptNone=False, noCheck=False):
         args = list(args)
         for i, arg in enumerate(args):
             if arg is None:
                 args[i] = type(None)
                 if not acceptNone:
                     if not useQtSignal:
-                        raise NoneTypeNotSupportedError("Event does not support NoneType as arg since 'acceptNone'=False")
+                        raise NoneTypeNotSupportedError(
+                            "Event does not support NoneType as arg since 'acceptNone'=False")
                     else:
-                        acceptNone = True # force acceptNone to True
+                        acceptNone = True  # force acceptNone to True
             elif not isinstance(arg, (str, type, ForwardRef)):
                 raise Exception("Event's arg must be type or type name, but got " + str(type(arg)))
         self._args = tuple(args)
@@ -101,48 +96,60 @@ class Event:
         self._tempEvents = set()
         self._noCheck = noCheck
         self._hasEmitted = False  # to prevent sometimes Signal emit twice with unknown reason
-        self._noneIndexes = set() # record the index of None in args. Since Signal is hard to emit None, we need to mark down the index of None and replace when _invoke
-        if useQtSignal:
-            signalArgs = []
-            for arg in args:
-                if subClassCheck(arg, CrossModuleEnum):
-                    signalArgs.append(Enum)
-                elif isinstance(arg, type):
+        self._noneIndexes = set()  # record the index of None in args. Since Signal is hard to emit None, we need to mark down the index of None and replace when _invoke
+    def _init_pyqt_signal(self, *args, acceptNone=False):
+        signalArgs = []
+        for arg in args:
+            if subClassCheck(arg, CrossModuleEnum):
+                signalArgs.append(Enum)
+            elif isinstance(arg, type):
+                signalArgs.append(arg)
+            elif get_origin(arg) is not None:
+                origin = get_origin(arg)
+                if origin == Union:
                     signalArgs.append(arg)
-                elif get_origin(arg) is not None:
-                    origin = get_origin(arg)
-                    if origin == Union:
-                        signalArgs.append(arg)
-                    elif origin != Literal:
-                        signalArgs.append(origin)
-                    else:
-                        signalArgs.append(object)
+                elif origin != Literal:
+                    signalArgs.append(origin)
                 else:
                     signalArgs.append(object)
-            possibleInputs = [signalArgs]
-            while not _allPossibleInputsOk(possibleInputs):
-                possibleInput = _getHasUnionInput(possibleInputs)
-                possibleInputs.remove(possibleInput)
-                for i, arg in enumerate(possibleInput):
-                    if get_origin(arg) is not None and get_origin(arg) == Union:
-                        for argType in get_args(arg): # for each type in Union
-                            argTypeOrigin = get_origin(argType)
-                            if argTypeOrigin is not None and argTypeOrigin != Union:
-                                argType = argTypeOrigin
-                            newPossibleInput = list(possibleInput)
-                            newPossibleInput[i] = argType
-                            possibleInputs.append(newPossibleInput.copy())
-                        break
-            self._possibleInputs = possibleInputs
-            if len(possibleInputs) == 1:
-                self._qtSignal = _SignalWrapper(*possibleInputs[0])
-                self._qtSignal.signal.connect(self._invoke)
             else:
-                self._qtSignal = _SignalWrapper(*possibleInputs)
-                for possibleInput in possibleInputs:
-                    self._qtSignal.signal.__getitem__(possibleInput).connect(self._invoke)
-            if acceptNone:
-                self._possibleInputs.append([type(None)] * len(signalArgs))
+                signalArgs.append(object)
+        possibleInputs = [signalArgs]
+        while not _allPossibleInputsOk(possibleInputs):
+            possibleInput = _getHasUnionInput(possibleInputs)
+            possibleInputs.remove(possibleInput)
+            for i, arg in enumerate(possibleInput):
+                if get_origin(arg) is not None and get_origin(arg) == Union:
+                    for argType in get_args(arg):  # for each type in Union
+                        argTypeOrigin = get_origin(argType)
+                        if argTypeOrigin is not None and argTypeOrigin != Union:
+                            argType = argTypeOrigin
+                        newPossibleInput = list(possibleInput)
+                        newPossibleInput[i] = argType
+                        possibleInputs.append(newPossibleInput.copy())
+                    break
+        self._possibleInputs = possibleInputs
+        if len(possibleInputs) == 1:
+            self._qtSignal = _SignalWrapper(*possibleInputs[0])
+            self._qtSignal.signal.connect(self._invoke)
+        else:
+            self._qtSignal = _SignalWrapper(*possibleInputs)
+            for possibleInput in possibleInputs:
+                self._qtSignal.signal.__getitem__(possibleInput).connect(self._invoke)
+        if acceptNone:
+            self._possibleInputs.append([type(None)] * len(signalArgs))
+    def __init__(self, *args, useQtSignal=False, acceptNone=False, noCheck=False):
+        '''
+        :param args: 事件的参数类型（1個或多個），可以是 类型 或 类型名稱 。支持所有utils.TypeUtils.simpleTypeCheck的類型。
+        :param useQtSignal: 是否使用Qt的Signal作為事件機制。一般在QT需要跨線程時使用。如果使用此參數，則需要明確定義所有可能的參數類型,
+                    e.g: A繼承B, 如果A和B都可能作為參數類型，則需要Event(Union[A, B], useQtSignal=True), 否則QT的Siganl會
+                    導致類型坍塌為基類。
+        :param acceptNone: 是否接受None作為參數。如果args中有None，則acceptNone會強制設置為True(僅限useQtSignal模式)。
+        :param noCheck: addListener/invoke 時不檢查參數數量/類型是否正確
+        '''
+        self._init_params(*args, useQtSignal=useQtSignal, acceptNone=acceptNone, noCheck=noCheck)
+        if useQtSignal:
+            self._init_pyqt_signal(*args, acceptNone=acceptNone)
 
     def __iadd__(self, other):
         self.addListener(other)
@@ -288,6 +295,7 @@ class Event:
         if self._hasEmitted:
             return # when use QtSignal, sometimes it will emit twice with unknown reason
         self._hasEmitted = True
+        ignoreErr = self._ignoreErr  # will be assigned in self.invoke
         if self.acceptNone and self.useQtSignal:
             args = list(args)
             for index in self._noneIndexes:
@@ -301,6 +309,11 @@ class Event:
                     self.removeListener(event)
                 else:
                     raise e
+            except Exception as e:
+                if ignoreErr:
+                    print(f"Exception occurred in event {event}. Msg: {e}. Skipped.")
+                else:
+                    raise e
         for event in self.tempEvents:
             try:
                 event(*args)
@@ -308,6 +321,11 @@ class Event:
                 if 'deleted' in str(e):
                     # C/C++ object has been deleted(usually occurs in PYQT)
                     continue
+                else:
+                    raise e
+            except Exception as e:
+                if ignoreErr:
+                    print(f"Exception occurred in event {event}. Msg: {e}. Skipped.")
                 else:
                     raise e
         self._tempEvents.clear()
@@ -329,11 +347,12 @@ class Event:
             elif not valueTypeCheck(arg, self.args[i]):
                 if not (arg is None and self._acceptNone):
                     raise Exception(f"Parameter: {arg} is not valid for type'{self.args[i]}'")
-    def invoke(self, *args):
+    def invoke(self, *args, ignoreErr=False):
         '''invoke all listeners'''
         if not self._noCheck:
             self._check_invoke_params(*args)
         self._hasEmitted = False
+        self._ignoreErr = ignoreErr
         if not self._useQtSignal:
             self._invoke(*args)
         else:
@@ -387,77 +406,211 @@ class Tasks(Event):
     Type of tasks must be callable.
     When create, the init params will be the input types of tasks.
     '''
-    def _checkTask(self, task):
-        if not isinstance(task, Callable):
-            raise TypeError("Task must be callable")
+    def _init_pyqt_signal(self, *args, acceptNone=False):
+        signalArgs = []
+        for arg in args:
+            if subClassCheck(arg, CrossModuleEnum):
+                signalArgs.append(Enum)
+            elif isinstance(arg, type):
+                signalArgs.append(arg)
+            elif get_origin(arg) is not None:
+                origin = get_origin(arg)
+                if origin == Union:
+                    signalArgs.append(arg)
+                elif origin != Literal:
+                    signalArgs.append(origin)
+                else:
+                    signalArgs.append(object)
+            else:
+                signalArgs.append(object)
+        possibleInputs = [signalArgs]
+        while not _allPossibleInputsOk(possibleInputs):
+            possibleInput = _getHasUnionInput(possibleInputs)
+            possibleInputs.remove(possibleInput)
+            for i, arg in enumerate(possibleInput):
+                if get_origin(arg) is not None and get_origin(arg) == Union:
+                    for argType in get_args(arg):  # for each type in Union
+                        argTypeOrigin = get_origin(argType)
+                        if argTypeOrigin is not None and argTypeOrigin != Union:
+                            argType = argTypeOrigin
+                        newPossibleInput = list(possibleInput)
+                        newPossibleInput[i] = argType
+                        possibleInputs.append(newPossibleInput.copy())
+                    break
+        self._possibleInputs = possibleInputs
+        if len(possibleInputs) == 1:
+            self._qtSignal = _SignalWrapper(*possibleInputs[0])
+            self._qtSignal.signal.connect(self._execute)
+        else:
+            self._qtSignal = _SignalWrapper(*possibleInputs)
+            for possibleInput in possibleInputs:
+                self._qtSignal.signal.__getitem__(possibleInput).connect(self._execute)
+        if acceptNone:
+            self._possibleInputs.append([type(None)] * len(signalArgs))
+
     def addTasks(self, tasks:Union[Callable, Iterable[Callable]]):
         if isinstance(tasks, Iterable):
             for task in tasks:
-                self._checkTask(task)
                 self.addTempListener(task)
         else:
-            self._checkTask(tasks)
             self.addTempListener(tasks)
     def removeTasks(self, tasks:Union[Callable, Iterable[Callable]]):
         if isinstance(tasks, Iterable):
             for task in tasks:
-                self._checkTask(task)
                 self.removeTempListener(task)
         else:
-            self._checkTask(tasks)
             self.removeTempListener(tasks)
     def addForeverTasks(self, tasks:Union[Callable, Iterable[Callable]]):
         if isinstance(tasks, Iterable):
             for task in tasks:
-                self._checkTask(task)
                 self.addListener(task)
         else:
-            self._checkTask(tasks)
             self.addListener(tasks)
     def removeForeverTasks(self, tasks:Union[Callable, Iterable[Callable]]):
         if isinstance(tasks, Iterable):
             for task in tasks:
-                self._checkTask(task)
                 self.removeListener(task)
         else:
-            self._checkTask(tasks)
             self.removeListener(tasks)
-    def execute(self, *args):
-        self.invoke(*args)
+
+    def invoke(self, *args, ignoreErr=False):
+        raise Exception("invoke is not supported in Tasks, use 'execute' instead")
+
+    def execute(self, *args, ignoreErr=True):
+        if not self._noCheck:
+            self._check_invoke_params(*args)
+        self._hasEmitted = False
+        self._ignoreErr = ignoreErr
+        if not self._useQtSignal:
+            self._invoke(*args)
+        else:
+            for i, arg in enumerate(args):
+                if arg is None:
+                    if self.acceptNone:
+                        self._noneIndexes.add(i)
+                    else:
+                        raise NoneTypeNotSupportedError('''None type is not supported since you have set "acceptNone" to False.
+                                                        When you want to pass None in useQtSignal mode, you must use set "acceptNone" to True.''')
+            if len(self._possibleInputs) == 0:
+                self._qtSignal.signal.emit(*args)
+            else:
+                mostSuitableInput = _findMostSuitableInputType(self._possibleInputs, args, self.acceptNone)
+                self._qtSignal.signal.__getitem__(mostSuitableInput).emit(*args)
+            self._noneIndexes.clear()
 
 class AutoSortTask(Tasks):
     '''Tasks will be cleared after execute. Tasks will be sorted by order.'''
+    def _init_pyqt_signal(self, *args, acceptNone=False):
+        signalArgs = []
+        for arg in args:
+            if subClassCheck(arg, CrossModuleEnum):
+                signalArgs.append(Enum)
+            elif isinstance(arg, type):
+                signalArgs.append(arg)
+            elif get_origin(arg) is not None:
+                origin = get_origin(arg)
+                if origin == Union:
+                    signalArgs.append(arg)
+                elif origin != Literal:
+                    signalArgs.append(origin)
+                else:
+                    signalArgs.append(object)
+            else:
+                signalArgs.append(object)
+        possibleInputs = [signalArgs]
+        while not _allPossibleInputsOk(possibleInputs):
+            possibleInput = _getHasUnionInput(possibleInputs)
+            possibleInputs.remove(possibleInput)
+            for i, arg in enumerate(possibleInput):
+                if get_origin(arg) is not None and get_origin(arg) == Union:
+                    for argType in get_args(arg):  # for each type in Union
+                        argTypeOrigin = get_origin(argType)
+                        if argTypeOrigin is not None and argTypeOrigin != Union:
+                            argType = argTypeOrigin
+                        newPossibleInput = list(possibleInput)
+                        newPossibleInput[i] = argType
+                        possibleInputs.append(newPossibleInput.copy())
+                    break
+        self._possibleInputs = possibleInputs
+        if len(possibleInputs) == 1:
+            self._qtSignal = _SignalWrapper(*possibleInputs[0])
+            self._qtSignal.signal.connect(self._execute)
+        else:
+            self._qtSignal = _SignalWrapper(*possibleInputs)
+            for possibleInput in possibleInputs:
+                self._qtSignal.signal.__getitem__(possibleInput).connect(self._execute)
+        if acceptNone:
+            self._possibleInputs.append([type(None)] * len(signalArgs))
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._tempEvents = [] # for heapq
         self._events = [] # for heapq
+
+    class TaskWrapper:
+        def __init__(self, func, order):
+            self._func = func
+            self._order = order
+        @property
+        def func(self):
+            return self._func
+        @property
+        def order(self):
+            return self._order
+        def __call__(self, *args, **kwargs):
+            self._func(*args, **kwargs)
+        def __lt__(self, other):
+            return self._order < other._order
+        def __gt__(self, other):
+            return self._order > other._order
+        def __eq__(self, other):
+            if isinstance(other, int):
+                return self._order == other
+            elif not isinstance(other, self.__class__):
+                return self._func == other
+            else:
+                return super().__eq__(other)
+        def __le__(self, other):
+            return self._order <= other._order
+        def __ge__(self, other):
+            return self._order >= other._order
+        def __ne__(self, other):
+            return self._order != other._order
+    @classmethod
+    def _TaskWrapper(cls, func, order):
+        return cls.TaskWrapper(func, order)
+
     def addListener(self, listener:Union[callable, Iterable[callable]], order:int=0):
         self._checkListener(listener)
-        heapq.heappush(self._events, (order, listener))
+        if listener not in self._events:
+            heapq.heappush(self._events, self._TaskWrapper(listener, order))
     def addTempListener(self, listener:Union[callable, Iterable[callable]], order:int=0):
         self._checkListener(listener)
-        heapq.heappush(self._tempEvents, (order, listener))
+        if listener not in self._tempEvents:
+            heapq.heappush(self._tempEvents, self._TaskWrapper(listener, order))
     def removeListener(self, listener, throwError:bool=False):
         if isinstance(listener, Iterable):
             for l in listener:
                 self.removeListener(l)
         else:
-            for i, l in enumerate(self._events):
-                if l[1] == listener:
-                    self._events.pop(i)
-                    break
+            for task in self._events:
+                if task == listener:
+                    self._events.remove(task)
+                    return
+            if throwError:
+                raise ListenerNotFoundError(f"listener {listener} not found")
     def removeTempListener(self, listener, throwError:bool=False):
         if isinstance(listener, Iterable):
             for l in listener:
                 self.removeTempListener(l)
         else:
-            for i, l in enumerate(self._tempEvents):
-                if l[1] == listener:
-                    self._tempEvents.pop(i)
-                    break
+            for task in self._tempEvents:
+                if task == listener:
+                    self._tempEvents.remove(task)
+                    return
+            if throwError:
+                raise ListenerNotFoundError(f"listener {listener} not found")
 
     def addTask(self, task:Callable, order:int=0):
-        self._checkTask(task)
         self.addTempListener(task, order)
     def addTasks(self, tasks:Union[Callable, Iterable[Callable]], orders:Union[int, Iterable[int]]=0):
         if not isinstance(tasks, Iterable):
@@ -474,35 +627,53 @@ class AutoSortTask(Tasks):
         for task, order in zip(tasks, orders):
             self.addForeverTask(task, order)
     def addForeverTask(self, task:Callable, order:int=0):
-        self._checkTask(task)
         self.addListener(task, order)
 
-    def _invoke(self, *args):
+    def _execute(self, *args):
         if self._hasEmitted:
-            return # when use QtSignal, sometimes it will emit twice with unknown reason
+            return
         self._hasEmitted = True
-        if self.acceptNone and self.useQtSignal:
-            args = list(args)
-            for index in self._noneIndexes:
-                args[index] = None
-        for order, event in self.events:
+        ignoreErr = self._ignoreErr
+        allTasks = []
+        for task in self.events:
+            heapq.heappush(allTasks, task)
+        for temptask in self.tempEvents:
+            heapq.heappush(allTasks, temptask)
+        for task in allTasks:
             try:
-                event(*args)
+                task(*args)
             except RuntimeError as e:
                 if 'deleted' in str(e):
                     # C/C++ object has been deleted(usually occurs in PYQT)
-                    self.removeListener(event)
+                    self.removeTempListener(task)
                 else:
                     raise e
-        for order, event in self.tempEvents:
-            try:
-                event(*args)
-            except RuntimeError as e:
-                if 'deleted' in str(e):
-                    # C/C++ object has been deleted(usually occurs in PYQT)
-                    continue
+            except Exception as e:
+                if ignoreErr:
+                    print(f"Exception occurred in event {task}. Msg: {e}. Skipped.")
                 else:
                     raise e
         self._tempEvents.clear()
+    def execute(self, *args, ignoreErr=True):
+        if not self._noCheck:
+            self._check_invoke_params(*args)
+        self._hasEmitted = False
+        self._ignoreErr = ignoreErr
+        if not self._useQtSignal:
+            self._execute(*args)
+        else:
+            for i, arg in enumerate(args):
+                if arg is None:
+                    if self.acceptNone:
+                        self._noneIndexes.add(i)
+                    else:
+                        raise NoneTypeNotSupportedError('''None type is not supported since you have set "acceptNone" to False.
+                                                        When you want to pass None in useQtSignal mode, you must use set "acceptNone" to True.''')
+            if len(self._possibleInputs) == 0:
+                self._qtSignal.signal.emit(*args)
+            else:
+                mostSuitableInput = _findMostSuitableInputType(self._possibleInputs, args, self.acceptNone)
+                self._qtSignal.signal.__getitem__(mostSuitableInput).emit(*args)
+            self._noneIndexes.clear()
 
 __all__ = ["Event", "ListenerNotFoundError", "NoneTypeNotSupportedError", "DelayEvent", "Tasks", "AutoSortTask"]

@@ -16,7 +16,7 @@ class DepthFunc(Enum):
 # endregion
 
 # region render
-class RenderOrder:
+class RenderOrder(Enum):
     """
     Render order of GameObjects.
     Note that this is not a enum class.

@@ -21,7 +21,7 @@ class Engine:
             SetGlobalValue("_ENGINE_SINGLETON", e)
             _engine_singleton = e
             return e
-    def __init__(self, scene: Scene = None, winTitle=None, winSize=(800, 480),):
+    def __init__(self, scene: Scene = None, winTitle=None, winSize=(1080, 720), windowResizable=False):
         self._scene = scene
         if winTitle is not None:
             title = winTitle
@@ -30,7 +30,7 @@ class Engine:
         else:
             title = 'Stable Renderer'
 
-        self._windowManager = WindowManager(title, winSize)
+        self._windowManager = WindowManager(title, winSize, windowResizable)
         self._inputManager = InputManager(self._windowManager.Window)
         self._runtimeManager = RuntimeManager()
         self._renderManager = RenderManager()

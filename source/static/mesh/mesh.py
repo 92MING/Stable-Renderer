@@ -1,8 +1,19 @@
 import os
 from static.resourcesObj import ResourcesObj
+from utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
 
 class Mesh(ResourcesObj):
     _BaseName = 'Mesh'
+
+    def __init__(self, name):
+        super().__init__(name)
+        currentID = GetOrAddGlobalValue('_MeshCount', 0)
+        self._meshID = currentID # for corresponding map
+        SetGlobalValue('_MeshCount', currentID+1)
+
+    @property
+    def meshID(self):
+        return self._meshID
 
     def load(self, path:str):
         '''Load data from file. Override this function to implement loading data from file'''
