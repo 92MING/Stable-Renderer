@@ -27,6 +27,7 @@ class RenderManager(Manager):
                  brightness=1.0,
                  contrast=1.0,):
         super().__init__()
+        self.engine._renderManager = self
         self._renderTasks = AutoSortTask()
         self._deferRenderTasks = AutoSortTask()
         self._postProcessTasks = AutoSortTask()
@@ -120,8 +121,8 @@ class RenderManager(Manager):
         self._brightness = brightness
         self._contrast = contrast
 
-        default_post_process_vs_path = os.path.join(SHADER_DIR, 'default_post_process.vs')
-        default_post_process_fs_path = os.path.join(SHADER_DIR, 'default_post_process.fs')
+        default_post_process_vs_path = os.path.join(SHADER_DIR, 'default_post_process_vs.glsl')
+        default_post_process_fs_path = os.path.join(SHADER_DIR, 'default_post_process_fs.glsl')
         self._default_post_process_shader = Shader("default_post_process", default_post_process_vs_path, default_post_process_fs_path)
         def final_draw():
             self._default_post_process_shader.setUniform("enableHDR", self._enableHDR)
@@ -183,6 +184,7 @@ class RenderManager(Manager):
         gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, 5 * 4, ctypes.c_void_p(3 * 4))
         gl.glBindVertexArray(0)
 
+        # self._quadShader = Shader("Default_Quad_Shader", DEFAULT_QUAD_VS_SHADER_PATH, DEFAULT_QUAD_FS_SHADER_PATH)
     def _draw_quad(self):
         gl.glBindVertexArray(self._quadVAO)
         gl.glDrawElements(gl.GL_TRIANGLES, 6, gl.GL_UNSIGNED_INT, None)
@@ -240,7 +242,8 @@ class RenderManager(Manager):
                 print(f"Render Task ({order}, {func}) Error. Msg: {e}. Skipped.")
         self._renderTasks._tempEvents.clear()
     def _getTextureImg(self, gTexBufferID, glFormat, glDataType, npDataType, channel_num)->np.ndarray:
-        data = gl.glGetTextureImage(gTexBufferID, 0, glFormat, glDataType)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, gTexBufferID)
+        data = gl.glGetTexImage(gTexBufferID, 0, glFormat, glDataType)
         data = np.frombuffer(data, dtype=npDataType)
         data = data.reshape((self.engine.WindowManager.WindowSize[1], self.engine.WindowManager.WindowSize[0], channel_num))
         return data
@@ -409,6 +412,8 @@ class RenderManager(Manager):
         idData = self._getTextureImg(self._gBuffer_id, gl.GL_RGB_INTEGER, gl.GL_INT, np.int32, 3)
         depthData = self._getTextureImg(self._gBuffer_depth, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT, np.float32, 1)
         # TODO: send these data to stable-diffusion, and get color data back
+        print(idData.shape)
+        print(idData)
 
         # get data back from SD
         # TODO: load the color data back to self._gBuffer_color texture, i.e. colorData = ...
