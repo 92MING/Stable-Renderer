@@ -181,6 +181,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         controlnet_conditioning_scale=1.0,
         control_guidance_start=0.0,
         control_guidance_end=1.0,
+        correspondence_map=None,
     ):
         if height is not None and height % 8 != 0 or width is not None and width % 8 != 0:
             raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
@@ -335,6 +336,10 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 raise ValueError(f"control guidance start: {start} can't be smaller than 0.")
             if end > 1.0:
                 raise ValueError(f"control guidance end: {end} can't be larger than 1.0.")
+        
+        # TODO: Check correspondence map 
+        if correspondence_map is not None:
+            pass
 
     # Copied from diffusers.pipelines.controlnet.pipeline_controlnet.StableDiffusionControlNetPipeline.prepare_image
     def prepare_control_image(
@@ -400,6 +405,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         guess_mode: bool = False,
         control_guidance_start: Union[float, List[float]] = 0.0,
         control_guidance_end: Union[float, List[float]] = 1.0,
+        correspondence_map: Optional[Dict] = None,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -544,6 +550,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
             controlnet_conditioning_scale=controlnet_conditioning_scale,
             control_guidance_start=control_guidance_start,
             control_guidance_end=control_guidance_end,
+            correspondence_map=correspondence_map,
         )
 
         # 4. Define call parameters
@@ -604,6 +611,10 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 else:
                     mask = None
                 masks[i] = mask
+        
+        # TODO: Process correspondence map
+        if correspondence_map is not None:
+            pass
 
         # 7. Prepare control image
         if control_images is None:
@@ -816,7 +827,8 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                     self.scheduler._step_index += 1
 
                 # TODO: Do overlapping using some algorithm
-                # self.overlap(latents_list, corr_map=None, generator=generator)
+                if correspondence_map is not None:
+                    self.overlap(latents_list, corr_map=correspondence_map, generator=generator)
 
                 # call the callback, if provided
                 if s == len(timesteps) - 1 or ((s + 1) > num_warmup_steps and (s + 1) % self.scheduler.order == 0):
