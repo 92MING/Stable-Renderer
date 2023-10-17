@@ -1,21 +1,22 @@
-import sys, os
+from ..modules import utils
+from pathlib import Path
+from PIL import Image
+import tqdm
+import cv2
+import torchvision.transforms as transforms
+import torch
+import sys
+import os
 sys.path.append(os.getcwd())
 
-import torch
-import torchvision.transforms as transforms
-import cv2
-import tqdm
-from PIL import Image
-from pathlib import Path
-import modules.utils as utils
 
 if __name__ == '__main__':
     # 1. 加载预训练模型
     model_type = "DPT_Large"   # 这只是一个选择，也可以选择其他的模型类型
     model = torch.hub.load("intel-isl/MiDaS", model_type)
-    device = ("cuda" if torch.cuda.is_available() else 
-             "mps" if torch.backends.mps.is_available() else
-             "cpu")
+    device = ("cuda" if torch.cuda.is_available() else
+              "mps" if torch.backends.mps.is_available() else
+              "cpu")
     model.to(device)
     model.eval()
 

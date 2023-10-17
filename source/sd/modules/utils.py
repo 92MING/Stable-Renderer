@@ -1,4 +1,3 @@
-import imagehash
 import re
 import cv2
 import numpy
@@ -13,8 +12,8 @@ def list_frames(frame_dir):
     pattern = r"frame_(\d+).png"
     try:
         frame_list = sorted(frame_dir.iterdir(), key=lambda x: int(re.match(pattern, x.name).group(1)))
-    except ValueError as e:
-        raise ValueError(f"Frame filename format is not correct. Please make sure all filenames follow format `frame_xxx.png`, where `xxx` is an integer.") from e
+    except AttributeError as e:
+        raise AttributeError(f"Frame filename format is not correct. Please make sure all filenames follow format `frame_xxx.png`, where `xxx` is an integer.") from e
     return frame_list
 
 

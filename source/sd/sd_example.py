@@ -2,11 +2,10 @@ import random
 import torch
 from PIL import Image
 from pathlib import Path
-from diffuser_pipeline.multi_frame_stable_diffusion import (
-    StableDiffusionImg2VideoPipeline,
-    load_pipe,
-)
+from sys import platform
 from modules import utils, config
+from modules.diffuser_pipelines.multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
+from modules.diffuser_pipelines.pipeline_utils import load_pipe
 
 
 def main():
@@ -18,7 +17,8 @@ def main():
             "lllyasviel/sd-controlnet-depth"  # Depth model
         ],
         use_safetensors=True,
-        scheduler_type="euler-ancestral"
+        scheduler_type="euler-ancestral",
+        no_half=(platform == 'darwin')  # Disable fp16 on MacOS
     )
     pipe.to(config.device)
 
@@ -41,18 +41,18 @@ def main():
     generator = torch.Generator(device=config.device).manual_seed(seed)
 
     # 2. Prepare images
-    n = 8  # Number of frames to utilize
-    frame_dir = Path("test/groups/group_7")
+    n = 4  # Number of frames to utilize
+    frame_dir = config.test_dir / "groups/group_7"
     frame_path_list = utils.list_frames(frame_dir)[:n]
     frames = [Image.open(img_path).convert('RGB') for img_path in frame_path_list]
 
     # 3. Prepare masks
-    masks = [Image.open("test/masks/mask.png")]*n  # Simply use single mask for all frames for testing
+    masks = [Image.open(config.test_dir / "masks/mask.png")]*n  # Simply use single mask for all frames for testing
 
     # 4. Prepare control images.
     # Simply use canny and depth images for test.
     canny_images = utils.make_canny_images(frames)
-    depth_img_dir = Path('test/depths/group_7')
+    depth_img_dir = config.test_dir / "depths/group_7"
     depth_img_paths = utils.list_frames(depth_img_dir)[:n]
     depth_images = [Image.open(img_path).convert('RGB') for img_path in depth_img_paths]
 
@@ -62,7 +62,7 @@ def main():
         prompt=prompt,
         negative_prompt=neg_prompt,
         images=frames,
-        masks=masks,  # Optional: mask images
+        # masks=masks,  # Optional: mask images
         control_images=control_images,
         width=width,
         height=height,
@@ -75,7 +75,7 @@ def main():
         # callback=utils.view_latents,
     ).images
 
-    output_dir = Path("test/outputs")
+    output_dir = config.test_dir / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for i, image in enumerate(output_frame_list):
