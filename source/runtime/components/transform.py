@@ -1,5 +1,5 @@
 from runtime.component import Component
-from glm import *
+import glm
 from typing import Optional, Union, Sequence
 
 class Transform(Component):
@@ -11,9 +11,9 @@ class Transform(Component):
         if not enable:
             raise Exception('Transform can not be disabled.')
         super().__init__(gameObj)
-        self.localPos = vec3(0, 0, 0)
-        self._localRot = quat() # rotation cannot be set directly since it is quaternion
-        self.localScale = vec3(1, 1, 1)
+        self.localPos = glm.vec3(0, 0, 0)
+        self._localRot = glm.quat() # rotation cannot be set directly since it is quaternion
+        self.localScale = glm.vec3(1, 1, 1)
     @property
     def enable(self):
         return True
@@ -29,15 +29,15 @@ class Transform(Component):
         return None
 
     # region rotation
-    def localRot(self, radian=False)->vec3:
+    def localRot(self, radian=False)->glm.vec3:
         if not radian:
-            return degrees(eulerAngles(self._localRot))
+            return glm.degrees(glm.eulerAngles(self._localRot))
         else:
-            return eulerAngles(self._localRot)
+            return glm.eulerAngles(self._localRot)
     def setLocalRot(self, x, y, z, radian=False):
         if not radian:
-            x, y, z = radians(x), radians(y), radians(z)
-        self._localRot = quat(vec3(x, y, z))
+            x, y, z = glm.radians(x), glm.radians(y), glm.radians(z)
+        self._localRot = glm.quat(glm.vec3(x, y, z))
     def localRotX(self, radian=False)->float:
         return self.localRot(radian)[0]
     def localRotY(self, radian=False)->float:
@@ -54,19 +54,19 @@ class Transform(Component):
         localRot = self.localRot(radian)
         self.setLocalRot(localRot[0], localRot[1], z, radian)
 
-    def globalRot(self, radian=False)->vec3:
+    def globalRot(self, radian=False)->glm.vec3:
         gloablForward = self.forward
         globalUp = self.up
         if not radian:
-            return degrees(eulerAngles(quatLookAt(gloablForward, globalUp)))
+            return glm.degrees(glm.eulerAngles(glm.quatLookAt(gloablForward, globalUp)))
         else:
-            return eulerAngles(quatLookAt(gloablForward, globalUp))
+            return glm.eulerAngles(glm.quatLookAt(gloablForward, globalUp))
 
-    def rotateLocalAxis(self, axis:vec3, angle:float, radian=False):
+    def rotateLocalAxis(self, axis:glm.vec3, angle:float, radian=False):
         if not radian:
-            angle = radians(angle)
+            angle = glm.radians(angle)
         angle = -angle
-        self._localRot = rotate(self._localRot, angle, axis)
+        self._localRot = glm.rotate(self._localRot, angle, axis)
     def rotateLocalX(self, angle:float, radian=False):
         '''rotate around local x axis'''
         self.rotateLocalAxis(self.localRight, angle, radian)
@@ -76,58 +76,58 @@ class Transform(Component):
     def rotateLocalZ(self, angle:float, radian=False):
         '''rotate around local z axis'''
         self.rotateLocalAxis(self.localForward, angle, radian)
-    def rotateGlobalAxis(self, globalAxis:vec3, angle:float, radian=False):
+    def rotateGlobalAxis(self, globalAxis:glm.vec3, angle:float, radian=False):
         if not radian:
-            angle = radians(angle)
-        newGlobalPos = rotate(self.globalPos, angle, globalAxis)
-        newGlobalForward = rotate(self.forward, angle, globalAxis)
+            angle = glm.radians(angle)
+        newGlobalPos = glm.rotate(self.globalPos, angle, globalAxis)
+        newGlobalForward = glm.rotate(self.forward, angle, globalAxis)
         self.globalPos = newGlobalPos
         self.forward = newGlobalForward
 
     @property
-    def localForward(self)->vec3:
+    def localForward(self)->glm.vec3:
         '''return vec3(0, 0, -1)'''
-        return vec3(0, 0, -1)
+        return glm.vec3(0, 0, -1)
     @property
-    def localUp(self)->vec3:
+    def localUp(self)->glm.vec3:
         '''return vec3(0, 1, 0)'''
-        return vec3(0, 1, 0)
+        return glm.vec3(0, 1, 0)
     @property
-    def localRight(self)->vec3:
+    def localRight(self)->glm.vec3:
         '''return vec3(1, 0, 0)'''
-        return vec3(1, 0, 0)
+        return glm.vec3(1, 0, 0)
 
     @property
-    def forward(self)->vec3:
+    def forward(self)->glm.vec3:
         '''return z- direction in local space transform to global space'''
         return self.transformDirection(self.localForward)
     @forward.setter
     def forward(self, value):
         '''set z- direction in local space transform to global space. Keep up direction unchanged'''
-        newRight = normalize(cross(self.up, value))
-        newUp = normalize(cross(value, newRight))
-        self._localRot = quatLookAt(value, newUp)
+        newRight = glm.normalize(glm.cross(self.up, value))
+        newUp = glm.normalize(glm.cross(value, newRight))
+        self._localRot = glm.quatLookAt(value, newUp)
     @property
-    def up(self)->vec3:
+    def up(self)->glm.vec3:
         '''return y+ direction in local space transform to global space'''
         return self.transformDirection(self.localUp)
     @up.setter
     def up(self, value):
         '''set y+ direction in local space transform to global space. Keep forward direction unchanged'''
-        newRight = normalize(cross(value, self.forward))
-        newForward = normalize(cross(newRight, value))
-        self._localRot = quatLookAt(newForward, value)
+        newRight = glm.normalize(glm.cross(value, self.forward))
+        newForward = glm.normalize(glm.cross(newRight, value))
+        self._localRot = glm.quatLookAt(newForward, value)
     @property
-    def right(self)->vec3:
+    def right(self)->glm.vec3:
         '''return x+ direction in local space transform to global space'''
         return self.transformDirection(self.localRight)
     @right.setter
     def right(self, value):
         '''set x+ direction in local space transform to global space. Keep up direction unchanged'''
-        newForward = normalize(cross(value, self.up))
-        newUp = normalize(cross(newForward, value))
-        self._localRot = quatLookAt(newForward, newUp)
-    def lookAt(self, globalTarget:Union['Transform','GameObject', vec3, Sequence]):
+        newForward = glm.normalize(glm.cross(value, self.up))
+        newUp = glm.normalize(glm.cross(newForward, value))
+        self._localRot = glm.quatLookAt(newForward, newUp)
+    def lookAt(self, globalTarget:Union['Transform','GameObject', glm.vec3, Sequence]):
         '''rotate transform to make forward direction point to globalTarget, and up direction point to up'''
         from runtime.gameObj import GameObject
         if isinstance(globalTarget, GameObject):
@@ -136,15 +136,15 @@ class Transform(Component):
             globalTarget = globalTarget.globalPos
         target = self.inverseTransformPoint(globalTarget)
         oldForward = self.localForward
-        newForward = normalize(target - self.localPos)
-        rotationAxis = normalize(cross(oldForward, newForward))
-        rotationAngle = acos(dot(oldForward, newForward))
+        newForward = glm.normalize(target - self.localPos)
+        rotationAxis = glm.normalize(glm.cross(oldForward, newForward))
+        rotationAngle = glm.acos(glm.dot(oldForward, newForward))
         self.rotateLocalAxis(rotationAxis, rotationAngle, True)
     # endregion
 
     # region position
     @property
-    def globalPos(self)->vec3:
+    def globalPos(self)->glm.vec3:
         '''return the position of this transform in global space'''
         return self.transformPoint(self.localPos)
     @globalPos.setter
@@ -152,7 +152,7 @@ class Transform(Component):
         self.setGlobalPos(value.x, value.y, value.z)
     def setGlobalPos(self, x,y,z):
         '''set the position of this transform in global space'''
-        self.localPos = self.inverseTransformPoint(vec3(x,y,z))
+        self.localPos = self.inverseTransformPoint(glm.vec3(x,y,z))
     def setGlobalPosX(self, x):
         globalPos = self.globalPos
         self.setGlobalPos(x, globalPos.y, globalPos.z)
@@ -166,11 +166,11 @@ class Transform(Component):
 
     # region scale
     @property
-    def globalScale(self)->vec3:
+    def globalScale(self)->glm.vec3:
         '''return the scale of this transform in global space'''
         if self.parent is None:
             return self.localScale
-        return (self.parent.globalScaleMatrix * vec4(self.localScale, 1)).xyz
+        return (self.parent.globalScaleMatrix * glm.vec4(self.localScale, 1)).xyz
     @property
     def globalScaleX(self)->float:
         return self.globalScale.x
@@ -194,11 +194,11 @@ class Transform(Component):
         self.setGlobalScale(value.x, value.y, value.z)
     def setGlobalScale(self, x,y,z):
         '''set the scale of this transform in global space'''
-        scale = vec3(x, y, z)
+        scale = glm.vec3(x, y, z)
         if self.parent is None:
             self.localScale = scale
         else:
-            self.localScale = (self.parent.inverseGlobalScaleMatrix * vec4(scale, 1)).xyz
+            self.localScale = (self.parent.inverseGlobalScaleMatrix * glm.vec4(scale, 1)).xyz
     def setGlobalScaleX(self, x):
         globalScale = self.globalScale
         self.setGlobalScale(x, globalScale.y, globalScale.z)
@@ -212,57 +212,57 @@ class Transform(Component):
 
     # region transform
     @property
-    def translationMatrix(self)->mat4:
+    def translationMatrix(self)->glm.mat4:
         '''return the matrix that can transform a vector to local position'''
-        return translate(self.localPos)
+        return glm.translate(self.localPos)
     @property
-    def rotationMatrix(self)->mat4:
+    def rotationMatrix(self)->glm.mat4:
         '''return the matrix that can transform a vector to local rotation'''
-        return mat4_cast(self._localRot)
+        return glm.mat4_cast(self._localRot)
     @property
-    def scaleMatrix(self)->mat4:
+    def scaleMatrix(self)->glm.mat4:
         '''return the matrix that can transform a vector to local scale'''
-        return scale(self.localScale)
+        return glm.scale(self.localScale)
     @property
-    def transformMatrix(self)->mat4:
+    def transformMatrix(self)->glm.mat4:
         '''return the matrix that can transform a vector to local space'''
         return self.translationMatrix * self.rotationMatrix * self.scaleMatrix
     @property
-    def globalTransformMatrix(self)->mat4:
+    def globalTransformMatrix(self)->glm.mat4:
         '''return the matrix that can transform a vector to global space'''
         if self.parent is None:
             return self.transformMatrix
         return self.parent.globalTransformMatrix * self.transformMatrix
     @property
-    def globalScaleMatrix(self)->mat4:
+    def globalScaleMatrix(self)->glm.mat4:
         '''return the matrix that can transform a vector to global scale'''
         if self.parent is None:
             return self.scaleMatrix
         return self.parent.globalScaleMatrix * self.scaleMatrix
     @property
-    def inverseGlobalTransformMatrix(self)->mat4:
+    def inverseGlobalTransformMatrix(self)->glm.mat4:
         '''return the matrix that can transform a vector from global space to local space'''
-        return inverse(self.globalTransformMatrix)
+        return glm.inverse(self.globalTransformMatrix)
     @property
-    def inverseGlobalScaleMatrix(self)->mat4:
+    def inverseGlobalScaleMatrix(self)->glm.mat4:
         '''return the matrix that can transform a vector from global scale to local scale'''
-        return inverse(self.globalScaleMatrix)
+        return glm.inverse(self.globalScaleMatrix)
 
-    def transformPoint(self, localPos)->vec3:
+    def transformPoint(self, localPos)->glm.vec3:
         '''transform a point from local space to global space'''
         if self.parent is None:
             return localPos
-        return (self.parent.globalTransformMatrix * vec4(localPos, 1)).xyz
-    def inverseTransformPoint(self, globalPos)->vec3:
+        return (self.parent.globalTransformMatrix * glm.vec4(localPos, 1)).xyz
+    def inverseTransformPoint(self, globalPos)->glm.vec3:
         '''transform a point from global space to local space'''
         if self.parent is None:
             return globalPos
-        return (self.parent.inverseGlobalTransformMatrix * vec4(globalPos, 1)).xyz
+        return (self.parent.inverseGlobalTransformMatrix * glm.vec4(globalPos, 1)).xyz
 
-    def transformDirection(self, localDir)->vec3:
+    def transformDirection(self, localDir)->glm.vec3:
         '''transform a direction from local space to global space (return a normalized vector)'''
-        return normalize(self.globalTransformMatrix * vec4(localDir, 0)).xyz
-    def inverseTransformDirection(self, globalDir)->vec3:
+        return glm.normalize(self.globalTransformMatrix * glm.vec4(localDir, 0)).xyz
+    def inverseTransformDirection(self, globalDir)->glm.vec3:
         '''transform a direction from global space to local space (return a normalized vector)'''
-        return normalize(self.inverseGlobalTransformMatrix * vec4(globalDir, 0)).xyz
+        return glm.normalize(self.inverseGlobalTransformMatrix * glm.vec4(globalDir, 0)).xyz
     # endregion

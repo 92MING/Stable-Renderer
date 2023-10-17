@@ -23,6 +23,6 @@ void main() {
     outColor = texture(diffuseTex, vertexUV);
     outPos = globalPos;
     outNormal = normalize((MVP_IT * vec4(texture(normalTex, vertexUV).xyz, 0)).xyz);
-	ivec2 uv = ivec2(vertexUV * ivec2(textureSize(diffuseTex)));
+	ivec2 uv = ivec2(vertexUV * ivec2(textureSize(diffuseTex, 0)));
 	outID = ivec3(objID, uv.x, uv.y);
 }
