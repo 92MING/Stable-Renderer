@@ -242,7 +242,8 @@ class RenderManager(Manager):
                 print(f"Render Task ({order}, {func}) Error. Msg: {e}. Skipped.")
         self._renderTasks._tempEvents.clear()
     def _getTextureImg(self, gTexBufferID, glFormat, glDataType, npDataType, channel_num)->np.ndarray:
-        data = gl.glGetTextureImage(gTexBufferID, 0, glFormat, glDataType)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, gTexBufferID)
+        data = gl.glGetTexImage(gTexBufferID, 0, glFormat, glDataType)
         data = np.frombuffer(data, dtype=npDataType)
         data = data.reshape((self.engine.WindowManager.WindowSize[1], self.engine.WindowManager.WindowSize[0], channel_num))
         return data
@@ -411,7 +412,8 @@ class RenderManager(Manager):
         idData = self._getTextureImg(self._gBuffer_id, gl.GL_RGB_INTEGER, gl.GL_INT, np.int32, 3)
         depthData = self._getTextureImg(self._gBuffer_depth, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT, np.float32, 1)
         # TODO: send these data to stable-diffusion, and get color data back
-        # print(idData)
+        print(idData.shape)
+        print(idData)
 
         # get data back from SD
         # TODO: load the color data back to self._gBuffer_color texture, i.e. colorData = ...
