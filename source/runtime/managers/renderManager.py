@@ -183,7 +183,6 @@ class RenderManager(Manager):
         gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, 5 * 4, ctypes.c_void_p(3 * 4))
         gl.glBindVertexArray(0)
 
-        self._quadShader = Shader("Default_Quad_Shader", DEFAULT_QUAD_VS_SHADER_PATH, DEFAULT_QUAD_FS_SHADER_PATH)
     def _draw_quad(self):
         gl.glBindVertexArray(self._quadVAO)
         gl.glDrawElements(gl.GL_TRIANGLES, 6, gl.GL_UNSIGNED_INT, None)
@@ -270,7 +269,7 @@ class RenderManager(Manager):
         gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 0, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_modelMatrix))
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 2 * 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))
     def UpdateUBO_ViewMatrix(self, viewMatrix: glm.mat4):
         self._UBO_viewMatrix = viewMatrix
         self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_viewMatrix * self._UBO_modelMatrix
@@ -278,7 +277,7 @@ class RenderManager(Manager):
         gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, glm.sizeof(glm.mat4), glm.sizeof(glm.mat4),  glm.value_ptr(self._UBO_viewMatrix))
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 2 * 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))
     def UpdateUBO_ProjMatrix(self, projectionMatrix: glm.mat4):
         self._UBO_projectionMatrix = projectionMatrix
         self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_viewMatrix * self._UBO_modelMatrix
@@ -286,7 +285,7 @@ class RenderManager(Manager):
         gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 2 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4),  glm.value_ptr(self._UBO_projectionMatrix))
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 2 * 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))
     def printOpenGLError(self):
         try:
             gl.glGetError() # nothing to do with error, just clear error flag

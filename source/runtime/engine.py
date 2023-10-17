@@ -21,7 +21,19 @@ class Engine:
             SetGlobalValue("_ENGINE_SINGLETON", e)
             _engine_singleton = e
             return e
-    def __init__(self, scene: Scene = None, winTitle=None, winSize=(1080, 720), windowResizable=False):
+    def __init__(self,
+                 scene: Scene = None,
+                 winTitle=None,
+                 winSize=(1080, 720),
+                 windowResizable=False,
+                 enableHDR=True,
+                 enableGammaCorrection=True,
+                 gamma=2.2,
+                 exposure=1.0,
+                 saturation=1.0,
+                 brightness=1.0,
+                 contrast=1.0,):
+
         self._scene = scene
         if winTitle is not None:
             title = winTitle
@@ -33,7 +45,8 @@ class Engine:
         self._windowManager = WindowManager(title, winSize, windowResizable)
         self._inputManager = InputManager(self._windowManager.Window)
         self._runtimeManager = RuntimeManager()
-        self._renderManager = RenderManager()
+        self._renderManager = RenderManager(enableHDR=enableHDR, enableGammaCorrection=enableGammaCorrection, gamma=gamma, exposure=exposure,
+                                            saturation=saturation, brightness=brightness, contrast=contrast,)
         self._sceneManager = SceneManager(self._scene)
         self._resourceManager = ResourcesManager()
         # endregion
@@ -83,10 +96,10 @@ class Engine:
             Manager._RunFrameBegin()  # input events / clear buffers / etc.
 
             self.beforeFrameRun()
-            Manager._RunFrameRun() # update gameobjs, components, etc.
+            Manager._RunFrameRun() # update gameobjs, components / render / ... etc.
 
             self.beforeFrameEnd()
-            Manager._RunFrameEnd() # render / swap buffers / time count / etc.
+            Manager._RunFrameEnd() #  swap buffers / time count / etc.
 
         self.beforeRelease()
         Manager._RunRelease()
