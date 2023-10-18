@@ -269,7 +269,7 @@ class RenderManager(Manager):
         self._renderTasks._tempEvents.clear()
     def _getTextureImg(self, gTexBufferID, glFormat, glDataType, npDataType, channel_num)->np.ndarray:
         gl.glBindTexture(gl.GL_TEXTURE_2D, gTexBufferID)
-        data = gl.glGetTexImage(gTexBufferID, 0, glFormat, glDataType)
+        data = gl.glGetTexImage(gl.GL_TEXTURE_2D, 0, glFormat, glDataType)
         data = np.frombuffer(data, dtype=npDataType)
         data = data.reshape((self.engine.WindowManager.WindowSize[1], self.engine.WindowManager.WindowSize[0], channel_num))
         return data
@@ -452,6 +452,7 @@ class RenderManager(Manager):
     def _onFrameRun(self):
         # normal render
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._gBuffer)
+        gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         self._excute_render_task() # depth test will be enabled in this function
 
@@ -460,18 +461,16 @@ class RenderManager(Manager):
         colorData = self._getTextureImg(self._gBuffer_color, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
         posData = self._getTextureImg(self._gBuffer_pos, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
         normalData = self._getTextureImg(self._gBuffer_normal, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
-        idData = self._getTextureImg(self._gBuffer_id, gl.GL_RGB, gl.GL_INT, np.int32, 3)
+        idData = self._getTextureImg(self._gBuffer_id, gl.GL_RGB_INTEGER, gl.GL_INT, np.int32, 3)
         depthData = self._getTextureImg(self._gBuffer_depth, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT, np.float32, 1)
         # TODO: send these data to stable-diffusion, and get color data back
-        print(idData.shape)
-        print(idData)
 
         # get data back from SD
         # TODO: load the color data back to self._gBuffer_color texture, i.e. colorData = ...
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_color)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA,
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB,
                         self.engine.WindowManager.WindowSize[0], self.engine.WindowManager.WindowSize[1],
-                        0, gl.GL_RGBA, gl.GL_FLOAT, colorData.tobytes())
+                        0, gl.GL_RGB, gl.GL_FLOAT, colorData.tobytes())
         # TODO: update color pixel datas, i.e. pixelDict[id] = (oldColor *a + newColor *b), newColor = inverse light intensity of the pixel color
         # TODO: replace corresponding color pixel datas with color data from color dict
         # endregion
@@ -480,7 +479,7 @@ class RenderManager(Manager):
         # defer render: normal light effect apply
         gl.glDisable(gl.GL_DEPTH_TEST)
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._postProcessFBO) # output to post process FBO
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT)
         # TODO: set light & view point uniforms
         if len(self._deferRenderTasks) >0:
             self._deferRenderTasks.execute(ignoreErr=True) # apply light effect here
