@@ -34,6 +34,7 @@ class Engine:
                  brightness=1.0,
                  contrast=1.0,):
 
+        # region
         self._scene = scene
         if winTitle is not None:
             title = winTitle
