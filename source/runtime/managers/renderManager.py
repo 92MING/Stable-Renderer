@@ -478,7 +478,6 @@ class RenderManager(Manager):
         # TODO: replace corresponding color pixel datas with color data from color dict
         # endregion
 
-        # region defer render
         # defer render: normal light effect apply
         gl.glDisable(gl.GL_DEPTH_TEST)
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._postProcessFBO) # output to post process FBO
