@@ -2,3 +2,4 @@ test
 __pycache__
 models
 *.png
+.DS_Store

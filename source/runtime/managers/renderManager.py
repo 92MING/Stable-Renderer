@@ -469,6 +469,22 @@ class RenderManager(Manager):
         depthData = self._getTextureImg(self._gBuffer_depth, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT, np.float32, 1)
         # TODO: send these data to stable-diffusion, and get color data back
 
+        print('[DEBUG] Color data is empty: ', np.array_equal(colorData, np.zeros_like(colorData)))
+        print('[DEBUG] Pos data is empty: ', np.array_equal(posData, np.zeros_like(posData)))
+        print('[DEBUG] Normal data is empty: ', np.array_equal(normalData, np.zeros_like(normalData)))
+        print('[DEBUG] Id data is empty: ', np.array_equal(idData, np.zeros_like(idData)))
+        print('[DEBUG] Depth data is empty: ', np.array_equal(depthData, np.zeros_like(depthData)))
+        # color_img = Image.fromarray(colorData, 'RGB')
+        # color_img.save('color_img.png')
+        # pos_img = Image.fromarray(posData, 'RGB')
+        # pos_img.save('pos_img.png')
+        # normal_img = Image.fromarray(normalData, 'RGB')
+        # normal_img.save('normal_img.png')
+        # id_img = Image.fromarray(idData, 'RGB')
+        # id_img.save('id_img.png')
+        # depth_img = Image.fromarray(depthData, 'RGB')
+        # depth_img.save('depth_img.png')
+
         # Code run normally until here, pending fixes for idData
         # get data back from SD
         # TODO: load the color data back to self._gBuffer_color texture, i.e. colorData = ...
