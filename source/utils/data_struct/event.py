@@ -157,6 +157,8 @@ class Event:
     def __isub__(self, other):
         self.removeListener(other)
         return self
+    def __len__(self):
+        return len(self._events) + len(self._tempEvents)
     def destroy(self):
         self._events.clear()
         self._tempEvents.clear()

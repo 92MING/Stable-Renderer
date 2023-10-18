@@ -40,3 +40,5 @@ class Mesh(ResourcesObj):
         mesh = formatCls(name)
         mesh.load(path)
         return mesh
+
+__all__ = ['Mesh']

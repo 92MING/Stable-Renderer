@@ -89,6 +89,10 @@ class Texture(ResourcesObj):
     # endregion
 
     def bind(self, slot:int, uniformID):
+        '''
+        Bind texture to a slot and set shader uniform.
+        Make sure u have used shader before calling this function.
+        '''
         if self._texID is None:
             raise Exception('Texture is not yet sent to GPU. Cannot bind.')
         gl.glActiveTexture(gl.GL_TEXTURE0 + slot)
@@ -164,3 +168,5 @@ class Texture(ResourcesObj):
         texture = cls(name, format, min_filter, mag_filter, s_wrap, t_wrap)
         texture.load(path)
         return texture
+
+__all__ = ['Texture']

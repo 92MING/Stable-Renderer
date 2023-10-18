@@ -49,10 +49,14 @@ class RenderManager(Manager):
         self._UBO_projectionMatrix = glm.mat4(1.0)
         self._UBO_MVP = glm.mat4(1.0)
         self._UBO_MVP_IT = glm.mat4(1.0)
+        self._UBO_MV = glm.mat4(1.0)
+        self._UBO_MV_IT = glm.mat4(1.0)
+        self._UBO_cam_pos = glm.vec3(0.0, 0.0, 0.0) # world camera position
+        self._UBO_cam_dir = glm.vec3(0.0, 0.0, 0.0) # world camera direction
 
         self._matrixUBO = gl.glGenBuffers(1)
         gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self._matrixUBO)
-        gl.glBufferData(gl.GL_UNIFORM_BUFFER, 5 * glm.sizeof(glm.mat4), None, gl.GL_DYNAMIC_DRAW)
+        gl.glBufferData(gl.GL_UNIFORM_BUFFER, 6 * glm.sizeof(glm.mat4) + 2 * glm.sizeof(glm.vec3), None, gl.GL_DYNAMIC_DRAW)
         gl.glBindBufferBase(gl.GL_UNIFORM_BUFFER, self.MatrixUBO_BindingPoint, self._matrixUBO)
 
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 0, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_modelMatrix))
@@ -60,42 +64,49 @@ class RenderManager(Manager):
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 2 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_projectionMatrix))
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))  # MVP
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))  # MVP_IT
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 5 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV))  # MV
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 6 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV_IT))  # MV_IT
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_pos))  # camera world position
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + glm.sizeof(glm.vec3), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_dir))  # camera world forward direction
+
     def _init_defer_render(self):
-        self._default_gBuffer_shader = Shader("default_Gbuffer_shader",
-                                              os.path.join(SHADER_DIR, "default_Gbuffer_vs.glsl"),
-                                              os.path.join(SHADER_DIR, "default_Gbuffer_fs.glsl"))
+        self._default_gBuffer_shader = Shader.Default_GBuffer_Shader()
         '''For submit data to gBuffer'''
 
-        self._default_defer_render_shader = Shader("default_defer_render_shader",
-                                                    os.path.join(SHADER_DIR, "default_defer_render_vs.glsl"),
-                                                    os.path.join(SHADER_DIR, "default_defer_render_fs.glsl"))
+        self._default_defer_render_shader = Shader.Default_Defer_Shader()
         '''For render gBuffer data to screen'''
 
         winWidth, winHeight = self.engine.WindowManager.WindowSize
+
+        # color data (rgb)
         self._gBuffer_color = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_color)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB16F, winWidth, winHeight, 0, gl.GL_RGBA, gl.GL_FLOAT, None)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, winWidth, winHeight, 0, gl.GL_RGB, gl.GL_FLOAT, None) # color is rgb8f
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
 
+        # position data (x, y, z)
         self._gBuffer_pos = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_pos)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB16F, winWidth, winHeight, 0, gl.GL_RGBA, gl.GL_FLOAT, None)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB16F, winWidth, winHeight, 0, gl.GL_RGB, gl.GL_FLOAT, None) # position is rgb16f
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
 
+        # normal data (x, y, z)
         self._gBuffer_normal = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_normal)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB16F, winWidth, winHeight, 0, gl.GL_RGB, gl.GL_FLOAT, None)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, winWidth, winHeight, 0, gl.GL_RGB, gl.GL_FLOAT, None) # normal is rgb8f
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
 
+        # identifier
         self._gBuffer_id = gl.glGenTextures(1) # ivec3 id = (objID, uv_Xcoord, uv_Ycoord)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_id)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB16I, winWidth, winHeight, 0, gl.GL_RGB_INTEGER, gl.GL_INT, None)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB16I, winWidth, winHeight, 0, gl.GL_RGB_INTEGER, gl.GL_INT, None) # id is rgb16i
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
 
+        # depth data
         self._gBuffer_depth = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_depth)
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_DEPTH_COMPONENT, winWidth, winHeight, 0, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT, None)
@@ -112,6 +123,7 @@ class RenderManager(Manager):
         gl.glDrawBuffers(3, [gl.GL_COLOR_ATTACHMENT0, gl.GL_COLOR_ATTACHMENT1, gl.GL_COLOR_ATTACHMENT2, gl.GL_COLOR_ATTACHMENT3])
 
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+        self._default_defer_render_task = self._wrapDeferRenderTask()
     def _init_post_process(self, enableHDR=True, enableGammaCorrection=True, gamma=2.2, exposure=1.0, saturation=1.0, brightness=1.0, contrast=1.0):
         self._enableHDR = enableHDR
         self._enableGammaCorrection = enableGammaCorrection
@@ -121,9 +133,7 @@ class RenderManager(Manager):
         self._brightness = brightness
         self._contrast = contrast
 
-        default_post_process_vs_path = os.path.join(SHADER_DIR, 'default_post_process_vs.glsl')
-        default_post_process_fs_path = os.path.join(SHADER_DIR, 'default_post_process_fs.glsl')
-        self._default_post_process_shader = Shader("default_post_process", default_post_process_vs_path, default_post_process_fs_path)
+        self._default_post_process_shader = Shader.Default_Post_Shader()
         def final_draw():
             self._default_post_process_shader.setUniform("enableHDR", self._enableHDR)
             self._default_post_process_shader.setUniform("enableGammaCorrection", self._enableGammaCorrection)
@@ -136,17 +146,21 @@ class RenderManager(Manager):
             gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
             self.DrawScreen()
         self._final_draw = self._wrapPostProcessTask(self._default_post_process_shader, final_draw)
+        '''
+        _final_draw is actually a post renderring process but it is not in the post process list.
+        Default post process(hdr/gamma...) is applied here.
+        '''
 
         self._screenTexture_1 = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._screenTexture_1)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB16F, self.engine.WindowManager.WindowSize[0],
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA16F, self.engine.WindowManager.WindowSize[0],
                         self.engine.WindowManager.WindowSize[1], 0, gl.GL_RGBA, gl.GL_FLOAT, None)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
 
         self._screenTexture_2 = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._screenTexture_2)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB16F, self.engine.WindowManager.WindowSize[0],
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA16F, self.engine.WindowManager.WindowSize[0],
                         self.engine.WindowManager.WindowSize[1], 0, gl.GL_RGBA, gl.GL_FLOAT, None)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
@@ -184,13 +198,17 @@ class RenderManager(Manager):
         gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, 5 * 4, ctypes.c_void_p(3 * 4))
         gl.glBindVertexArray(0)
 
-        # self._quadShader = Shader("Default_Quad_Shader", DEFAULT_QUAD_VS_SHADER_PATH, DEFAULT_QUAD_FS_SHADER_PATH)
     def _draw_quad(self):
+        '''draw the screen quad with the current screen texture'''
         gl.glBindVertexArray(self._quadVAO)
         gl.glDrawElements(gl.GL_TRIANGLES, 6, gl.GL_UNSIGNED_INT, None)
         gl.glBindVertexArray(0)
 
     def _wrapRenderTask(self, task:callable=None, shader:Shader=None, mesh:Mesh=None):
+        '''
+        This wrapper will help setting the meshID as "objID" to the shader.
+        If task is not given, mesh.draw() will be called.
+        '''
         if task is None and mesh is None:
             raise ValueError("task and mesh cannot be both None")
         shader = shader or self._default_gBuffer_shader
@@ -201,6 +219,10 @@ class RenderManager(Manager):
             task() if task is not None else mesh.draw()
         return wrap
     def _wrapDeferRenderTask(self, shader=None, task=None):
+        '''
+        This wrapper help to bind the gBuffer textures to the shader(color, pos, normal, etc.).
+        if task is not given, it will draw the screen quad.
+        '''
         def _bindGtexture(slot, textureID, name):
             gl.glActiveTexture(gl.GL_TEXTURE0 + slot)
             gl.glBindTexture(gl.GL_TEXTURE_2D, textureID)
@@ -215,6 +237,10 @@ class RenderManager(Manager):
             task() if task is not None else self._draw_quad()
         return wrap
     def _wrapPostProcessTask(self, shader:Shader, task:callable=None):
+        '''
+        This wrapper helps to bind the last screen texture to the shader and draw a quad(if task is not given).
+        screen buffer texture will also be swapped after the task is done.
+        '''
         def wrap():
             shader.useProgram()
             gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self.CurrentScreenTexture, 0)
@@ -265,22 +291,44 @@ class RenderManager(Manager):
     @property
     def UBO_ProjMatrix(self):
         return self._UBO_projectionMatrix
+    @property
+    def UBO_CamPos(self):
+        return self._UBO_cam_pos
+    @property
+    def UBO_CamDir(self):
+        return self._UBO_cam_dir
+    def UpdateUBO_CamPos(self, camPos: glm.vec3):
+        self._UBO_cam_pos = camPos
+        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_pos))
+    def UpdateUBO_CamDir(self, camDir: glm.vec3):
+        self._UBO_cam_dir = camDir
+        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + glm.sizeof(glm.vec3), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_dir))
     def UpdateUBO_ModelMatrix(self, modelMatrix: glm.mat4):
         self._UBO_modelMatrix = modelMatrix
-        self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_viewMatrix * self._UBO_modelMatrix
+        self._UBO_MV = self._UBO_viewMatrix * self._UBO_modelMatrix
+        self._UBO_MV_IT = glm.transpose(glm.inverse(self._UBO_MV))
+        self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_MV
         self._UBO_MVP_IT = glm.transpose(glm.inverse(self._UBO_MVP))
         gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 0, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_modelMatrix))
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 5 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV))
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 6 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV_IT))
     def UpdateUBO_ViewMatrix(self, viewMatrix: glm.mat4):
         self._UBO_viewMatrix = viewMatrix
-        self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_viewMatrix * self._UBO_modelMatrix
+        self._UBO_MV = self._UBO_viewMatrix * self._UBO_modelMatrix
+        self._UBO_MV_IT = glm.transpose(glm.inverse(self._UBO_MV))
+        self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_MV
         self._UBO_MVP_IT = glm.transpose(glm.inverse(self._UBO_MVP))
         gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, glm.sizeof(glm.mat4), glm.sizeof(glm.mat4),  glm.value_ptr(self._UBO_viewMatrix))
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 5 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV))
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 6 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV_IT))
     def UpdateUBO_ProjMatrix(self, projectionMatrix: glm.mat4):
         self._UBO_projectionMatrix = projectionMatrix
         self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_viewMatrix * self._UBO_modelMatrix
@@ -289,7 +337,11 @@ class RenderManager(Manager):
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 2 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4),  glm.value_ptr(self._UBO_projectionMatrix))
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))
-    def printOpenGLError(self):
+
+    # endregion
+
+    # region opengl system
+    def PrintOpenGLError(self):
         try:
             gl.glGetError() # nothing to do with error, just clear error flag
         except Exception as e:
@@ -405,11 +457,10 @@ class RenderManager(Manager):
 
         # region SD
         # output data to SD
-        colorData = self._getTextureImg(self._gBuffer_color, gl.GL_RGBA, gl.GL_FLOAT, np.float32, 4)
-        posData = self._getTextureImg(self._gBuffer_pos, gl.GL_RGBA, gl.GL_FLOAT, np.float32, 4)
+        colorData = self._getTextureImg(self._gBuffer_color, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
+        posData = self._getTextureImg(self._gBuffer_pos, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
         normalData = self._getTextureImg(self._gBuffer_normal, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
-        # TODO: also output light info
-        idData = self._getTextureImg(self._gBuffer_id, gl.GL_RGB_INTEGER, gl.GL_INT, np.int32, 3)
+        idData = self._getTextureImg(self._gBuffer_id, gl.GL_RGB, gl.GL_INT, np.int32, 3)
         depthData = self._getTextureImg(self._gBuffer_depth, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT, np.float32, 1)
         # TODO: send these data to stable-diffusion, and get color data back
         print(idData.shape)
@@ -431,7 +482,10 @@ class RenderManager(Manager):
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._postProcessFBO) # output to post process FBO
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         # TODO: set light & view point uniforms
-        self._deferRenderTasks.execute(ignoreErr=True) # apply light effect here
+        if len(self._deferRenderTasks) >0:
+            self._deferRenderTasks.execute(ignoreErr=True) # apply light effect here
+        else:
+            self._default_defer_render_task()
 
         # defer render: render volume light
         gl.glEnable(gl.GL_DEPTH_TEST) # volume light need depth test

@@ -17,10 +17,7 @@ class DepthFunc(Enum):
 
 # region render
 class RenderOrder(Enum):
-    """
-    Render order of GameObjects.
-    Note that this is not a enum class.
-    """
+    """Render order of GameObjects"""
     OPAQUE = 1000
     TRANSPARENT = 2000
     OVERLAY = 3000

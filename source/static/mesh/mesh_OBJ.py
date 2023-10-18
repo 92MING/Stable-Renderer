@@ -119,3 +119,5 @@ class Mesh_OBJ(Mesh):
             raise Exception('Data is not sent to GPU')
         gl.glBindVertexArray(self.vao)
         gl.glDrawArrays(self.drawMode.value, 0, len(self.vertices) // self.vertexCount)
+
+__all__ = ['Mesh_OBJ']

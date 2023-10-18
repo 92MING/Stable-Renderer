@@ -29,3 +29,5 @@ class Texture_DDS(Texture):
     def clear(self):
         super().clear()
         self._dds = None
+
+__all__ = ['Texture_DDS']

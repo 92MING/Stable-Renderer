@@ -6,17 +6,24 @@ layout (std140) uniform Matrices {
 	mat4 projection;
 	mat4 MVP;
 	mat4 MVP_IT; // inverse transpose of MVP
+	mat4 MV; // model-view matrix
+	mat4 MV_IT; // inverse transpose of MV
+	vec3 cameraPos;
+	vec3 cameraDir;
 };
 layout (location = 0) in vec3 pos;
 layout (location = 1) in vec3 normal;
 layout (location = 2) in vec2 texcoord;
 
-out vec4 globalPos;
+out vec3 worldPos;
+out vec3 worldNormal;
 out vec2 vertexUV;
 
 void main()
 {
-	globalPos = model * vec4(pos, 1.0);
+	worldPos = (MV * vec4(pos, 1.0)).xyz;
+	worldNormal = normalize(MV_IT * vec4(normal, 0.0)).xyz;
 	vertexUV = texcoord;
-	gl_Position = globalPos;
+
+	gl_Position = MVP * vec4(pos, 1.0);
 }

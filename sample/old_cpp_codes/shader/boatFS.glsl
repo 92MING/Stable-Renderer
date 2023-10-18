@@ -55,7 +55,7 @@ void main()
     mat4 modelMatrix_IT = transpose(inverse(modelMatrix));
     vec3 worldNormal = (modelMatrix_IT * (texture2D(boatNormalTex, uv)* 2.0 -1.0)).xyz * 1.5 ;
     float textureLength = textureSize(direct_shadowMap, 0).x;
-    float texelLength = 1.0 / float(textureLength);
+        float texelLength = 1.0 / float(textureLength);
     vec3 viewDir = normalize(camPos - worldPos.xyz);
     vec4 baseColor_a = texture2D(boatDiffuseTex, uv);
     vec3 baseColor = baseColor_a.xyz;

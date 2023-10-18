@@ -64,3 +64,6 @@ class Scene(NamedObj):
         return f"<Scene {self.name}>"
     def __str__(self):
         return self.__repr__()
+
+
+__all__ = ['Scene']

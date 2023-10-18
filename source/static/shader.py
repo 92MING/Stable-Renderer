@@ -1,10 +1,15 @@
 from OpenGL.GL import *
 from utils.base_clses import NamedObj
 from .enums import ShaderType
-import glm
+import glm, os
+from utils.path_utils import SHADER_DIR
 from runtime.engineObj import EngineObj
 
 class Shader(NamedObj, EngineObj):
+
+    _Default_GBuffer_Shader = None
+    _Default_Defer_Shader = None
+    _Default_Post_Shader = None
 
     def __init__(self, name, vertex_source_path:str, fragment_source_path:str):
         super().__init__(name)
@@ -18,7 +23,7 @@ class Shader(NamedObj, EngineObj):
     def _init_shader(self, source:str, type:ShaderType):
         shaderID = glCreateShader(type.value)
         if shaderID == 0:
-            self.engine.RenderManager.printOpenGLError()
+            self.engine.RenderManager.PrintOpenGLError()
             raise RuntimeError(f'Failed to create shader {self.name}')
         glShaderSource(shaderID, source)
         glCompileShader(shaderID)
@@ -30,7 +35,7 @@ class Shader(NamedObj, EngineObj):
     def _init_program(self, v_shaderID, f_shaderID):
         program = glCreateProgram()
         if program == 0:
-            self.engine.RenderManager.printOpenGLError()
+            self.engine.RenderManager.PrintOpenGLError()
             raise RuntimeError(f'Failed to create program when initializing shader: {self.name}')
         glAttachShader(program, v_shaderID)
         glAttachShader(program, f_shaderID)
@@ -65,7 +70,7 @@ class Shader(NamedObj, EngineObj):
 
     def useProgram(self):
         if glUseProgram(self._programID):
-            self.engine.RenderManager.printOpenGLError()
+            self.engine.RenderManager.PrintOpenGLError()
 
     def getUniformID(self, name:str):
         return glGetUniformLocation(self._programID, name)
@@ -174,3 +179,27 @@ class Shader(NamedObj, EngineObj):
                 return glUniformMatrix4x3fv(val_id, 1, GL_FALSE, glm.value_ptr(value))
         else:
             raise TypeError("Invalid uniform type: {}".format(type(value)))
+
+    @classmethod
+    def Default_GBuffer_Shader(cls):
+        if cls._Default_GBuffer_Shader is None:
+            cls._default_gBuffer_shader = Shader("default_Gbuffer_shader",
+                                                  os.path.join(SHADER_DIR, "default_Gbuffer_vs.glsl"),
+                                                  os.path.join(SHADER_DIR, "default_Gbuffer_fs.glsl"))
+        return cls._Default_GBuffer_Shader
+    @classmethod
+    def Default_Defer_Shader(cls):
+        if cls._Default_Defer_Shader is None:
+            cls._Default_Defer_Shader = Shader("default_defer_render_shader",
+                                                os.path.join(SHADER_DIR, "default_defer_render_vs.glsl"),
+                                                os.path.join(SHADER_DIR, "default_defer_render_fs.glsl"))
+        return cls._Default_Defer_Shader
+    @classmethod
+    def Default_Post_Shader(cls):
+        if cls._Default_Post_Shader is None:
+            cls._Default_Post_Shader = Shader("default_post_process",
+                                              os.path.join(SHADER_DIR, 'default_post_process_vs.glsl'),
+                                              os.path.join(SHADER_DIR, 'default_post_process_fs.glsl'))
+        return cls._Default_Post_Shader
+
+__all__ = ['Shader']

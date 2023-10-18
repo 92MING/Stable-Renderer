@@ -118,6 +118,9 @@ class Component(EngineObj, metaclass=ComponentMeta):
     def gameObj(self)->'GameObject':
         return self._gameObj
     @property
+    def transform(self)->'Transform':
+        return self._gameObj.transform
+    @property
     def enable(self):
         return self._enable and self._gameObj.active
     @enable.setter
@@ -131,3 +134,5 @@ class Component(EngineObj, metaclass=ComponentMeta):
                     self._tryAwake()
                 else:
                     self.onDisable()
+
+__all__ = ['Component']

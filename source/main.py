@@ -1,31 +1,30 @@
 import os.path
-import glm
+from runtime.components import Camera, MeshRenderer
+from runtime.gameObj import GameObject
+from runtime.component import Component
 from runtime.engine import Engine
-from static.texture import Texture
-from static.shader import Shader
-from static.mesh import Mesh
+from static import Material, Mesh, Texture
 from utils.path_utils import RESOURCES_DIR
-import OpenGL.GL as gl
 
 if __name__ == '__main__':
+
+    class Boat(Component):
+        def update(self):
+            self.transform.rotateLocalY(0.1)
+
     class Sample(Engine):
         def beforePrepare(self):
-            boatDir = os.path.join(RESOURCES_DIR, 'boat')
-            self.boat = Mesh.Load(os.path.join(boatDir, 'boat.obj'))
-            self.boatShader = Shader('boat_shader',os.path.join(boatDir, 'boat_vs.glsl'), os.path.join(boatDir, 'boat_fs.glsl'))
-            self.boatDiffuseTex = Texture.Load(os.path.join(boatDir, 'boatColor.png'), 'boat_diffuse')
-            proj = glm.perspective(glm.radians(45.0), self.WindowManager.AspectRatio, 0.1, 1000.0)
-            view = glm.lookAt(glm.vec3(4, 4, -3), glm.vec3(0, 0, 0), glm.vec3(0, 1, 0))
-            self.RenderManager.UpdateUBO_ProjMatrix(proj)
-            self.RenderManager.UpdateUBO_ViewMatrix(view)
+            self.boatMesh = Mesh.Load(os.path.join(RESOURCES_DIR, 'boat', 'boat.obj'))
+            self.boatMaterial = Material.Default_Opaque_Material()
+            self.boatMaterial.addDiffuseMap(Texture.Load(os.path.join(RESOURCES_DIR, 'boat', 'boatColor.png')))
+            self.boatMaterial.addDiffuseMap(Texture.Load(os.path.join(RESOURCES_DIR, 'boat', 'boatNormal.png')))
 
-        def beforeFrameRun(self):
-            modelM = self.RenderManager.UBO_ModelMatrix
-            modelM = glm.rotate(modelM, glm.radians(0.05), glm.vec3(0.0, 1.0, 0.0))
-            self.RenderManager.UpdateUBO_ModelMatrix(modelM)
+            self.camera = GameObject('Camera', posiiton=[4, 4, -3])
+            self.camera.addComponent(Camera)
+            self.camera.transform.lookAt([0, 0, 0])
 
-            self.boatShader.useProgram()
-            self.boatDiffuseTex.bind(0, self.boatShader.getUniformID('boatDiffuseTex'))
-            self.boat.draw()
+            self.boat = GameObject('Boat', posiiton=[0, 0, 0])
+            self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, material=self.boatMaterial)
+            self.boat.addComponent(Boat)
 
     Sample().run()

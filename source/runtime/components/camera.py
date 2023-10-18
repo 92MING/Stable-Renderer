@@ -66,13 +66,14 @@ class Camera(Component):
 
     @property
     def _pos(self):
-        return self.gameObj.transform.globalPos
+        return self.transform.globalPos
     @property
     def _forward(self):
-        return self.gameObj.transform.forward
+        return self.transform.forward
     @property
     def _up(self):
-        return self.gameObj.transform.up
+        return self.transform.up
+
     @property
     def viewMatrix(self):
         return glm.lookAt(self._pos, self._pos + self._forward, self._up)
@@ -100,8 +101,15 @@ class Camera(Component):
         if self.isMainCamera:
             if self.engine.bgColor != self.bgColor:
                 self.engine.bgColor = self.bgColor
+            worldPos, worldForward = self.transform.globalPos, self.transform.forward
             viewMatrix, projectionMatrix = self.viewMatrix, self.projectionMatrix
             if self.engine.RenderManager.UBO_ViewMatrix != viewMatrix:
                 self.engine.RenderManager.UpdateUBO_ViewMatrix(viewMatrix)
             if self.engine.RenderManager.UBO_ProjMatrix != projectionMatrix:
                 self.engine.RenderManager.UpdateUBO_ProjMatrix(projectionMatrix)
+            if self.engine.RenderManager.UBO_CamPos != worldPos:
+                self.engine.RenderManager.UpdateUBO_CamPos(worldPos)
+            if self.engine.RenderManager.UBO_CamForward != worldForward:
+                self.engine.RenderManager.UpdateUBO_CamDir(worldForward)
+
+__all__ = ['Camera']
