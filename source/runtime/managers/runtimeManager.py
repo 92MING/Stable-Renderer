@@ -11,6 +11,7 @@ class RuntimeManager(Manager):
         super().__init__()
         self._fixedUpdateMaxFPS = fixedUpdateMaxFPS
         self._minFixedUpdateDeltaTime = 1.0 / fixedUpdateMaxFPS
+        self._frame_count = 0
         self._deltaTime = 0.0
         self._startTime = 0.0
         self._firstFrame = True
@@ -25,6 +26,9 @@ class RuntimeManager(Manager):
     @property
     def DeltaTime(self):
         return self._deltaTime
+    @property
+    def FrameCount(self):
+        return self._frame_count
 
     def _onFrameBegin(self):
         self._startTime = glfw.get_time()
@@ -38,5 +42,6 @@ class RuntimeManager(Manager):
         self._firstFrame = False
     def _onFrameEnd(self):
         self._deltaTime += (glfw.get_time() - self._startTime)
+        self._frame_count += 1
 
 __all__ = ['RuntimeManager']

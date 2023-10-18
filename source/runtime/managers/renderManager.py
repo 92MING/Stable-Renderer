@@ -466,24 +466,26 @@ class RenderManager(Manager):
             print('[DEBUG] Normal data is empty: ', np.array_equal(normalData, np.zeros_like(normalData)))
             print('[DEBUG] Id data is empty: ', np.array_equal(idData, np.zeros_like(idData)))
             print('[DEBUG] Depth data is empty: ', np.array_equal(depthData, np.zeros_like(depthData)))
-        
-        # flattened_color = np.ravel(colorData)
-        # non_zero_pos = np.nonzero(flattened_color)
-        # print(flattened_color[non_zero_pos.shape])
-        # outputDir = os.path.join(OUTPUT_DIR, 'temp')
-        color_img = Image.fromarray((colorData*255).astype(np.uint8), 'RGB')
-        color_img.save('color_img.png')
-        pos_img = Image.fromarray((posData * 255).astype(np.uint8), 'RGB')
-        pos_img.save('pos_img.png')
-        normal_img = Image.fromarray((normalData * 255).astype(np.uint8), 'RGB')
-        normal_img.save('normal_img.png')
-        id_img = Image.fromarray((idData * 255).astype(np.uint8), 'RGB')
-        id_img.save('id_img.png')
-        depth_data_max, depth_data_min = np.max(depthData), np.min(depthData)
-        depth_data_normalized = (depthData - np.ones_like(depthData) * depth_data_max) / (depth_data_max - depth_data_min)
-        depth_data_int8 = ((np.ones_like(depth_data_normalized)-depth_data_normalized) * 255).astype(np.uint8)
-        depth_img = Image.fromarray(np.squeeze(depth_data_int8), mode='L')
-        depth_img.save('depth_img.png')
+
+        if self.engine.RuntimeManager.FrameCount % self.engine.OutputManager.SaveMapPerNumFrame == 0:
+            color_img = Image.fromarray((colorData*255).astype(np.uint8), 'RGB')
+            color_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'color', f'color_img_{self.engine.RuntimeManager.FrameCount}.png'))
+
+            pos_img = Image.fromarray((posData * 255).astype(np.uint8), 'RGB')
+            pos_img.save(os.path.join(self.engine.OutputManager.OutputDir, f'pos/pos_img_{self.engine.RuntimeManager.FrameCount}.png'))
+
+            normal_img = Image.fromarray((normalData * 255).astype(np.uint8), 'RGB')
+            normal_img.save(os.path.join(self.engine.OutputManager.OutputDir, f'normal/normal_img_{self.engine.RuntimeManager.FrameCount}.png'))
+
+            id_img = Image.fromarray((idData * 255).astype(np.uint8), 'RGB')
+            id_img.save(os.path.join(self.engine.OutputManager.OutputDir,f'id/id_img_{self.engine.RuntimeManager.FrameCount}.png'))
+
+            depth_data_max, depth_data_min = np.max(depthData), np.min(depthData)
+            depth_data_normalized = (depthData - np.ones_like(depthData) * depth_data_max) / (depth_data_max - depth_data_min)
+            depth_data_int8 = ((np.ones_like(depth_data_normalized)-depth_data_normalized) * 255).astype(np.uint8)
+            depth_img = Image.fromarray(np.squeeze(depth_data_int8), mode='L')
+            depth_img.save(os.path.join(self.engine.OutputManager.OutputDir, f'depth/depth_img_{self.engine.RuntimeManager.FrameCount}.png'))
+
         # Code run normally until here, pending fixes for idData
         # get data back from SD
         # TODO: load the color data back to self._gBuffer_color texture, i.e. colorData = ...

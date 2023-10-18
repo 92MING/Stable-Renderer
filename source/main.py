@@ -27,5 +27,9 @@ if __name__ == '__main__':
             self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, material=self.boatMaterial)
             self.boat.addComponent(AutoRotation)
 
-    Sample.Run(enableGammaCorrection=True, debug=True)
+    Sample.Run(enableGammaCorrection=True,
+               debug=True,
+               output_dir='./tmp',
+               output_subfolders=['color', 'pos', 'normal', 'id', 'depth'],
+               save_map_per_num_frame=30)
     # Sample.Run(debug=True)

@@ -4,3 +4,4 @@ models
 *.png
 .DS_Store
 test.py
+*.zip
