@@ -12,6 +12,7 @@ from static.enums import RenderOrder
 from static.mesh import Mesh
 import glfw
 from typing import Union
+from PIL import Image
 
 class RenderManager(Manager):
     '''Manager of all rendering stuffs'''
@@ -270,6 +271,10 @@ class RenderManager(Manager):
         self._renderTasks._tempEvents.clear()
     def _getTextureImg(self, gTexBufferID, glFormat, glDataType, npDataType, channel_num)->np.ndarray:
         gl.glBindTexture(gl.GL_TEXTURE_2D, gTexBufferID)
+        # gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAX_LEVEL, 0)
+        # height = gl.glGetTexLevelParameteriv(gl.GL_TEXTURE_2D, 0, gl.GL_TEXTURE_HEIGHT)
+        # width = gl.glGetTexLevelParameteriv(gl.GL_TEXTURE_2D, 0, gl.GL_TEXTURE_WIDTH)
+        # array = np.zeros(width, height)
         data = gl.glGetTexImage(gl.GL_TEXTURE_2D, 0, glFormat, glDataType)
         data = np.frombuffer(data, dtype=npDataType)
         data = data.reshape((self.engine.WindowManager.WindowSize[1], self.engine.WindowManager.WindowSize[0], channel_num))
@@ -458,6 +463,7 @@ class RenderManager(Manager):
         depthData = self._getTextureImg(self._gBuffer_depth, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT, np.float32, 1)
         # TODO: send these data to stable-diffusion, and get color data back
 
+        # Code run normally until here, pending fixes for idData
         # get data back from SD
         # TODO: load the color data back to self._gBuffer_color texture, i.e. colorData = ...
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_color)
