@@ -472,19 +472,19 @@ class RenderManager(Manager):
             color_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'color', f'color_img_{self.engine.RuntimeManager.FrameCount}.png'))
 
             pos_img = Image.fromarray((posData * 255).astype(np.uint8), 'RGB')
-            pos_img.save(os.path.join(self.engine.OutputManager.OutputDir, f'pos/pos_img_{self.engine.RuntimeManager.FrameCount}.png'))
+            pos_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'pos', f'pos_img_{self.engine.RuntimeManager.FrameCount}.png'))
 
             normal_img = Image.fromarray((normalData * 255).astype(np.uint8), 'RGB')
-            normal_img.save(os.path.join(self.engine.OutputManager.OutputDir, f'normal/normal_img_{self.engine.RuntimeManager.FrameCount}.png'))
+            normal_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'normal', f'normal_img_{self.engine.RuntimeManager.FrameCount}.png'))
 
             id_img = Image.fromarray((idData * 255).astype(np.uint8), 'RGB')
-            id_img.save(os.path.join(self.engine.OutputManager.OutputDir,f'id/id_img_{self.engine.RuntimeManager.FrameCount}.png'))
+            id_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'id', f'id_img_{self.engine.RuntimeManager.FrameCount}.png'))
 
             depth_data_max, depth_data_min = np.max(depthData), np.min(depthData)
             depth_data_normalized = (depthData - np.ones_like(depthData) * depth_data_max) / (depth_data_max - depth_data_min)
             depth_data_int8 = ((np.ones_like(depth_data_normalized)-depth_data_normalized) * 255).astype(np.uint8)
             depth_img = Image.fromarray(np.squeeze(depth_data_int8), mode='L')
-            depth_img.save(os.path.join(self.engine.OutputManager.OutputDir, f'depth/depth_img_{self.engine.RuntimeManager.FrameCount}.png'))
+            depth_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'depth', f'depth_img_{self.engine.RuntimeManager.FrameCount}.png'))
 
         # Code run normally until here, pending fixes for idData
         # get data back from SD

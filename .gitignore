@@ -5,3 +5,4 @@ models
 .DS_Store
 test.py
 *.zip
+rendered_frames
