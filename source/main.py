@@ -28,4 +28,5 @@ if __name__ == '__main__':
             self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, material=self.boatMaterial)
             self.boat.addComponent(Boat)
 
-    Sample.Run()
+    #Sample.Run(debug=True)
+    Sample.Run(enableGammaCorrection=False)
