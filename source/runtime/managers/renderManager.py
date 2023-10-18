@@ -271,13 +271,10 @@ class RenderManager(Manager):
         self._renderTasks._tempEvents.clear()
     def _getTextureImg(self, gTexBufferID, glFormat, glDataType, npDataType, channel_num)->np.ndarray:
         gl.glBindTexture(gl.GL_TEXTURE_2D, gTexBufferID)
-        # gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAX_LEVEL, 0)
-        # height = gl.glGetTexLevelParameteriv(gl.GL_TEXTURE_2D, 0, gl.GL_TEXTURE_HEIGHT)
-        # width = gl.glGetTexLevelParameteriv(gl.GL_TEXTURE_2D, 0, gl.GL_TEXTURE_WIDTH)
-        # array = np.zeros(width, height)
         data = gl.glGetTexImage(gl.GL_TEXTURE_2D, 0, glFormat, glDataType)
         data = np.frombuffer(data, dtype=npDataType)
         data = data.reshape((self.engine.WindowManager.WindowSize[1], self.engine.WindowManager.WindowSize[0], channel_num))
+        data = data[::-1, :, :] # flip array upside down
         return data
     # endregion
 
@@ -447,12 +444,6 @@ class RenderManager(Manager):
     # endregion
 
     # region run
-    def _onFrameRun_debug(self):
-        '''This func will run when debug=True instead of _onFrameRun()'''
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
-        gl.glEnable(gl.GL_DEPTH_TEST)
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-        self._excute_render_task()  # depth test will be enabled in this function
     def _onFrameRun(self):
         # normal render
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._gBuffer)
@@ -469,22 +460,30 @@ class RenderManager(Manager):
         depthData = self._getTextureImg(self._gBuffer_depth, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT, np.float32, 1)
         # TODO: send these data to stable-diffusion, and get color data back
 
-        print('[DEBUG] Color data is empty: ', np.array_equal(colorData, np.zeros_like(colorData)))
-        print('[DEBUG] Pos data is empty: ', np.array_equal(posData, np.zeros_like(posData)))
-        print('[DEBUG] Normal data is empty: ', np.array_equal(normalData, np.zeros_like(normalData)))
-        print('[DEBUG] Id data is empty: ', np.array_equal(idData, np.zeros_like(idData)))
-        print('[DEBUG] Depth data is empty: ', np.array_equal(depthData, np.zeros_like(depthData)))
-        # color_img = Image.fromarray(colorData, 'RGB')
-        # color_img.save('color_img.png')
-        # pos_img = Image.fromarray(posData, 'RGB')
-        # pos_img.save('pos_img.png')
-        # normal_img = Image.fromarray(normalData, 'RGB')
-        # normal_img.save('normal_img.png')
-        # id_img = Image.fromarray(idData, 'RGB')
-        # id_img.save('id_img.png')
-        # depth_img = Image.fromarray(depthData, 'RGB')
-        # depth_img.save('depth_img.png')
-
+        if self.engine.IsDebugMode:
+            print('[DEBUG] Color data is empty: ', np.array_equal(colorData, np.zeros_like(colorData)))
+            print('[DEBUG] Pos data is empty: ', np.array_equal(posData, np.zeros_like(posData)))
+            print('[DEBUG] Normal data is empty: ', np.array_equal(normalData, np.zeros_like(normalData)))
+            print('[DEBUG] Id data is empty: ', np.array_equal(idData, np.zeros_like(idData)))
+            print('[DEBUG] Depth data is empty: ', np.array_equal(depthData, np.zeros_like(depthData)))
+        
+        # flattened_color = np.ravel(colorData)
+        # non_zero_pos = np.nonzero(flattened_color)
+        # print(flattened_color[non_zero_pos.shape])
+        # outputDir = os.path.join(OUTPUT_DIR, 'temp')
+        color_img = Image.fromarray((colorData*255).astype(np.uint8), 'RGB')
+        color_img.save('color_img.png')
+        pos_img = Image.fromarray((posData * 255).astype(np.uint8), 'RGB')
+        pos_img.save('pos_img.png')
+        normal_img = Image.fromarray((normalData * 255).astype(np.uint8), 'RGB')
+        normal_img.save('normal_img.png')
+        id_img = Image.fromarray((idData * 255).astype(np.uint8), 'RGB')
+        id_img.save('id_img.png')
+        depth_data_max, depth_data_min = np.max(depthData), np.min(depthData)
+        depth_data_normalized = (depthData - np.ones_like(depthData) * depth_data_max) / (depth_data_max - depth_data_min)
+        depth_data_int8 = ((np.ones_like(depth_data_normalized)-depth_data_normalized) * 255).astype(np.uint8)
+        depth_img = Image.fromarray(np.squeeze(depth_data_int8), mode='L')
+        depth_img.save('depth_img.png')
         # Code run normally until here, pending fixes for idData
         # get data back from SD
         # TODO: load the color data back to self._gBuffer_color texture, i.e. colorData = ...

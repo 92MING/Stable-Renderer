@@ -3,3 +3,4 @@ __pycache__
 models
 *.png
 .DS_Store
+test.py

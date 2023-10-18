@@ -7,7 +7,6 @@ from static import Material, Mesh, Texture
 from utils.path_utils import RESOURCES_DIR
 
 if __name__ == '__main__':
-
     class AutoRotation(Component):
         def update(self):
             self.transform.rotateLocalY(0.1)
@@ -15,8 +14,8 @@ if __name__ == '__main__':
     class Sample(Engine):
         def beforePrepare(self):
             self.boatMesh = Mesh.Load(os.path.join(RESOURCES_DIR, 'boat', 'boat.obj'))
-            #self.boatMaterial = Material.Debug_Material()
             self.boatMaterial = Material.Default_Opaque_Material()
+            # self.boatMaterial = Material.Debug_Material()
             self.boatMaterial.addDiffuseMap(Texture.Load(os.path.join(RESOURCES_DIR, 'boat', 'boatColor.png')))
             self.boatMaterial.addNormalMap(Texture.Load(os.path.join(RESOURCES_DIR, 'boat', 'boatNormal.png')))
 
@@ -28,5 +27,5 @@ if __name__ == '__main__':
             self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, material=self.boatMaterial)
             self.boat.addComponent(AutoRotation)
 
-    #Sample.Run(debug=True)
-    Sample.Run(enableGammaCorrection=False)
+    Sample.Run(enableGammaCorrection=True, debug=True)
+    # Sample.Run(debug=True)
