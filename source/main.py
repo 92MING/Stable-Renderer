@@ -8,7 +8,7 @@ from utils.path_utils import RESOURCES_DIR
 
 if __name__ == '__main__':
 
-    class Boat(Component):
+    class AutoRotation(Component):
         def update(self):
             self.transform.rotateLocalY(0.1)
 
@@ -26,7 +26,7 @@ if __name__ == '__main__':
 
             self.boat = GameObject('Boat', position=[0, 0, 0])
             self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, material=self.boatMaterial)
-            self.boat.addComponent(Boat)
+            self.boat.addComponent(AutoRotation)
 
     #Sample.Run(debug=True)
     Sample.Run(enableGammaCorrection=False)
