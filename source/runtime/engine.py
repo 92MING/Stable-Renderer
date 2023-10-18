@@ -38,7 +38,11 @@ class Engine:
                  saturation=1.0,
                  brightness=1.0,
                  contrast=1.0,
-                 debug=False,):
+                 debug=False,
+                 output_dir="./tmp",
+                 output_subfolders=None,
+                 save_map_per_num_frame=30):
+
         self.AcceptedPrint('Engine is initializing...')
         self._debug = debug
         self._scene = scene
@@ -49,6 +53,7 @@ class Engine:
         else:
             title = 'Stable Renderer'
 
+        # region managers
         self._windowManager = WindowManager(title, winSize, windowResizable, bgColor)
         self._inputManager = InputManager(self._windowManager.Window)
         self._runtimeManager = RuntimeManager()
@@ -56,6 +61,7 @@ class Engine:
                                             saturation=saturation, brightness=brightness, contrast=contrast,)
         self._sceneManager = SceneManager(self._scene)
         self._resourceManager = ResourcesManager()
+        self._outputManager = OutputManager(output_dir=output_dir, output_subfolders=output_subfolders, save_map_per_num_frame=save_map_per_num_frame)
         # endregion
 
     # region debug
@@ -116,6 +122,9 @@ class Engine:
     @property
     def ResourcesManager(self)->ResourcesManager:
         return self._resourceManager
+    @property
+    def OutputManager(self)->OutputManager:
+        return self._outputManager
     # endregion
 
     # region overridable methods

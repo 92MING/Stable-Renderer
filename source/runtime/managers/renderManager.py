@@ -274,6 +274,7 @@ class RenderManager(Manager):
         data = gl.glGetTexImage(gl.GL_TEXTURE_2D, 0, glFormat, glDataType)
         data = np.frombuffer(data, dtype=npDataType)
         data = data.reshape((self.engine.WindowManager.WindowSize[1], self.engine.WindowManager.WindowSize[0], channel_num))
+        data = data[::-1, :, :] # flip array upside down
         return data
     # endregion
 
@@ -443,12 +444,6 @@ class RenderManager(Manager):
     # endregion
 
     # region run
-    def _onFrameRun_debug(self):
-        '''This func will run when debug=True instead of _onFrameRun()'''
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
-        gl.glEnable(gl.GL_DEPTH_TEST)
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-        self._excute_render_task()  # depth test will be enabled in this function
     def _onFrameRun(self):
         # normal render
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._gBuffer)
@@ -469,6 +464,32 @@ class RenderManager(Manager):
         #image = Image.fromarray(_colorData, 'RGB')
         #image.save(os.path.join(outputDir, 'color.png'))
         # TODO: send these data to stable-diffusion, and get color data back
+
+        if self.engine.IsDebugMode:
+            print('[DEBUG] Color data is empty: ', np.array_equal(colorData, np.zeros_like(colorData)))
+            print('[DEBUG] Pos data is empty: ', np.array_equal(posData, np.zeros_like(posData)))
+            print('[DEBUG] Normal data is empty: ', np.array_equal(normalData, np.zeros_like(normalData)))
+            print('[DEBUG] Id data is empty: ', np.array_equal(idData, np.zeros_like(idData)))
+            print('[DEBUG] Depth data is empty: ', np.array_equal(depthData, np.zeros_like(depthData)))
+
+        if self.engine.RuntimeManager.FrameCount % self.engine.OutputManager.SaveMapPerNumFrame == 0:
+            color_img = Image.fromarray((colorData*255).astype(np.uint8), 'RGB')
+            color_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'color', f'color_img_{self.engine.RuntimeManager.FrameCount}.png'))
+
+            pos_img = Image.fromarray((posData * 255).astype(np.uint8), 'RGB')
+            pos_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'pos', f'pos_img_{self.engine.RuntimeManager.FrameCount}.png'))
+
+            normal_img = Image.fromarray((normalData * 255).astype(np.uint8), 'RGB')
+            normal_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'normal', f'normal_img_{self.engine.RuntimeManager.FrameCount}.png'))
+
+            id_img = Image.fromarray((idData * 255).astype(np.uint8), 'RGB')
+            id_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'id', f'id_img_{self.engine.RuntimeManager.FrameCount}.png'))
+
+            depth_data_max, depth_data_min = np.max(depthData), np.min(depthData)
+            depth_data_normalized = (depthData - np.ones_like(depthData) * depth_data_max) / (depth_data_max - depth_data_min)
+            depth_data_int8 = ((np.ones_like(depth_data_normalized)-depth_data_normalized) * 255).astype(np.uint8)
+            depth_img = Image.fromarray(np.squeeze(depth_data_int8), mode='L')
+            depth_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'depth', f'depth_img_{self.engine.RuntimeManager.FrameCount}.png'))
 
         # Code run normally until here, pending fixes for idData
         # get data back from SD
