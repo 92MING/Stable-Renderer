@@ -1,9 +1,10 @@
 from utils.global_utils import GetOrAddGlobalValue, GetGlobalValue
-import time
 
 _MANAGERS = GetOrAddGlobalValue('_ENGINE_MANAGERS', set())
 _MANAGER_FUNCS = GetOrAddGlobalValue('_ENGINE_MANAGER_FUNCS', dict())
 class Manager:
+
+    _engine = None
 
     _PrepareFuncOrder = 0
     _ReleaseFuncOrder = 0
@@ -31,6 +32,16 @@ class Manager:
     def _onFrameEnd(self):
         '''Will be called after "_onFrameRun"'''
         pass
+    def _onFrameBegin_debug(self):
+        '''In debug mode, this function will be called instead of "_onFrameBegin".'''
+        self._onFrameBegin() # override this function to debug
+    def _onFrameRun_debug(self):
+        '''In debug mode, this function will be called instead of "_onFrameRun".'''
+        self._onFrameRun()
+    def _onFrameEnd_debug(self):
+        '''In debug mode, this function will be called instead of "_onFrameEnd".'''
+        self._onFrameEnd()
+
     def _prepare(self):
         '''Prepare will be call before the loop begins.'''
         pass
@@ -40,7 +51,9 @@ class Manager:
 
     @property
     def engine(self)->'Engine':
-        return GetGlobalValue('_ENGINE_SINGLETON')
+        if self._engine is None:
+            self._engine = GetGlobalValue('_ENGINE_SINGLETON')
+        return self._engine
 
     @staticmethod
     def _RunPrepare():
@@ -57,7 +70,7 @@ class Manager:
             _MANAGER_FUNCS['begin'] = sorted(_MANAGERS, key=lambda m: m._FrameBeginFuncOrder)
         for manager in _MANAGER_FUNCS['begin']:
             try:
-                manager._onFrameBegin()
+                manager._onFrameBegin() if not manager.engine.IsDebugMode else manager._onFrameBegin_debug()
             except Exception as e:
                 print(f'Warning: Error when running "_onFrameBegin" of {manager.__class__.__qualname__}. Err msg: {e}')
     @staticmethod
@@ -66,7 +79,7 @@ class Manager:
             _MANAGER_FUNCS['run'] = sorted(_MANAGERS, key=lambda m: m._FrameRunFuncOrder)
         for manager in _MANAGER_FUNCS['run']:
             try:
-                manager._onFrameRun()
+                manager._onFrameRun() if not manager.engine.IsDebugMode else manager._onFrameRun_debug()
             except Exception as e:
                 print(f'Warning: Error when running "_onFrameRun" of {manager.__class__.__qualname__}. Err msg: {e}')
     @staticmethod
@@ -75,7 +88,7 @@ class Manager:
             _MANAGER_FUNCS['end'] = sorted(_MANAGERS, key=lambda m: m._FrameEndFuncOrder)
         for manager in _MANAGER_FUNCS['end']:
             try:
-                manager._onFrameEnd()
+                manager._onFrameEnd() if not manager.engine.IsDebugMode else manager._onFrameEnd_debug()
             except Exception as e:
                 print(f'Warning: Error when running "_onFrameEnd" of {manager.__class__.__qualname__}.Err msg: {e}')
     @staticmethod

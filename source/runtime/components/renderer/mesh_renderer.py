@@ -27,4 +27,5 @@ class MeshRenderer(Renderer):
     def _drawAvailable(self):
         return super()._drawAvailable() and self._mesh is not None
 
+
 __all__ = ['MeshRenderer']

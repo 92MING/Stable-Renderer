@@ -1,5 +1,5 @@
 // default post processing FS
-#version 330
+#version 330 core
 
 in vec2 uv;
 uniform sampler2D screenTexture;

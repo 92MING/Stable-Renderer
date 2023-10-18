@@ -7,12 +7,22 @@ from typing import Union
 
 class Material(EngineObj, NamedObj):
 
+    # region default materials
     _Default_Opaque_Material = None
+    _Debug_Material = None
     @classmethod
     def Default_Opaque_Material(cls):
+        '''Default opaque material with default shader.'''
         if cls._Default_Opaque_Material is None:
             cls._Default_Opaque_Material = Material('Default_Opaque_Material', Shader.Default_GBuffer_Shader())
         return cls._Default_Opaque_Material
+    @classmethod
+    def Debug_Material(cls):
+        '''Debug material with default shader.'''
+        if cls._Debug_Material is None:
+            cls._Debug_Material = Material('Debug_Material', Shader.Debug_Shader())
+        return cls._Debug_Material
+    # endregion
 
     def __init__(self, name, shader:Shader=Shader, order:Union[RenderOrder, int]=RenderOrder.OPAQUE):
         NamedObj.__init__(self, name)
@@ -38,17 +48,18 @@ class Material(EngineObj, NamedObj):
         :param name: the name is the uniform name in shader
         :param texture: texture object
         :param order: the uniform order in shader. If None, the order will be the last one
-        :param replace: if True, the texture will replace the existing one with the same order
+        :param replace: if True, the texture will replace the existing one with the same order or name
         '''
+        if name in self._textures and not replace:
+            raise RuntimeError(f'Texture {name} already exists in material {self.name}. Please remove it first.')
         if order is None:
             order = len(self._textures)
-        for name, texture_order in self._textures.items():
-            _, order = texture_order
-            if order == order:
+        for other_name, (other_texture, other_order) in self._textures.items():
+            if order == other_order:
                 if not replace:
                     raise RuntimeError(f'Order {order} already exists in material {self.name}. Please remove it first.')
                 else:
-                    self._textures.pop(name)
+                    self._textures.pop(other_name)
                     break
         self._textures[name] = (texture, order)
     def removeTexture(self, name:str):
@@ -72,6 +83,6 @@ class Material(EngineObj, NamedObj):
         textures = [(name, tex, order) for name, (tex, order) in self._textures.items()]
         textures.sort(key=lambda x: x[2])
         for i, (name, tex, shader) in enumerate(textures):
-            tex.bind(i, name)
+            tex.bind(i, self._shader.getUniformID(name))
 
 __all__ = ['Material']

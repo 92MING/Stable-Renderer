@@ -3,17 +3,20 @@ from .renderManager import RenderManager
 from utils.data_struct import DelayEvent, Event
 import glfw
 import OpenGL.GL as gl
+from static import Color
 
 class WindowManager(Manager):
 
     _FrameEndFuncOrder = RenderManager._FrameEndFuncOrder + 1 # swap buffer should be called after render
     _ReleaseFuncOrder = 999 # terminate glfw should be called at the end
 
-    def __init__(self, title, size, windowResizable = False):
+    def __init__(self, title, size, windowResizable = False, bgColor=Color.CLEAR):
         super().__init__()
+        self._bgColor = bgColor
         self._init_glfw(title, size, windowResizable)
         self._onWindowResize = DelayEvent(int, int)
         self._onWindowResize.addListener(lambda width, height: gl.glViewport(0, 0, width, height))
+        gl.glClearColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a)
 
     def _init_glfw(self, winTitle, winSize, winResizable):
         self._title = winTitle
@@ -44,6 +47,14 @@ class WindowManager(Manager):
     def _release(self):
         glfw.terminate()
 
+    # region properties
+    @property
+    def BgColor(self):
+        return self._bgColor
+    @BgColor.setter
+    def BgColor(self, value:Color):
+        self._bgColor = value
+        gl.glClearColor(value.r, value.g, value.b, value.a)
     @property
     def WindowResizable(self):
         return self._resizable
@@ -78,5 +89,7 @@ class WindowManager(Manager):
     @property
     def AspectRatio(self):
         return self._size[0] / self._size[1]
+    # endregion
+
 
 __all__ = ['WindowManager']

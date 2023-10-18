@@ -36,7 +36,7 @@ class RenderManager(Manager):
         self._init_defer_render() # framebuffers for post-processing
         self._init_post_process(enableHDR=enableHDR, enableGammaCorrection=enableGammaCorrection, gamma=gamma, exposure=exposure,
                                 saturation=saturation, brightness=brightness, contrast=contrast)
-        self._init_draw_quad() # quad for post-processing
+        self._init_quad() # quad for post-processing
 
     # region private
     def _init_opengl(self):
@@ -120,8 +120,9 @@ class RenderManager(Manager):
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT2, gl.GL_TEXTURE_2D, self._gBuffer_normal, 0)
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT3, gl.GL_TEXTURE_2D, self._gBuffer_id, 0)
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_DEPTH_ATTACHMENT, gl.GL_TEXTURE_2D, self._gBuffer_depth, 0)
-        gl.glDrawBuffers(3, [gl.GL_COLOR_ATTACHMENT0, gl.GL_COLOR_ATTACHMENT1, gl.GL_COLOR_ATTACHMENT2, gl.GL_COLOR_ATTACHMENT3])
-
+        gl.glDrawBuffers(4, [gl.GL_COLOR_ATTACHMENT0, gl.GL_COLOR_ATTACHMENT1, gl.GL_COLOR_ATTACHMENT2, gl.GL_COLOR_ATTACHMENT3])
+        if (gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER) != gl.GL_FRAMEBUFFER_COMPLETE):
+            raise Exception("G-Framebuffer is not complete! Some error occured.")
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
         self._default_defer_render_task = self._wrapDeferRenderTask()
     def _init_post_process(self, enableHDR=True, enableGammaCorrection=True, gamma=2.2, exposure=1.0, saturation=1.0, brightness=1.0, contrast=1.0):
@@ -171,7 +172,7 @@ class RenderManager(Manager):
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._postProcessFBO)
         gl.glDrawBuffer(gl.GL_COLOR_ATTACHMENT0)
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
-    def _init_draw_quad(self):
+    def _init_quad(self):
         self._quadVertices = np.array([
             -1.0, 1.0, 0.0, 0.0, 1.0,  # Left Top
             -1.0, -1.0, 0.0, 0.0, 0.0,  # Left Bottom
@@ -331,21 +332,13 @@ class RenderManager(Manager):
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 6 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV_IT))
     def UpdateUBO_ProjMatrix(self, projectionMatrix: glm.mat4):
         self._UBO_projectionMatrix = projectionMatrix
-        self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_viewMatrix * self._UBO_modelMatrix
+        self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_MV
         self._UBO_MVP_IT = glm.transpose(glm.inverse(self._UBO_MVP))
         gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 2 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4),  glm.value_ptr(self._UBO_projectionMatrix))
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))
 
-    # endregion
-
-    # region opengl system
-    def PrintOpenGLError(self):
-        try:
-            gl.glGetError() # nothing to do with error, just clear error flag
-        except Exception as e:
-            print('GL ERROR: ', e)
     # endregion
 
     # region post process
@@ -468,9 +461,7 @@ class RenderManager(Manager):
         # get data back from SD
         # TODO: load the color data back to self._gBuffer_color texture, i.e. colorData = ...
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_color)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB,
-                        self.engine.WindowManager.WindowSize[0], self.engine.WindowManager.WindowSize[1],
-                        0, gl.GL_RGB, gl.GL_FLOAT, colorData.tobytes())
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, self.engine.WindowManager.WindowSize[0], self.engine.WindowManager.WindowSize[1], 0, gl.GL_RGB, gl.GL_FLOAT, colorData.tobytes())
         # TODO: update color pixel datas, i.e. pixelDict[id] = (oldColor *a + newColor *b), newColor = inverse light intensity of the pixel color
         # TODO: replace corresponding color pixel datas with color data from color dict
         # endregion
@@ -479,29 +470,15 @@ class RenderManager(Manager):
         # defer render: normal light effect apply
         gl.glDisable(gl.GL_DEPTH_TEST)
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._postProcessFBO) # output to post process FBO
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT)
-        # TODO: set light & view point uniforms
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self.CurrentScreenTexture, 0)
         if len(self._deferRenderTasks) >0:
             self._deferRenderTasks.execute(ignoreErr=True) # apply light effect here
         else:
             self._default_defer_render_task()
 
-        # defer render: render volume light
-        gl.glEnable(gl.GL_DEPTH_TEST) # volume light need depth test
-        gl.glBindFramebuffer(gl.GL_READ_FRAMEBUFFER, self._gBuffer)  # read color buffer & depth buffer from gBuffer
-        gl.glBindFramebuffer(gl.GL_DRAW_FRAMEBUFFER, self._postProcessFBO)  # write color buffer to post process frame buffer
-        gl.glBlitFramebuffer(0, 0, self.engine.WindowManager.WindowSize[0], self.engine.WindowManager.WindowSize[1],
-                              0, 0, self.engine.WindowManager.WindowSize[0], self.engine.WindowManager.WindowSize[1],
-                              gl.GL_DEPTH_BUFFER_BIT, gl.GL_NEAREST)
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._postProcessFBO) # output to post process FBO
-        # TODO: use volume light shader to render volume light
-        # endregion
-
         # post process
         gl.glDisable(gl.GL_DEPTH_TEST) # post process don't need depth test
         self._postProcessTasks.execute(ignoreErr=True)
-
-        # final draw
         self._final_draw() # default post process shader is used here. Will also bind to FBO 0(screen)
 
     def _onFrameEnd(self):

@@ -50,6 +50,9 @@ class Camera(Component):
                 if cam is not self:
                     if cam.set_as_main_camera():
                         break
+    def onEnable(self):
+        if Camera._Main_Camera is None:
+            self.set_as_main_camera()
 
     @property
     def isMainCamera(self):
@@ -57,7 +60,7 @@ class Camera(Component):
     def set_as_main_camera(self)->bool:
         '''
         Set this camera as the main camera. Return True if success, otherwise return False.
-        :return: bool
+        :return: bool - whether this camera is set as the main camera
         '''
         if not self.enable:
             return False
@@ -65,23 +68,17 @@ class Camera(Component):
         return True
 
     @property
-    def _pos(self):
-        return self.transform.globalPos
-    @property
-    def _forward(self):
-        return self.transform.forward
-    @property
-    def _up(self):
-        return self.transform.up
-
-    @property
     def viewMatrix(self):
-        return glm.lookAt(self._pos, self._pos + self._forward, self._up)
+        pos = self.transform.globalPos
+        forward = self.transform.forward
+        up = self.transform.up
+        return glm.lookAt(pos, pos + forward, up)
     @property
     def projectionMatrix(self):
         if self.projection_type == ProjectionType.PERSPECTIVE:
+            fov = glm.radians(self.fov)
             return glm.perspective(
-                self.fov,
+                fov,
                 self.engine.WindowManager.AspectRatio,
                 self.near_plane,
                 self.far_plane,
@@ -99,8 +96,8 @@ class Camera(Component):
 
     def lateUpdate(self):
         if self.isMainCamera:
-            if self.engine.bgColor != self.bgColor:
-                self.engine.bgColor = self.bgColor
+            if self.engine.WindowManager.BgColor != self.bgColor:
+                self.engine.WindowManager.BgColor = self.bgColor
             worldPos, worldForward = self.transform.globalPos, self.transform.forward
             viewMatrix, projectionMatrix = self.viewMatrix, self.projectionMatrix
             if self.engine.RenderManager.UBO_ViewMatrix != viewMatrix:
@@ -109,7 +106,7 @@ class Camera(Component):
                 self.engine.RenderManager.UpdateUBO_ProjMatrix(projectionMatrix)
             if self.engine.RenderManager.UBO_CamPos != worldPos:
                 self.engine.RenderManager.UpdateUBO_CamPos(worldPos)
-            if self.engine.RenderManager.UBO_CamForward != worldForward:
+            if self.engine.RenderManager.UBO_CamDir != worldForward:
                 self.engine.RenderManager.UpdateUBO_CamDir(worldForward)
 
 __all__ = ['Camera']

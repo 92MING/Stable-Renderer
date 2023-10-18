@@ -1,11 +1,8 @@
-import OpenGL.error
-import glfw
-import numpy as np
-
 from static.resourcesObj import ResourcesObj
-import os, time
+import os
 from PIL import Image
 from static.enums import *
+from utils.decorator import Overload
 
 class Texture(ResourcesObj):
     _BaseName = 'Texture'
@@ -88,16 +85,22 @@ class Texture(ResourcesObj):
         self._t_wrap = value
     # endregion
 
+    @Overload
     def bind(self, slot:int, uniformID):
         '''
         Bind texture to a slot and set shader uniform.
-        Make sure u have used shader before calling this function.
+        Make sure you have used shader before calling this function.
         '''
         if self._texID is None:
             raise Exception('Texture is not yet sent to GPU. Cannot bind.')
         gl.glActiveTexture(gl.GL_TEXTURE0 + slot)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._texID)
         gl.glUniform1i(uniformID, slot)
+    @Overload
+    def bind(self, slot:int, name:str, shader:'Shader'):
+        '''Use shader, and bind texture to a slot and set shader uniform with your given name.'''
+        shader.useProgram()
+        self.bind(slot, shader.getUniformID(name))
 
     def load(self, path):
         '''Default load by PIL'''

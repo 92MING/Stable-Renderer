@@ -7,7 +7,7 @@ class Mesh(ResourcesObj):
 
     def __init__(self, name):
         super().__init__(name)
-        currentID = GetOrAddGlobalValue('_MeshCount', 0)
+        currentID = GetOrAddGlobalValue('_MeshCount', 1) # 0 is reserved
         self._meshID = currentID # for corresponding map
         SetGlobalValue('_MeshCount', currentID+1)
 

@@ -1,9 +1,13 @@
-import glfw, time
+import glfw
 from utils.global_utils import *
 from static.scene import *
 import numpy as np
 np.set_printoptions(suppress=True)
 from runtime.managers import *
+import OpenGL.GL as gl
+import OpenGL.GLU as glu
+from colorama import Fore, Style
+from static import Color
 
 _engine_singleton = GetOrAddGlobalValue("_ENGINE_SINGLETON", None)
 class Engine:
@@ -26,14 +30,17 @@ class Engine:
                  winTitle=None,
                  winSize=(1080, 720),
                  windowResizable=False,
+                 bgColor=Color.CLEAR,
                  enableHDR=True,
                  enableGammaCorrection=True,
                  gamma=2.2,
                  exposure=1.0,
                  saturation=1.0,
                  brightness=1.0,
-                 contrast=1.0,):
-
+                 contrast=1.0,
+                 debug=False,):
+        self.AcceptedPrint('Engine is initializing...')
+        self._debug = debug
         self._scene = scene
         if winTitle is not None:
             title = winTitle
@@ -42,7 +49,7 @@ class Engine:
         else:
             title = 'Stable Renderer'
 
-        self._windowManager = WindowManager(title, winSize, windowResizable)
+        self._windowManager = WindowManager(title, winSize, windowResizable, bgColor)
         self._inputManager = InputManager(self._windowManager.Window)
         self._runtimeManager = RuntimeManager()
         self._renderManager = RenderManager(enableHDR=enableHDR, enableGammaCorrection=enableGammaCorrection, gamma=gamma, exposure=exposure,
@@ -51,6 +58,42 @@ class Engine:
         self._resourceManager = ResourcesManager()
         # endregion
 
+    # region debug
+    @property
+    def IsDebugMode(self):
+        return self._debug
+    @IsDebugMode.setter
+    def IsDebugMode(self, value):
+        self._debug = value
+
+    def PrintOpenGLError(self):
+        try:
+            gl.glGetError() # nothing to do with error, just clear error flag
+        except Exception as e:
+            print('GL ERROR: ', glu.gluErrorString(e))
+    def WarningPrint(self, *args, **kwargs):
+        '''Print as yellow and bold text.'''
+        print(Fore.YELLOW + Style.BRIGHT, end='')
+        print(*args, **kwargs)
+        print(Style.RESET_ALL, end='')
+    def ErrorPrint(self, *args, **kwargs):
+        '''Print as red and bold text.'''
+        print(Fore.RED + Style.BRIGHT, end='')
+        print(*args, **kwargs)
+        print(Style.RESET_ALL, end='')
+    def InfoPrint(self, *args, **kwargs):
+        '''Print as blue and bold text.'''
+        print(Fore.BLUE + Style.BRIGHT, end='')
+        print(*args, **kwargs)
+        print(Style.RESET_ALL, end='')
+    def AcceptedPrint(self, *args, **kwargs):
+        '''Print as green and bold text.'''
+        print(Fore.GREEN + Style.BRIGHT, end='')
+        print(*args, **kwargs)
+        print(Style.RESET_ALL, end='')
+    # endregion
+
+    # region managers
     @property
     def WindowManager(self)->WindowManager:
         '''Window Manager. GLFW related.'''
@@ -73,6 +116,7 @@ class Engine:
     @property
     def ResourcesManager(self)->ResourcesManager:
         return self._resourceManager
+    # endregion
 
     # region overridable methods
     def beforePrepare(self):...
@@ -90,6 +134,7 @@ class Engine:
         Manager._RunPrepare()  # prepare work, mainly for sceneManager to build scene, load resources, etc.
         self.afterPrepare()
 
+        self.AcceptedPrint('Preparation done. Start running...')
         while not glfw.window_should_close(self.WindowManager.Window):
 
             self.beforeFrameBegin()
@@ -106,8 +151,8 @@ class Engine:
         self.afterRelease()
 
     @classmethod
-    def Run(cls):
+    def Run(cls, *args, **kwargs):
         global _engine_singleton
         if _engine_singleton is None:
-            _engine_singleton = cls()
+            _engine_singleton = cls(*args, **kwargs)
         _engine_singleton.run()

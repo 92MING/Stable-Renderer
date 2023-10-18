@@ -37,7 +37,7 @@ class GameObject(EngineObj, NamedObj):
                  active:bool=True,
                  parent:'GameObject'=None,
                  tags:Union[str, list, tuple, set]=None,
-                 posiiton:Union[list, tuple, glm.vec3]=None,
+                 position:Union[list, tuple, glm.vec3]=None,
                  rotation:Union[list, tuple, glm.vec3]=None,
                  scale:Union[list, tuple, glm.vec3]=None,
                  needTransform=True):
@@ -47,7 +47,7 @@ class GameObject(EngineObj, NamedObj):
         :param active: whether this gameObj is active. If not active, this gameObj and all its children will not be updated.
         :param parent: parent gameObj. If None, this gameObj will be added to root gameObj list.
         :param tags: tags of this gameObj. Can be used to find this gameObj. Can be None, str, list, tuple or set.
-        :param posiiton: local position of this gameObj. If needTransform is False, error will be raised if posiiton is not None.
+        :param position: local position of this gameObj. If needTransform is False, error will be raised if posiiton is not None.
         :param rotation: local rotation of this gameObj in euler angles. If needTransform is False, error will be raised if rotation is not None.
         :param scale: local scale of this gameObj. If needTransform is False, error will be raised if scale is not None.
         :param needTransform: whether this gameObj need a transform component.
@@ -69,10 +69,10 @@ class GameObject(EngineObj, NamedObj):
                 self.addTag(tag)
         if needTransform:
             self.addComponent(Transform)
-        if not needTransform and (posiiton is not None or rotation is not None or scale is not None):
+        if not needTransform and (position is not None or rotation is not None or scale is not None):
             raise ValueError("If needTransform is False, posiiton, rotation and scale cannot be set.")
-        if posiiton is not None:
-            self.transform.localPos = glm.vec3(posiiton)
+        if position is not None:
+            self.transform.localPos = glm.vec3(position)
         if rotation is not None:
             self.transform.setLocalRot(rotation[0], rotation[1], rotation[2])
         if scale is not None:
