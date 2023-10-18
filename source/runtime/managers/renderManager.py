@@ -56,7 +56,7 @@ class RenderManager(Manager):
 
         self._matrixUBO = gl.glGenBuffers(1)
         gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self._matrixUBO)
-        gl.glBufferData(gl.GL_UNIFORM_BUFFER, 6 * glm.sizeof(glm.mat4) + 2 * glm.sizeof(glm.vec3), None, gl.GL_DYNAMIC_DRAW)
+        gl.glBufferData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + 2 * glm.sizeof(glm.vec3), None, gl.GL_DYNAMIC_DRAW)
         gl.glBindBufferBase(gl.GL_UNIFORM_BUFFER, self.MatrixUBO_BindingPoint, self._matrixUBO)
 
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 0, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_modelMatrix))

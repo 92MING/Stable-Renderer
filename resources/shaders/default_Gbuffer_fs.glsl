@@ -25,7 +25,7 @@ uniform sampler2D normalTex;
 uniform int objID;
 
 void main() {
-    outColor = texture(diffuseTex, vertexUV);
+    outColor = texture(diffuseTex, vertexUV).rgb;
     outPos = worldPos;
     outNormal = normalize((MV_IT * vec4(texture(normalTex, vertexUV).xyz, 0.0)).xyz);
 	ivec2 uv = ivec2(vertexUV * ivec2(textureSize(diffuseTex, 0)));

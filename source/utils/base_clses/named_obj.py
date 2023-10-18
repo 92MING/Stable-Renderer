@@ -13,7 +13,8 @@ class NamedObj(CrossModuleClass):
         if cls._instances is None:
             cls._instances = {}
         if name in cls._instances:
-            raise Exception(f'Instance with name {name} already exists')
+            ins = cls._instances[name]
+            ins.__init__ = lambda *args, **kwargs: None # prevent __init__ from being called
         else:
             ins = super().__new__(cls)
             cls._instances[name] = ins
