@@ -448,6 +448,7 @@ class RenderManager(Manager):
 
     # region run
     def _onFrameRun_debug(self):
+        '''This func will run when debug=True instead of _onFrameRun()'''
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
