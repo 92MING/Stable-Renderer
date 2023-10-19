@@ -16,29 +16,30 @@ class CorrespondenceMap:
     }
     where vertex_ids are unique
     """
+
     def __init__(self,
                  correspondence_map: dict):
         # avoid calling directly, should be initiated using classmethods
         self._correspondence_map = correspondence_map
-    
+
     def __str__(self):
         return self._correspondence_map.__str__()
 
     @property
-    def Map(self)->dict:
+    def Map(self) -> dict:
         return self._correspondence_map
 
     @classmethod
     def from_existing_directory_img(cls,
                                     directory: str,
-                                    num_frames: int=None,
+                                    num_frames: int = None,
                                     enable_strict_checking=True):
         r"""
         Create CorrespondenceMap instance from using the images in an existing directory.
         Directory should exist and numeric values should be present in the filename for every image files.
         The numeric values will be used as the key to sort id maps into ascending order for the construction of CorrespondenceMap
         Files not ending with ('.jpeg', '.png', '.bmp', '.jpg') are considered as non-image files, which will be skipped.
- 
+
         :param directory: directory where id maps are stored as images
         :param num_frames: first n frames to be used for building correspondence map, all frames will be used if not specified
         :param enable_strict_checking: when enabled, check uniqueness, only one pixel position should be added to the same id in every frame,

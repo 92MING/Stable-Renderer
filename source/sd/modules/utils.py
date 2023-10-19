@@ -1,23 +1,26 @@
 import re
 import cv2
+import os
 import numpy
 import torch
 import torchvision.transforms as transforms
 from typing import List
 from PIL import Image
 from pathlib import Path
+from . import config
+from . import log_utils as logu
 
 
 def list_frames(frame_dir):
-    pattern = r"frame_(\d+).png"
+    pattern = re.compile(r".*_(\d+).png")
     try:
-        frame_list = sorted(frame_dir.iterdir(), key=lambda x: int(re.match(pattern, x.name).group(1)))
+        frame_list = sorted(listfiles(frame_dir, exts='.png', return_type=Path, return_path=True), key=lambda filename: int(pattern.match(str(filename)).group(1)))
     except AttributeError as e:
-        raise AttributeError(f"Frame filename format is not correct. Please make sure all filenames follow format `frame_xxx.png`, where `xxx` is an integer.") from e
+        raise AttributeError(f"Frame filename format is not correct. Please make sure all filenames follow format `*_xxx.png`, where `xxx` is an integer.") from e
     return frame_list
 
 
-def listfiles(directory, exts, return_type: type = None, return_path: bool = False, return_dir: bool = False, recur: bool = False):
+def listfiles(directory, exts=None, return_type: type = None, return_path: bool = False, return_dir: bool = False, recur: bool = False):
     if exts and return_dir:
         raise ValueError("Cannot return both files and directories")
     if return_type != str and not return_path:
@@ -86,26 +89,52 @@ def make_depth_images(images: List[Image.Image]):
     return depth_images
 
 
-def split_by_index(frames, split_index: list):
+def make_correspondence_map(from_dir, save_to_path):
     """
-    Split frames into groups with similar perceptual hashes.
+    Make correspondence map from a directory of images.
+    If the correspondence map already exists, then load it.
+    Otherwise, create and save it.
+    :param from_dir: The directory of images.
+    :param save_to_path: The path to save the correspondence map.
+    :return: The correspondence map.
     """
-    groups = []
-    split_index.insert(0, 0)
-    for i in range(1, len(split_index)):
-        groups.append(frames[split_index[i-1]: split_index[i]])
-        # print(f"Group {i} = [{split_index[i-1]}, {split_index[i]})")
+    import pickle
+    from .data_classes.correspondenceMap import CorrespondenceMap
+    if save_to_path.is_file():
+        try:
+            with open(save_to_path, 'rb') as f:
+                corr_map = pickle.load(f)
+            return corr_map
+        except ModuleNotFoundError as e:
+            os.remove(save_to_path)
+            logu.warn(f"[WARNING] Correspondence map {save_to_path} is corrupted. It will be re-created.")
 
-    return groups
+    logu.info(f"[INFO] Creating correspondence map from {from_dir}")
+    corr_map = CorrespondenceMap.from_existing_directory_img(
+        from_dir,
+        enable_strict_checking=False,
+        num_frames=10
+    )
+    with open(save_to_path, 'wb') as f:
+        pickle.dump(corr_map, f)
+    logu.success(f"[SUCCESS] Correspondence map created and saved to {save_to_path}")
+    return corr_map
 
 
-def view_latents(i, t, latents):
+def save_latents(i, t, latents):
     """
-    Callback function to view latents during inference.
+    Callback function to save vae-approx-decoded latents during inference.
     :param i: The current inference step.
     :param t: The current time step.
     :param latents: The current latents. If is list type, then process the first element.
     """
-    from modules.vae_approx import latents_to_single_pil_approx
-    image = latents_to_single_pil_approx(latents[0] if isinstance(latents, list) else latents)
-    image.show()
+    from .vae_approx import latents_to_single_pil_approx
+    logu.info(f"[INFO] Saving latents at inference step {i} and time step {t}")
+    save_dir = config.test_dir / 'latents'
+    save_dir.mkdir(parents=True, exist_ok=True)
+    if isinstance(latents, list):
+        image = [latents_to_single_pil_approx(lat) for lat in latents]
+        [image.save(save_dir / f'latents_{i:02d}_{j:02d}.png') for j, image in enumerate(image)]
+    else:
+        image = latents_to_single_pil_approx(latents)
+        image.save(save_dir / f'latents_{i:02d}.png')
