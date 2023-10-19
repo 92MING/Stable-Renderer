@@ -6,3 +6,4 @@ output/temp
 test.py
 *.zip
 rendered_frames
+*.ipynb
