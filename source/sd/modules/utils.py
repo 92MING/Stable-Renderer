@@ -12,15 +12,15 @@ from . import log_utils as logu
 
 
 def list_frames(frame_dir):
-    pattern = r".*_(\d+).png"
+    pattern = re.compile(r".*_(\d+).png")
     try:
-        frame_list = sorted(frame_dir.iterdir(), key=lambda x: int(re.match(pattern, x.name).group(1)))
+        frame_list = sorted(listfiles(frame_dir, exts='.png', return_type=Path, return_path=True), key=lambda filename: int(pattern.match(str(filename)).group(1)))
     except AttributeError as e:
-        raise AttributeError(f"Frame filename format is not correct. Please make sure all filenames follow format `frame_xxx.png`, where `xxx` is an integer.") from e
+        raise AttributeError(f"Frame filename format is not correct. Please make sure all filenames follow format `*_xxx.png`, where `xxx` is an integer.") from e
     return frame_list
 
 
-def listfiles(directory, exts, return_type: type = None, return_path: bool = False, return_dir: bool = False, recur: bool = False):
+def listfiles(directory, exts=None, return_type: type = None, return_path: bool = False, return_dir: bool = False, recur: bool = False):
     if exts and return_dir:
         raise ValueError("Cannot return both files and directories")
     if return_type != str and not return_path:

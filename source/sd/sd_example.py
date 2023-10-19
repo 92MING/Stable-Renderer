@@ -1,5 +1,6 @@
 import random
 import torch
+import time
 from PIL import Image
 from pathlib import Path
 from sys import platform
@@ -42,10 +43,10 @@ def main():
     generator = torch.Generator(device=config.device).manual_seed(seed)
 
     # 2. Prepare images
-    n = 4  # Number of frames to utilize
+    n = 8  # Number of frames to utilize
     frame_dir = test_dir / "color"
     frame_path_list = utils.list_frames(frame_dir)[:n]
-    logu.debug(f"[DEBUG] Frames: {[path.name for path in frame_path_list]}")
+    logu.debug(f"[DEBUG] Frames: {[Path(path).name for path in frame_path_list]}")
     frames = [Image.open(img_path).convert('RGB') for img_path in frame_path_list]
 
     # 3. Prepare masks
@@ -63,6 +64,7 @@ def main():
     # 5. Prepare correspondence map
     corr_map = utils.make_correspondence_map(test_dir / "id", test_dir / "corr_map.pkl")
 
+    tic = time.time()
     output_frame_list = pipe.__call__(
         prompt=prompt,
         negative_prompt=neg_prompt,
@@ -80,6 +82,8 @@ def main():
         callback=utils.save_latents,
         correspondence_map=corr_map,
     ).images
+    toc = time.time()
+    logu.info(f"[INFO] Inference time: {toc - tic:.2f}s")
 
     output_dir = test_dir / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
