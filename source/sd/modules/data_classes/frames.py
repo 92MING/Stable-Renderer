@@ -3,7 +3,7 @@ from typing import Any
 import os
 
 # TODO: Make DataClass as the parent for all other dataclasses 
-class DataClass:
+class Frames:
     def __init__(self, data: Any):
         self._data = data
     
@@ -11,8 +11,9 @@ class DataClass:
     def Data(self):
         return self._data
     
+    def __str__(self):
+        return self._data.__str__()
+    
     @classmethod
-    def from_existing_directory(cls,
-                                directory: str,):
-        assert os.path.exists(directory), f"Directroy {directory} not found"
+    def from_existing_directory(cls, directory: str):
         pass

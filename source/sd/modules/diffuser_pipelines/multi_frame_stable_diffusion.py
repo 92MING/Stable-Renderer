@@ -24,7 +24,7 @@ from diffusers.utils import deprecate, logging
 from transformers import CLIPTextModel, CLIPTokenizer
 from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, preprocess_image
 from ..data_classes.correspondenceMap import CorrespondenceMap
-
+from .. import log_utils as logu
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -337,21 +337,20 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 raise ValueError(f"control guidance start: {start} can't be smaller than 0.")
             if end > 1.0:
                 raise ValueError(f"control guidance end: {end} can't be larger than 1.0.")
-        
-        # TODO: Check correspondence map 
-        if correspondence_map is not None:
-            if isinstance(correspondence_map, CorrespondenceMap):
-                key = next(iter(correspondence_map.Map.keys))
-                item = correspondence_map.Map.get(key)
-                # check an item for the structure[([xpos, ypos], frame_idx)]
-                if isinstance(item, list) and len(item[0]) == 2 and len(item[0][0]) == 2 and isinstance(item[0][1], int):
-                    pass
-                else:
-                    raise ValueError(f'Correspondence map item {item} does not have the structure [([xpos, ypos], frame_idx), ...]')
 
-            else:
-                raise TypeError(f"Correspondence map has type {type(correspondence_map)}")
-            
+        # TODO: Check correspondence map
+        # if correspondence_map is not None:
+        #     if isinstance(correspondence_map, CorrespondenceMap):
+        #         key = next(iter(correspondence_map.Map.keys))
+        #         item = correspondence_map.Map.get(key)
+        #         # check an item for the structure[([xpos, ypos], frame_idx)]
+        #         if isinstance(item, list) and len(item[0]) == 2 and len(item[0][0]) == 2 and isinstance(item[0][1], int):
+        #             pass
+        #         else:
+        #             raise ValueError(f'Correspondence map item {item} does not have the structure [([xpos, ypos], frame_idx), ...]')
+
+        #     else:
+        #         raise TypeError(f"Correspondence map has type {type(correspondence_map)}")
 
     # Copied from diffusers.pipelines.controlnet.pipeline_controlnet.StableDiffusionControlNetPipeline.prepare_image
     def prepare_control_image(
@@ -623,7 +622,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 else:
                     mask = None
                 masks[i] = mask
-        
+
         # TODO: Process correspondence map
         if correspondence_map is not None:
             pass
@@ -817,7 +816,8 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
                     # compute the previous noisy sample x_t -> x_t-1
                     latents_frame = self.scheduler.step(noise_pred, t, latents_frame, **extra_step_kwargs, return_dict=False)[0]
-                    self.scheduler._step_index -= 1
+                    if hasattr(self.scheduler, "_step_index"):
+                        self.scheduler._step_index -= 1
 
                     # handle inpainting
                     if masks is not None:
@@ -835,12 +835,13 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
                     denoised_latents_frame_list.append(latents_frame)
 
-                if self.scheduler._step_index is not None:
+                if hasattr(self.scheduler, "_step_index") and self.scheduler._step_index is not None:
                     self.scheduler._step_index += 1
 
-                # TODO: Do overlapping using some algorithm
                 if correspondence_map is not None:
-                    self.overlap(latents_list, corr_map=correspondence_map, generator=generator)
+                    latents_list = self.overlap(latents_list, corr_map=correspondence_map, generator=generator)
+                else:
+                    latents_list = denoised_latents_frame_list
 
                 # call the callback, if provided
                 if s == len(timesteps) - 1 or ((s + 1) > num_warmup_steps and (s + 1) % self.scheduler.order == 0):
@@ -879,7 +880,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
         return StableDiffusionPipelineOutput(images=images, nsfw_content_detected=None)
 
-    # TODO: Complete this function
+    # TODO: Optimize this function
     def overlap(self, latents_list: List[torch.Tensor], corr_map: CorrespondenceMap, generator: torch.Generator):
         """
         Do multi-diffusion overlapping on a list of frame latents according to the corresponding map.
@@ -894,6 +895,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         :param generator: A torch generator used to sample latent dist.
         :return: A list of overlapped frame latents.
         """
+
         def _encode(image):
             latent_dist = self.vae.encode(image).latent_dist
             latents = latent_dist.sample(generator=generator)
@@ -906,20 +908,28 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
             return image
 
         assert len(latents_list) <= max([len(vertex_info) for _, vertex_info in corr_map.Map.items()])
+
         images = [_decode(latents) for latents in latents_list]  # [B, C, H, W]
-        value = [torch.zeros_like(img) for img in images]  # [B, C, H, W]
-        count = value.copy()
-        screen_h, screen_w = images[0].shape[:2]
+        num_frames = len(images)
+        screen_h, screen_w = images[0].shape[2:]
+
+        # logu.debug(f"[DEBUG] Shape of images: {images[0].shape}. Number of frames: {num_frames}.")
+        # logu.debug(f"[DEBUG] Data type of images: {images[0].dtype}. Device of images: {images[0].device}.")
+
+        value = [torch.zeros_like(image) for image in images]  # [B, C, H, W]
+        count = value.copy()  # [B, C, H, W]
         for id, vertex_infos in corr_map.Map.items():
             for pixel_pos, frame_idx in vertex_infos:
-                w, h = pixel_pos
-                if w >= 0 and w < screen_w and h >= 0 and h < screen_h:
-                    value[frame_idx][:, :, h, w] += images[frame_idx][:, :, h, w]
-                    count[frame_idx][:, :, h, w] += 1
+                h, w = pixel_pos
+                i = frame_idx - 1
+                if i < num_frames and w >= 0 and w < screen_w and h >= 0 and h < screen_h:
+                    value[i][:, :, h, w] += images[i][:, :, h, w]
+                    count[i][:, :, h, w] += 1
 
-        for i in len(value):
-            value[i] = torch.where(count[i] > 0, value[i] / count[i], value[i])
+        for i in range(num_frames):
+            value[i] = torch.where(count[i] > 0, value[i] / count[i], torch.zeros_like(images[i]))  # TODO: Test different last arguement
             value[i] = _encode(value[i])
+
         return value
 
 

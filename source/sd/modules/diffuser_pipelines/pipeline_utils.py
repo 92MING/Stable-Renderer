@@ -1,5 +1,6 @@
 import os
 import torch
+from sys import platform
 from typing import List
 from diffusers import ControlNetModel
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
@@ -11,30 +12,33 @@ def load_pipe(
     control_net_model_paths: List[str] = ["lllyasviel/sd-controlnet-depth"],
     use_safetensors: bool = True,
     scheduler_type: str = "euler-ancestral",
-    no_half: bool = True,
+    no_half: bool = False,
+    local_files_only: bool = False,
 ) -> StableDiffusionImg2VideoPipeline:
     """
     Load a Stable Diffusion pipeline with some controlnets.
     """
+    no_half = no_half or (platform == 'darwin')
     torch_dtype = torch.float32 if no_half else torch.float16
     model_path = os.path.abspath(model_path)
     control_net_model_paths = [str(path) for path in control_net_model_paths]
     if isinstance(control_net_model_paths, str):
         controlnet = ControlNetModel.from_pretrained(
             control_net_model_paths,
-            torch_dtype=torch_dtype,
+            torch_dtype=torch_dtype
         )
     elif isinstance(control_net_model_paths, list):
         controlnets = []
         for control_net_model_path in control_net_model_paths:
             controlnet = ControlNetModel.from_pretrained(
                 control_net_model_path,
-                torch_dtype=torch_dtype,
+                torch_dtype=torch_dtype
             )
             controlnets.append(controlnet)
         controlnet = MultiControlNetModel(controlnets)
 
-    if os.path.isfile(model_path):
+    if local_files_only or os.path.isfile(model_path):
+        assert os.path.isfile(model_path), f"Model path {os.path.abspath(model_path)} is not a file."
         pipe = StableDiffusionImg2VideoPipeline.from_single_file(
             model_path,
             local_files_only=True,
@@ -58,6 +62,6 @@ def load_pipe(
     try:
         pipe.enable_xformers_memory_efficient_attention(attention_op=None)
     except ModuleNotFoundError:
-        print("[INFO] xformer not found.")
+        print("[WARNING] XFormers not found. You can install XFormers with `pip install xformers` to speed up the generation.")
     # pipe.enable_model_cpu_offload()
     return pipe
