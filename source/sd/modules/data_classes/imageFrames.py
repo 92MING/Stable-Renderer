@@ -22,7 +22,7 @@ class ImageFrames(Frames):
         for filename in os.listdir(directory):
             if file_filter(filename):
                 key = extract_key(filename)
-                image = np.array(Image.open(os.path.join(directory, filename)))
+                image = Image.open(os.path.join(directory, filename))
                 data_container.append(SortableElement(value=key, object=image))
         data_container = [d.Object for d in sorted(data_container)[:num_frames]]
         return ImageFrames(data_container)

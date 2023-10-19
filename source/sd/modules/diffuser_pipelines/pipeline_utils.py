@@ -20,7 +20,8 @@ def load_pipe(
     """
     no_half = no_half or (platform == 'darwin')
     torch_dtype = torch.float32 if no_half else torch.float16
-    model_path = os.path.abspath(model_path)
+    if os.path.exists(model_path):
+        model_path = os.path.abspath(model_path)
     control_net_model_paths = [str(path) for path in control_net_model_paths]
     if isinstance(control_net_model_paths, str):
         controlnet = ControlNetModel.from_pretrained(
