@@ -20,7 +20,7 @@ class OutputManager(Manager):
     def SaveMapPerNumFrame(self):
         return self._save_map_per_num_frame
 
-    def _onFrameBegin(self):
+    def _prepare(self):
         os.makedirs(self._output_dir, exist_ok=True)
         if self._output_subfolders is not None:
             for subfolder_dir in self._output_subfolders:

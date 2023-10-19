@@ -3,6 +3,10 @@ from utils.global_utils import GetOrAddGlobalValue, GetGlobalValue
 _MANAGERS = GetOrAddGlobalValue('_ENGINE_MANAGERS', set())
 _MANAGER_FUNCS = GetOrAddGlobalValue('_ENGINE_MANAGER_FUNCS', dict())
 class Manager:
+    '''
+    Manager are singletons classes that manage some specific functions in the engine during runtime.
+    Public methods should be started with capital letter.
+    '''
 
     _engine = None
 
