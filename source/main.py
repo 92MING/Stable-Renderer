@@ -9,13 +9,12 @@ from utils.path_utils import RESOURCES_DIR
 if __name__ == '__main__':
     class AutoRotation(Component):
         def update(self):
-            self.transform.rotateLocalY(0.1)
+            self.transform.rotateLocalY(0.2)
 
     class Sample(Engine):
         def beforePrepare(self):
             self.boatMesh = Mesh.Load(os.path.join(RESOURCES_DIR, 'boat', 'boat.obj'))
             self.boatMaterial = Material.Default_Opaque_Material()
-            # self.boatMaterial = Material.Debug_Material()
             self.boatMaterial.addDiffuseMap(Texture.Load(os.path.join(RESOURCES_DIR, 'boat', 'boatColor.png')))
             self.boatMaterial.addNormalMap(Texture.Load(os.path.join(RESOURCES_DIR, 'boat', 'boatNormal.png')))
 
@@ -32,4 +31,3 @@ if __name__ == '__main__':
                output_dir='./tmp',
                output_subfolders=['color', 'pos', 'normal', 'id', 'depth'],
                save_map_per_num_frame=30)
-    # Sample.Run(debug=True)

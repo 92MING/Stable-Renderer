@@ -1,7 +1,7 @@
 test
 __pycache__
 models
-*.png
+output/temp
 .DS_Store
 test.py
 *.zip
