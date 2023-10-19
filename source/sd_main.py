@@ -46,6 +46,7 @@ if __name__ == '__main__':
     corr_map = CorrespondenceMap.from_existing_directory_img(
         os.path.join(config.frames_dir, 'id'),
         enable_strict_checking=False,
+        pixel_position_callback=lambda x,y: (x//8, y//8),
         num_frames=config.num_frames)
     images = ImageFrames.from_existing_directory(
         os.path.join(config.frames_dir, 'color'),

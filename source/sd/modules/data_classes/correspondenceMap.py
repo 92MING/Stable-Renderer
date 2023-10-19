@@ -79,7 +79,7 @@ class CorrespondenceMap:
                     if np.array_equal(id, np.zeros_like(id)):
                         continue
                     id_key = tuple(id)
-                    pix_xpos, pix_ypos = pixel_position_callback(i, j) if pixel_position_callback is not None else i, j
+                    pix_xpos, pix_ypos = pixel_position_callback(i, j) if pixel_position_callback is not None else (i, j)
                     if corr_map.get(id_key) is None:
                         corr_map[id_key] = [([pix_xpos, pix_ypos], frame_idx)]
                     else:

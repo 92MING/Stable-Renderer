@@ -113,6 +113,7 @@ def make_correspondence_map(from_dir, save_to_path):
     corr_map = CorrespondenceMap.from_existing_directory_img(
         from_dir,
         enable_strict_checking=False,
+        pixel_position_callback=lambda x, y: (x//8, y//8),
         num_frames=10
     )
     with open(save_to_path, 'wb') as f:

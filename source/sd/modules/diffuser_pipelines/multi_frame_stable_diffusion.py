@@ -25,6 +25,7 @@ from transformers import CLIPTextModel, CLIPTokenizer
 from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, preprocess_image
 from ..data_classes.correspondenceMap import CorrespondenceMap
 from .. import log_utils as logu
+from concurrent.futures import ThreadPoolExecutor, wait
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -919,17 +920,23 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         # logu.debug(f"[DEBUG] Shape of images: {images[0].shape}. Number of frames: {num_frames}.")
         # logu.debug(f"[DEBUG] Data type of images: {images[0].dtype}. Device of images: {images[0].device}.")
 
+        def process_pixel(image, value, count, h, w, i):
+            value[i][:, :, h, w] += image[:, :, h, w]
+            count[i][:, :, h, w] += 1
+
         value = [torch.zeros_like(image) for image in images]  # [B, C, H, W]
         count = value.copy()  # [B, C, H, W]
-        for id, vertex_infos in corr_map.Map.items():
-            for pixel_pos, frame_idx in vertex_infos:
-                h, w = pixel_pos
-                h = h // 8
-                w = w // 8
-                i = frame_idx - 1
-                if i < num_frames and w >= 0 and w < screen_w and h >= 0 and h < screen_h:
-                    value[i][:, :, h, w] += images[i][:, :, h, w]
-                    count[i][:, :, h, w] += 1
+        with ThreadPoolExecutor() as executor:
+            thread_pool = []
+            for id, vertex_infos in corr_map.Map.items():
+                for pixel_pos, frame_idx in vertex_infos:
+                    h, w = pixel_pos
+                    i = frame_idx - 1
+                    if i < num_frames and w >= 0 and w < screen_w and h >= 0 and h < screen_h:
+                        thread = executor.submit(process_pixel,
+                                                 images[i], value, count, h, w, i)
+                        thread_pool.append(thread)
+            wait(thread_pool)
 
         for i in range(num_frames):
             value[i] = torch.where(count[i] > 0, value[i] / count[i], torch.zeros_like(images[i]))  # TODO: Test different last arguement
