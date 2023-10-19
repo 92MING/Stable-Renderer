@@ -817,7 +817,8 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
                     # compute the previous noisy sample x_t -> x_t-1
                     latents_frame = self.scheduler.step(noise_pred, t, latents_frame, **extra_step_kwargs, return_dict=False)[0]
-                    self.scheduler._step_index -= 1
+                    if hasattr(self.scheduler, "_step_index"):
+                        self.scheduler._step_index -= 1
 
                     # handle inpainting
                     if masks is not None:
@@ -835,12 +836,14 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
                     denoised_latents_frame_list.append(latents_frame)
 
-                if self.scheduler._step_index is not None:
+                if hasattr(self.scheduler, "_step_index") and self.scheduler._step_index is not None:
                     self.scheduler._step_index += 1
 
                 # TODO: Do overlapping using some algorithm
                 if correspondence_map is not None:
-                    self.overlap(latents_list, corr_map=correspondence_map, generator=generator)
+                    latents_list = self.overlap(latents_list, corr_map=correspondence_map, generator=generator)
+                else:
+                    latents_list = denoised_latents_frame_list
 
                 # call the callback, if provided
                 if s == len(timesteps) - 1 or ((s + 1) > num_warmup_steps and (s + 1) % self.scheduler.order == 0):
