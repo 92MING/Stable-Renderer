@@ -14,7 +14,7 @@ class Renderer(Component):
         self._material = value
 
     def _draw(self):
-        '''Draw to screen. Override this method to implement your own drawing logic.'''
+        '''Draw to screen. Override this method to implement your own drawing logic. Usually add render task to RenderManager here'''
         raise NotImplementedError
     def _drawAvailable(self):
         '''Check if this renderer is available to draw. Override this method to implement your own logic.'''

@@ -1,4 +1,6 @@
 import os.path
+import time
+
 from .manager import Manager
 from .runtimeManager import RuntimeManager
 from utils.data_struct.event import AutoSortTask
@@ -6,7 +8,7 @@ import glm
 import OpenGL.GL as gl
 import numpy as np
 import ctypes
-from utils.path_utils import *
+from utils.path_utils import OUTPUT_DIR
 from static.shader import Shader
 from static.enums import RenderOrder
 from static.mesh import Mesh
@@ -69,7 +71,6 @@ class RenderManager(Manager):
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 6 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV_IT))  # MV_IT
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_pos))  # camera world position
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + glm.sizeof(glm.vec3), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_dir))  # camera world forward direction
-
     def _init_defer_render(self):
         self._default_gBuffer_shader = Shader.Default_GBuffer_Shader()
         '''For submit data to gBuffer'''
@@ -80,9 +81,9 @@ class RenderManager(Manager):
         winWidth, winHeight = self.engine.WindowManager.WindowSize
 
         # color data (rgb)
-        self._gBuffer_color = gl.glGenTextures(1)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_color)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, winWidth, winHeight, 0, gl.GL_RGB, gl.GL_FLOAT, None) # color is rgb8f
+        self._gBuffer_color_and_depth = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_color_and_depth)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA16F, winWidth, winHeight, 0, gl.GL_RGBA, gl.GL_FLOAT, None) # color is rgb8f
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
 
@@ -116,7 +117,7 @@ class RenderManager(Manager):
 
         self._gBuffer = gl.glGenFramebuffers(1)
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._gBuffer)
-        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self._gBuffer_color, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self._gBuffer_color_and_depth, 0)
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT1, gl.GL_TEXTURE_2D, self._gBuffer_pos, 0)
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT2, gl.GL_TEXTURE_2D, self._gBuffer_normal, 0)
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT3, gl.GL_TEXTURE_2D, self._gBuffer_id, 0)
@@ -224,6 +225,11 @@ class RenderManager(Manager):
         '''
         This wrapper help to bind the gBuffer textures to the shader(color, pos, normal, etc.).
         if task is not given, it will draw the screen quad.
+        Defer renderer could texture the following textures::
+            gColor_and_depth (r,g,b,depth), depth is in [0,1]
+            gPos (x,y,z)
+            gNormal (x,y,z)
+            g_UV_and_ID (u,v, meshID)
         '''
         def _bindGtexture(slot, textureID, name):
             gl.glActiveTexture(gl.GL_TEXTURE0 + slot)
@@ -232,7 +238,7 @@ class RenderManager(Manager):
         shader = shader or self._default_defer_render_shader
         def wrap():
             shader.useProgram()
-            _bindGtexture(0, self._gBuffer_color, "gColor")
+            _bindGtexture(0, self._gBuffer_color_and_depth, "gColor_and_depth")
             _bindGtexture(1, self._gBuffer_pos, "gPos")
             _bindGtexture(2, self._gBuffer_normal, "gNormal")
             _bindGtexture(3, self._gBuffer_id, "g_UV_and_ID")
@@ -453,12 +459,12 @@ class RenderManager(Manager):
 
         # region SD
         # output data to SD
-        colorData = self._getTextureImg(self._gBuffer_color, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
+        colorAndDepthData = self._getTextureImg(self._gBuffer_color_and_depth, gl.GL_RGBA, gl.GL_FLOAT, np.float32, 4)
+        colorData = colorAndDepthData[:, :, :3]
+        depthData = colorAndDepthData[:, :, 3]
         posData = self._getTextureImg(self._gBuffer_pos, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
         normalData = self._getTextureImg(self._gBuffer_normal, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
         idData = self._getTextureImg(self._gBuffer_id, gl.GL_RGB_INTEGER, gl.GL_INT, np.int32, 3)
-        depthData = self._getTextureImg(self._gBuffer_depth, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT, np.float32, 1)
-        # TODO: send these data to stable-diffusion, and get color data back
 
         if self.engine.IsDebugMode:
             print('[DEBUG] Color data is empty: ', np.array_equal(colorData, np.zeros_like(colorData)))
@@ -481,16 +487,17 @@ class RenderManager(Manager):
             id_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'id', f'id_img_{self.engine.RuntimeManager.FrameCount}.png'))
 
             depth_data_max, depth_data_min = np.max(depthData), np.min(depthData)
-            depth_data_normalized = (depthData - np.ones_like(depthData) * depth_data_max) / (depth_data_max - depth_data_min)
-            depth_data_int8 = ((np.ones_like(depth_data_normalized)-depth_data_normalized) * 255).astype(np.uint8)
+            print(f'[DEBUG] depth_data_max: {depth_data_max}, depth_data_min: {depth_data_min}')
+            depth_data_normalized = (depthData - depth_data_min) / (depth_data_max - depth_data_min)
+            depth_data_int8 = (depth_data_normalized * 255).astype(np.uint8)
             depth_img = Image.fromarray(np.squeeze(depth_data_int8), mode='L')
             depth_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'depth', f'depth_img_{self.engine.RuntimeManager.FrameCount}.png'))
 
         # Code run normally until here, pending fixes for idData
         # get data back from SD
-        # TODO: load the color data back to self._gBuffer_color texture, i.e. colorData = ...
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_color)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, self.engine.WindowManager.WindowSize[0], self.engine.WindowManager.WindowSize[1], 0, gl.GL_RGB, gl.GL_FLOAT, colorData.tobytes())
+        # TODO: load the color data back to self._gBuffer_color_and_depth texture, i.e. colorData = ...
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_color_and_depth)
+        gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, self.engine.WindowManager.WindowWidth, self.engine.WindowManager.WindowHeight, gl.GL_RGB, gl.GL_FLOAT, colorData.tobytes())
         # TODO: update color pixel datas, i.e. pixelDict[id] = (oldColor *a + newColor *b), newColor = inverse light intensity of the pixel color
         # TODO: replace corresponding color pixel datas with color data from color dict
         # endregion

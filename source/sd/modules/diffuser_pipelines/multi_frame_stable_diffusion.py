@@ -24,6 +24,7 @@ from diffusers.utils import deprecate, logging
 from transformers import CLIPTextModel, CLIPTokenizer
 from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, preprocess_image
 from ..data_classes.correspondenceMap import CorrespondenceMap
+from .. import log_utils as logu
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -339,7 +340,6 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
         # TODO: Check correspondence map
         if correspondence_map is not None:
-            pass
             if isinstance(correspondence_map, CorrespondenceMap):
                 key = next(iter(correspondence_map.Map.keys))
                 item = correspondence_map.Map.get(key)
@@ -416,7 +416,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         guess_mode: bool = False,
         control_guidance_start: Union[float, List[float]] = 0.0,
         control_guidance_end: Union[float, List[float]] = 1.0,
-        correspondence_map: Optional[Dict] = None,
+        correspondence_map: Optional[CorrespondenceMap] = None,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -880,14 +880,10 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         return StableDiffusionPipelineOutput(images=images, nsfw_content_detected=None)
 
     # TODO: Complete this function
-    def overlap(self, latents_list: List[torch.Tensor], corr_map: Dict, generator: torch.Generator, debug: bool = False):
+    def overlap(self, latents_list: List[torch.Tensor], corr_map: CorrespondenceMap, generator: torch.Generator):
         """
         Do multi-diffusion overlapping on a list of frame latents according to the corresponding map.
         :param latents_list: A list of frame latents. Each element is a tensor of shape [B, C, H, W].
-        :param corr_map: A dictionary of correspondence map. Each vertex id (key) is a dictionary of the following format:
-            {
-                'position': [x, y],  # The pixel position of the vertex in the image
-            }
         :param corr_map: CorrespondenceMap instances should have the following structure:
         {
             'vertex_id_1': [([pixel_xpos_1, pixel_ypos_1], frame_idx), ([pixel_xpos_2, pixel_ypos_2], frame_idx), ...],
@@ -898,8 +894,6 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         :param generator: A torch generator used to sample latent dist.
         :return: A list of overlapped frame latents.
         """
-        if debug:
-            from .. import log_utils as logu
 
         def _encode(image):
             latent_dist = self.vae.encode(image).latent_dist
@@ -916,23 +910,23 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
         images = [_decode(latents) for latents in latents_list]  # [B, C, H, W]
         num_frames = len(images)
-        if debug:
-            logu.debug(f"[DEBUG] Shape of images: {images[0].shape}. Number of frames: {num_frames}.")
-            logu.debug(f"[DEBUG] Data type of images: {images[0].dtype}. Device of images: {images[0].device}.")
+        screen_h, screen_w = images[0].shape[2:]
+
+        # logu.debug(f"[DEBUG] Shape of images: {images[0].shape}. Number of frames: {num_frames}.")
+        # logu.debug(f"[DEBUG] Data type of images: {images[0].dtype}. Device of images: {images[0].device}.")
+
         value = [torch.zeros_like(image) for image in images]  # [B, C, H, W]
         count = value.copy()  # [B, C, H, W]
-        screen_h, screen_w = images[0].shape[2:]
         for id, vertex_infos in corr_map.Map.items():
             for pixel_pos, frame_idx in vertex_infos:
                 w, h = pixel_pos
-                if w >= 0 and w < screen_w and h >= 0 and h < screen_h:
+                i = frame_idx - 1
+                if i < num_frames and w >= 0 and w < screen_w and h >= 0 and h < screen_h:
                     value[i][:, :, h, w] += images[i][:, :, h, w]
                     count[i][:, :, h, w] += 1
-                    value[frame_idx][:, :, h, w] += images[frame_idx][:, :, h, w]
-                    count[frame_idx][:, :, h, w] += 1
 
         for i in range(num_frames):
-            value[i] = torch.where(count[i] > 0, value[i] / count[i], torch.zeros_like(images[i]))
+            value[i] = torch.where(count[i] > 0, value[i] / count[i], images[i])  # TODO: Test different last arguement
             value[i] = _encode(value[i])
 
         return value

@@ -62,6 +62,6 @@ def load_pipe(
     try:
         pipe.enable_xformers_memory_efficient_attention(attention_op=None)
     except ModuleNotFoundError:
-        print("[WARNING] xformer not found. The generation speed will be slower.")
+        print("[WARNING] XFormers not found. You can install XFormers with `pip install xformers` to speed up the generation.")
     # pipe.enable_model_cpu_offload()
     return pipe

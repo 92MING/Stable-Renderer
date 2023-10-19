@@ -87,6 +87,12 @@ class WindowManager(Manager):
         self._size = (width, height)
         glfw.set_window_size(self._window, *self._size)
     @property
+    def WindowWidth(self):
+        return self._size[0]
+    @property
+    def WindowHeight(self):
+        return self._size[1]
+    @property
     def AspectRatio(self):
         return self._size[0] / self._size[1]
     # endregion
