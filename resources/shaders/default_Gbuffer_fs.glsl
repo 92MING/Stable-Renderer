@@ -11,9 +11,6 @@ layout (std140) uniform Matrices {
 	vec3 cameraPos;
 	vec3 cameraDir;
 };
-in vec4 worldPos;
-in vec3 worldNormal;
-in vec2 vertexUV;
 
 layout (location = 0) out vec4 outColorAndDepth; // (r, g, b, depth)
 layout (location = 1) out vec3 outPos;
@@ -24,16 +21,18 @@ uniform sampler2D diffuseTex;
 uniform sampler2D normalTex;
 uniform int objID;
 
+in vec3 worldPos;
+in vec3 worldNormal;
+in vec2 vertexUV;
+
 void main() {
 
 	// get color & depth
 	vec3 outColor = texture(diffuseTex, vertexUV).rgb;
-	vec4 screenPos = projection * worldPos;
-	float depth = (screenPos.z / screenPos.w) * 0.5 + 0.5;
-	outColorAndDepth = vec4(outColor, 1.0 - depth);
+	outColorAndDepth = vec4(outColor, 1.0 - gl_FragCoord.z);
 
 	// get position
-    outPos = worldPos.xyz;
+    outPos = worldPos;
 
 	// get normal
     outNormal = normalize((MV_IT * vec4(texture(normalTex, vertexUV).xyz, 0.0)).xyz);

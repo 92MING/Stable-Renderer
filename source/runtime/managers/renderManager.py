@@ -466,12 +466,6 @@ class RenderManager(Manager):
         normalData = self._getTextureImg(self._gBuffer_normal, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
         idData = self._getTextureImg(self._gBuffer_id, gl.GL_RGB_INTEGER, gl.GL_INT, np.int32, 3)
 
-        #outputDir = os.path.join(OUTPUT_DIR, 'temp')
-        #_colorData = (colorData * 255).astype(np.uint8)
-        #image = Image.fromarray(_colorData, 'RGB')
-        #image.save(os.path.join(outputDir, 'color.png'))
-        # TODO: send these data to stable-diffusion, and get color data back
-
         if self.engine.IsDebugMode:
             print('[DEBUG] Color data is empty: ', np.array_equal(colorData, np.zeros_like(colorData)))
             print('[DEBUG] Pos data is empty: ', np.array_equal(posData, np.zeros_like(posData)))
@@ -493,6 +487,7 @@ class RenderManager(Manager):
             id_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'id', f'id_img_{self.engine.RuntimeManager.FrameCount}.png'))
 
             depth_data_max, depth_data_min = np.max(depthData), np.min(depthData)
+            print(f'[DEBUG] depth_data_max: {depth_data_max}, depth_data_min: {depth_data_min}')
             depth_data_normalized = (depthData - depth_data_min) / (depth_data_max - depth_data_min)
             depth_data_int8 = (depth_data_normalized * 255).astype(np.uint8)
             depth_img = Image.fromarray(np.squeeze(depth_data_int8), mode='L')
@@ -502,7 +497,7 @@ class RenderManager(Manager):
         # get data back from SD
         # TODO: load the color data back to self._gBuffer_color_and_depth texture, i.e. colorData = ...
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_color_and_depth)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, self.engine.WindowManager.WindowSize[0], self.engine.WindowManager.WindowSize[1], 0, gl.GL_RGB, gl.GL_FLOAT, colorData.tobytes())
+        gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, self.engine.WindowManager.WindowWidth, self.engine.WindowManager.WindowHeight, gl.GL_RGB, gl.GL_FLOAT, colorData.tobytes())
         # TODO: update color pixel datas, i.e. pixelDict[id] = (oldColor *a + newColor *b), newColor = inverse light intensity of the pixel color
         # TODO: replace corresponding color pixel datas with color data from color dict
         # endregion
