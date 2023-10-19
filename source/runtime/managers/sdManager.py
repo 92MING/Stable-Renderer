@@ -19,7 +19,13 @@ class FrameData:
     depthData: np.ndarray
     def getPixelData(self, x, y):
         y = self.colorData.shape[0] - y - 1
-        return self.colorData[y, x], self.posData[y, x], self.normalData[y, x], self.depthData[y, x]
+        return {
+            'id': self.idData[y, x], # [objID, xCoord, yCoord]
+            'color': self.colorData[y, x], # [r, g, b]
+            'pos': self.posData[y, x], # [x, y, z]
+            'normal': self.normalData[y, x], # [x, y, z]
+            'depth': self.depthData[y, x], # [z]
+        }
 
 class SDManager(Manager):
     def __init__(self,
@@ -29,7 +35,7 @@ class SDManager(Manager):
                  threadPoolSize=6,):
         '''
         :param outputMaps: if output maps result to disk
-        :param maxFrameCacheCount: how many frames data should be stored in memory
+        :param maxFrameCacheCount: how many frames data should be stored in each
         :param mapSavingInterval: the frame interval between two map saving
         :param threadPoolSize: the size of thread pool. Threads are using for saving/loading maps asynchronously
         '''
@@ -37,7 +43,6 @@ class SDManager(Manager):
         self._outputMaps = outputMaps
         self._maxFrameCacheCount = maxFrameCacheCount
         self._mapSavingInterval = mapSavingInterval
-        self._frameCache = Queue()
 
         self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize)
 

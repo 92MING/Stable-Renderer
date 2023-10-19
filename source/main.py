@@ -5,6 +5,7 @@ from runtime.component import Component
 from runtime.engine import Engine
 from static import Material, Mesh, Texture
 from utils.path_utils import RESOURCES_DIR
+import shutil
 
 if __name__ == '__main__':
     class AutoRotation(Component):
@@ -26,6 +27,8 @@ if __name__ == '__main__':
             self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, material=self.boatMaterial)
             self.boat.addComponent(AutoRotation)
 
+    if os.path.exists('./tmp'):
+        shutil.rmtree('./tmp')
     Sample.Run(enableGammaCorrection=True,
                debug=True,
                output_dir='./tmp',
