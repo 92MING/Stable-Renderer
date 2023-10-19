@@ -54,10 +54,10 @@ class CorrespondenceMap:
                 continue
             match = re.search(r"\d+", file)
             if match:
-                frame_number = int(match.group())
+                frame_idx = int(match.group())
                 id_data_img = Image.open(os.path.join(directory, file))
                 id_data_array = np.array(id_data_img)
-                id_data_container.append(SortableElement(value=frame_number, object=id_data_array))
+                id_data_container.append(SortableElement(value=frame_idx, object=id_data_array))
             else:
                 raise RuntimeError(f"{file} has no numeric component in filename.")
         sorted_ids = sorted(id_data_container)
@@ -66,8 +66,7 @@ class CorrespondenceMap:
         # Prepare correspondence map
         print("[INFO] Preparing correspondence map...")
         corr_map = {}
-        for id_data_idx, id_data in tqdm(enumerate(sorted_ids), total=len(sorted_ids)):
-            frame_number = id_data_idx + 1
+        for frame_idx, id_data in tqdm(enumerate(sorted_ids), total=len(sorted_ids)):
             assert len(id_data.Object.shape) >= 2, "id_data should be at least 2D."
             # iterate elements, where elements have shape with first 2 dimensions dropped
             # add pixel position [i, j] to corr_map dictionary with tuple(id_key) as key
@@ -77,15 +76,15 @@ class CorrespondenceMap:
                         continue
                     id_key = tuple(id)
                     if corr_map.get(id_key) is None:
-                        corr_map[id_key] = [([i, j], frame_number)]
+                        corr_map[id_key] = [([i, j], frame_idx)]
                     else:
                         # check uniqueness, only one pixel position should be added to the same id per every frame
                         if enable_strict_checking:
-                            assert len(corr_map[id_key]) < frame_number, f"Corr_map[key={id_key}] value={corr_map[id_key]} has already appended a pixel position at frame number {frame_number}."
+                            assert len(corr_map[id_key]) < frame_idx, f"Corr_map[key={id_key}] value={corr_map[id_key]} has already appended a pixel position at frame index {frame_idx}."
                         else:
-                            if len(corr_map[id_key]) >= frame_number:
+                            if len(corr_map[id_key]) >= frame_idx:
                                 continue
-                        corr_map[id_key].append(([i, j], frame_number))
+                        corr_map[id_key].append(([i, j], frame_idx))
         return CorrespondenceMap(corr_map)
 
 

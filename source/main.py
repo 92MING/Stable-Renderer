@@ -31,6 +31,7 @@ if __name__ == '__main__':
         shutil.rmtree('./tmp')
     Sample.Run(enableGammaCorrection=True,
                debug=True,
+               winSize=(512, 512),
                output_dir='./tmp',
                output_subfolders=['color', 'pos', 'normal', 'id', 'depth'],
                save_map_per_num_frame=30)
