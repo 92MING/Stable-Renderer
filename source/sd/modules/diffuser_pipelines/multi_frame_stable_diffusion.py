@@ -907,9 +907,12 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
             image = self.vae.decode(latents).sample
             return image
 
-        assert len(latents_list) <= max([len(vertex_info) for _, vertex_info in corr_map.Map.items()])
+        corr_map_max_length = max([len(vertex_info) for _, vertex_info in corr_map.Map.items()])
+        # assert len(latents_list) <= corr_map_max_length, f"Correspondence map max length {corr_map_max_length} larger than number of latent {len(latents_list)}"
 
-        images = [_decode(latents) for latents in latents_list]  # [B, C, H, W]
+        # images = [_decode(latents) for latents in latents_list]  # [B, C, H, W]
+        images = latents_list
+
         num_frames = len(images)
         screen_h, screen_w = images[0].shape[2:]
 
@@ -921,6 +924,8 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         for id, vertex_infos in corr_map.Map.items():
             for pixel_pos, frame_idx in vertex_infos:
                 h, w = pixel_pos
+                h = h // 8
+                w = w // 8
                 i = frame_idx - 1
                 if i < num_frames and w >= 0 and w < screen_w and h >= 0 and h < screen_h:
                     value[i][:, :, h, w] += images[i][:, :, h, w]
@@ -928,7 +933,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
         for i in range(num_frames):
             value[i] = torch.where(count[i] > 0, value[i] / count[i], torch.zeros_like(images[i]))  # TODO: Test different last arguement
-            value[i] = _encode(value[i])
+            # value[i] = _encode(value[i])
 
         return value
 

@@ -1,5 +1,6 @@
 from .utils.sortableElement import SortableElement
 from PIL import Image
+from typing import Callable, Tuple
 import os
 import re
 import numpy as np
@@ -33,6 +34,7 @@ class CorrespondenceMap:
     def from_existing_directory_img(cls,
                                     directory: str,
                                     num_frames: int = None,
+                                    pixel_position_callback: Callable[[int, int], Tuple[int, int]]=None,
                                     enable_strict_checking=True):
         r"""
         Create CorrespondenceMap instance from using the images in an existing directory.
@@ -42,6 +44,7 @@ class CorrespondenceMap:
 
         :param directory: directory where id maps are stored as images
         :param num_frames: first n frames to be used for building correspondence map, all frames will be used if not specified
+        :param pixel_position_callback: callback function to be applied on pixel position read from frames
         :param enable_strict_checking: when enabled, check uniqueness, only one pixel position should be added to the same id in every frame,
                                         when disabled, only the first pixel position will be added to the same id in every frame, subsequent pixels will be ignored
 
@@ -76,8 +79,9 @@ class CorrespondenceMap:
                     if np.array_equal(id, np.zeros_like(id)):
                         continue
                     id_key = tuple(id)
+                    pix_xpos, pix_ypos = pixel_position_callback(i, j) if pixel_position_callback is not None else i, j
                     if corr_map.get(id_key) is None:
-                        corr_map[id_key] = [([i, j], frame_idx)]
+                        corr_map[id_key] = [([pix_xpos, pix_ypos], frame_idx)]
                     else:
                         # check uniqueness, only one pixel position should be added to the same id per every frame
                         if enable_strict_checking:
@@ -85,7 +89,7 @@ class CorrespondenceMap:
                         else:
                             if len(corr_map[id_key]) >= frame_idx:
                                 continue
-                        corr_map[id_key].append(([i, j], frame_idx))
+                        corr_map[id_key].append(([pix_xpos, pix_ypos], frame_idx))
         return CorrespondenceMap(corr_map)
 
 
