@@ -8,3 +8,4 @@ test.py
 rendered_frames
 *.ipynb
 source/tmp
+*.gif

@@ -23,8 +23,7 @@ def load_pipe(
     """
     logu.info(f"[INFO] Loading Stable Diffusion pipeline from {model_path} with controlnets {control_net_model_paths}.")
     no_half = no_half or (platform == 'darwin')
-    torch_dtype = torch.float32 if no_half else torch_dtype
-    model_path = os.path.abspath(model_path)
+    torch_dtype = torch.float32 if no_half else torch.float16
     control_net_model_paths = [str(path) for path in control_net_model_paths]
 
     if isinstance(control_net_model_paths, str):
@@ -43,6 +42,8 @@ def load_pipe(
         controlnet = MultiControlNetModel(controlnets)
 
     if local_files_only or os.path.isfile(model_path):
+        if os.path.exists(model_path):
+            model_path = os.path.abspath(model_path)
         assert os.path.isfile(model_path), f"Model path {os.path.abspath(model_path)} is not a file."
         pipe = StableDiffusionImg2VideoPipeline.from_single_file(
             model_path,

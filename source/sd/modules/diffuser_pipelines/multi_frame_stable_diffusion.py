@@ -1,3 +1,4 @@
+from ..utils import save_latents
 import torch
 import PIL
 import numpy
@@ -5,6 +6,7 @@ import cv2
 import torch.nn.functional as F
 import tqdm
 import os
+import concurrent.futures as cf
 from PIL import Image
 from packaging import version
 from typing import List, Dict, Callable, Union, Optional, Any, Tuple
@@ -23,11 +25,9 @@ from diffusers.configuration_utils import FrozenDict
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.utils import deprecate, logging
 from transformers import CLIPTextModel, CLIPTokenizer
-from concurrent.futures import ThreadPoolExecutor, wait
 from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, preprocess_image
 from ..data_classes.correspondenceMap import CorrespondenceMap
 from .. import log_utils as logu
-from ..utils import save_latents
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -816,8 +816,9 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
                     # compute the previous noisy sample x_t -> x_t-1
                     latents_frame = self.scheduler.step(noise_pred, t, latents_frame, **extra_step_kwargs, return_dict=False)[0]
-                    if hasattr(self.scheduler, '_step_index'):
-                        self.scheduler._step_index -= 1  # Fix step index
+
+                    if hasattr(self.scheduler, "_step_index"):
+                        self.scheduler._step_index -= 1
 
                     # handle inpainting
                     if do_inpainting:
@@ -889,24 +890,20 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
     # TODO: Optimize this function
     def vae_overlap(
         self,
-        latents_list: List[torch.Tensor],
+        latents_seq: List[torch.Tensor],
         corr_map: CorrespondenceMap,
         generator: torch.Generator,
         step: int = None,
         timestep: int = None
     ):
         """
-        Do multi-diffusion overlapping on a list of frame latents according to the corresponding map.
-        :param latents_list: A list of frame latents. Each element is a tensor of shape [B, C, H, W].
-        :param corr_map: CorrespondenceMap instances should have the following structure:
-        {
-            'vertex_id_1': [([pixel_xpos_1, pixel_ypos_1], frame_idx), ([pixel_xpos_2, pixel_ypos_2], frame_idx), ...],
-            'vertex_id_2': [([pixel_xpos_1, pixel_ypos_1], frame_idx), ([pixel_xpos_2, pixel_ypos_2], frame_idx), ...],
-            ...
-        }
-        where vertex_ids are unique
-        :param generator: A torch generator used to sample latent dist.
-        :return: A list of overlapped frame latents.
+        Do overlapping with VAE decode/encode a latents to pixel space.
+        :param latents_seq: A sequence of latents.
+        :param corr_map: A correspondence map.
+        :param generator: A torch.Generator.
+        :param step: The current step.
+        :param timestep: The current timestep.
+        :return: A sequence of overlapped latents.
         """
 
         def _encode(image):
@@ -920,18 +917,14 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
             image = self.vae.decode(latents).sample
             return image
 
-        assert len(latents_list) <= max([len(vertex_info) for _, vertex_info in corr_map.Map.items()])
+        # corr_map_max_length = max([len(vertex_info) for _, vertex_info in corr_map.Map.items()])
+        # assert len(latents_list) <= corr_map_max_length, f"Correspondence map max length {corr_map_max_length} larger than number of latent {len(latents_list)}"
 
-        pixel_value_list = overlap(pixel_value_list, corr_map, step=step, timestep=timestep)
+        pix_val_seq = [_decode(latents) for latents in latents_seq]
+        pix_val_seq = overlap(pix_val_seq, corr_map, step=step, timestep=timestep)
+        pix_val_seq = [_encode(pix_val) for pix_val in pix_val_seq]
 
-        pixel_value_list = [_decode(latents) for latents in latents_list]  # [B, C, H, W]
-
-        for i in range(len(pixel_value_list)):
-            pixel_value_list[i] = _encode(pixel_value_list[i])
-            # scale_factor = latents_list[i].mean() / pixel_value_list[i].mean()
-            # pixel_value_list[i] *= scale_factor
-
-        return pixel_value_list
+        return pix_val_seq
 
     def resize_overlap(
         self,
@@ -978,29 +971,24 @@ def overlap(
     corr_map: CorrespondenceMap,
     step: int = None,
     timestep: int = None,
-    batch_size: int = 1,
+    max_workers: int = 1,
     **kwargs
 ):
     """
-    Do overlapping on a list of frames according to the corresponding map.
-    :param frame_seq: A list of frames. Each element is a tensor of shape [B, C, H, W].
+    Do overlapping on a sequence of frames according to the corresponding map.
+    :param frame_seq: A sequence of frames. Each element is a tensor of shape [B, C, H, W].
     :param corr_map: correspondence map
-    :return: A list of overlapped frames.
+    :return: A sequence of overlapped frames.
     """
     assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
 
-    save_latents(step, timestep, frame_seq, kwargs.get('save_dir'), stem='before_overlap')
-
-    batches = make_batches(frame_seq, batch_size)
+    overlapped_frame_seq = [torch.zeros_like(frame) for frame in frame_seq]
     num_frames = len(frame_seq)
-    bs, channels, frame_h, frame_w = frame_seq[0].shape
-    device, dtype = frame_seq[0].device, frame_seq[0].dtype
-
-    # mask_list = [numpy.zeros((frame_h, frame_w), dtype=numpy.uint8)] * num_frames
+    frame_h, frame_w = frame_seq[0].shape[-2:]
 
     logu.debug(f"[DEBUG] frames are on device {frame_seq[0].device}")
 
-    for v_id, v_info in corr_map.Map.items():
+    def _process(v_id, v_info):
         value = 0
         count = 0
         for t_pix_pos, t in v_info:
@@ -1008,34 +996,26 @@ def overlap(
             if t - 1 < num_frames and w >= 0 and w < frame_w and h >= 0 and h < frame_h:
                 value += frame_seq[t-1][:, :, h, w]
                 count += 1
-                # mask_list[fi-1][h, w] = 1
 
         if count == 0:
-            continue
-        value /= count  # Take average
+            return
+        value /= count
 
         for t_pix_pos, t in v_info:
             h, w = t_pix_pos
             if t-1 < num_frames and w >= 0 and w < frame_w and h >= 0 and h < frame_h:
-                frame_seq[t-1][:, :, h, w] = value
-                # logu.debug(f"overlap: frame {fi-1} pixel ({h}, {w}) value {value}")
+                overlapped_frame_seq[t-1][:, :, h, w] = value
 
-    save_latents(step, timestep, frame_seq, kwargs.get('save_dir'), stem='after_overlap')
-    # [cv2.imwrite(os.path.join(kwargs.get('save_dir'), f'overlap_mask_{step}_{i}.png'), mask_list[i] * 255) for i in range(len(mask_list))]
+    if max_workers == 1:
+        for v_id, v_info in corr_map.Map.items():
+            _process(v_id, v_info)
+    else:
+        with cf.ThreadPoolExecutor as executor:
+            futures = [executor.submit(_process, v_id, v_info) for v_id, v_info in corr_map.Map.items()]
+            cf.wait(futures)
 
-    return frame_seq
+    # DEBUG
+    save_latents(step, timestep, frame_seq, kwargs.get('save_dir'), stem='before_overlap')
+    save_latents(step, timestep, overlapped_frame_seq, kwargs.get('save_dir'), stem='after_overlap')
 
-
-def make_batches(tensors: List[torch.Tensor], batch_size: int = 1):
-    """
-    Make a batch of tensors.
-    :param tensors: A list of tensors.
-    :param batch_size: The batch size.
-    :return: A list of batches.
-    """
-    num_tensors = len(tensors)
-    num_batches = torch.ceil(num_tensors / batch_size)
-    batches = []
-    for i in range(num_batches):
-        batches.append(torch.stack(tensors[i*batch_size:(i+1)*batch_size], dim=0))
-    return batches
+    return overlapped_frame_seq
