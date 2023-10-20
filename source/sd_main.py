@@ -1,6 +1,7 @@
 from sd.modules.data_classes import CorrespondenceMap, ImageFrames
 from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
 from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
+import sd.modules.log_utils as logu
 from diffusers import EulerAncestralDiscreteScheduler
 from sys import platform
 import torch
@@ -8,6 +9,7 @@ import os
 
 def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
     images[0].save(output_fname, format="GIF", save_all=True, append_images=images[1:], loop=0)
+    logu.success(f'[SUCESS] Saved image sequence as {output_fname}')
 
 class Config:
     # pipeline init configs
@@ -70,8 +72,8 @@ if __name__ == '__main__':
         control_images=controlnet_images,
         width=config.width,
         height=config.height,
-        num_inference_steps=20,
-        strength=1,
+        num_inference_steps=10,
+        strength=0.75,
         generator=generator,
         guidance_scale=7,
         controlnet_conditioning_scale=0.5,

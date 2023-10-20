@@ -6,7 +6,7 @@ import cv2
 import torch.nn.functional as F
 import tqdm
 import os
-import concurrent.futures as cf
+from torch.multiprocessing import Pool
 from PIL import Image
 from packaging import version
 from typing import List, Dict, Callable, Union, Optional, Any, Tuple
@@ -990,7 +990,7 @@ def overlap(
     corr_map: CorrespondenceMap,
     step: int = None,
     timestep: int = None,
-    max_workers: int = 1,
+    max_workers: int = 4,
     **kwargs
 ):
     """
@@ -1029,9 +1029,9 @@ def overlap(
         for v_id, v_info in corr_map.Map.items():
             _process(v_id, v_info)
     else:
-        with cf.ThreadPoolExecutor as executor:
-            futures = [executor.submit(_process, v_id, v_info) for v_id, v_info in corr_map.Map.items()]
-            cf.wait(futures)
+        with Pool(processes=max_workers) as pool:
+            for v_id, v_info in corr_map.Map.items():
+                pool.apply_async(_process, (v_id, v_info))
 
     # DEBUG
     try:
