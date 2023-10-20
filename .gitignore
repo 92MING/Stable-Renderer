@@ -9,3 +9,4 @@ rendered_frames
 *.ipynb
 source/tmp
 *.gif
+.cache/
