@@ -16,16 +16,19 @@ OUTPUT_DIR = os.path.join(PROJECT_DIR, 'output')
 '''output directory, for runtime map, etc.'''
 MAP_OUTPUT_DIR = os.path.join(OUTPUT_DIR, 'runtime_map')
 '''runtime map output directory, for saving normal map, pos map, id map, etc., during runtime.'''
+TEMP_OUTPUT_DIR = os.path.join(OUTPUT_DIR, 'temp')
+
 @Overload
-def get_map_output_dir():
-    '''return a dir under MAP_OUTPUT_DIR with current time as its name'''
+def get_map_output_dir(create_if_not_exists:bool=True):
+    '''Return a dir under MAP_OUTPUT_DIR with current time as its name. Will create one with a unique index.'''
     count = 0
     cur_time = datetime.datetime.now().strftime('%Y-%m-%d') + f'_{count}'
     while os.path.exists(os.path.join(MAP_OUTPUT_DIR, cur_time)):
         count += 1
         cur_time = datetime.datetime.now().strftime('%Y-%m-%d') + f'_{count}'
     cur_map_output_dir = os.path.join(MAP_OUTPUT_DIR, cur_time)
-    os.makedirs(cur_map_output_dir, exist_ok=True)
+    if create_if_not_exists:
+        os.makedirs(cur_map_output_dir, exist_ok=True)
     return cur_map_output_dir
 @Overload
 def get_map_output_dir(day:int, index:int, month:int=None, year:int=None):

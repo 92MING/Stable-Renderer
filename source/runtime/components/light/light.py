@@ -38,3 +38,5 @@ class Light(Component):
         if self._shadowMapID is not None:
             return # already created
         if self._Shadow_Map_Dimension == 2:
+            # TODO
+            pass

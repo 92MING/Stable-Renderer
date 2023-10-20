@@ -1,7 +1,9 @@
+import numpy
+
 from .utils.sortableElement import SortableElement
 from .. import log_utils as logu
 from PIL import Image
-from typing import Callable, Tuple
+from utils.path_utils import MAP_OUTPUT_DIR
 import os
 import re
 import pickle
@@ -54,25 +56,32 @@ class CorrespondenceMap:
         return self._num_frames
 
     @classmethod
-    def from_existing_directory_img(cls,
-                                    directory: str,
-                                    num_frames: int = None,
-                                    pixel_position_callback: Callable[[int, int], Tuple[int, int]] = None,
-                                    enable_strict_checking: bool = True,
-                                    use_cache: bool = False):
+    def Load_ID_Data_From_Dir(cls,
+                              directory: str=None,
+                              num_frames: int = None,
+                              pixel_position_callback: Callable[[int, int], Tuple[int, int]] = None,
+                              enable_strict_checking: bool = True,
+                              use_cache: bool = False):
         r"""
-        Create CorrespondenceMap instance from using the images in an existing directory.
+        Create CorrespondenceMap instance from using the images in an existing output path .
         Directory should exist and numeric values should be present in the filename for every image files.
         The numeric values will be used as the key to sort id maps into ascending order for the construction of CorrespondenceMap
         Files not ending with ('.jpeg', '.png', '.bmp', '.jpg') are considered as non-image files, which will be skipped.
 
-        :param directory: directory where id maps are stored as images
+        :param directory: directory where id maps are stored as images. If not given, the default output path with lastest timestamp will be used.
         :param num_frames: first n frames to be used for building correspondence map, all frames will be used if not specified
         :param pixel_position_callback: callback function to be applied on pixel position read from frames
         :param enable_strict_checking: when enabled, check uniqueness, only one pixel position should be added to the same id in every frame,
                                         when disabled, only the first pixel position will be added to the same id in every frame, subsequent pixels will be ignored
+        :param use_cache: whether to use cache to speed up loading. Cache will be generated if not found.
 
         """
+        if directory is None:
+            current_dirs = os.listdir(MAP_OUTPUT_DIR)
+            if len(current_dirs) == 0:
+                raise FileNotFoundError(f"No output directory found in {MAP_OUTPUT_DIR}")
+            directory = os.path.join(MAP_OUTPUT_DIR, sorted(current_dirs)[-1], 'id')
+
         if use_cache:
             cache_corr_map = cls._load_correspodence_map_from_cache(directory)
             if cache_corr_map is not None:
@@ -88,10 +97,9 @@ class CorrespondenceMap:
             match = re.search(r"\d+", file)
             if match:
                 frame_idx = int(match.group())
-                id_data_img = Image.open(os.path.join(directory, file))
+                id_data_array = numpy.load(os.path.join(directory, file))
                 if i == 0:
-                    width, height = id_data_img.size
-                id_data_array = np.array(id_data_img)
+                    width, height = id_data_array.shape[0], id_data_array.shape[1]
                 id_data_container.append(SortableElement(value=frame_idx, object=id_data_array))
             else:
                 raise RuntimeError(f"{file} has no numeric component in filename.")

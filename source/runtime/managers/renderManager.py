@@ -1,20 +1,15 @@
 import os.path
-import time
-
 from .manager import Manager
 from .runtimeManager import RuntimeManager
 from utils.data_struct.event import AutoSortTask
-import glm
 import OpenGL.GL as gl
 import numpy as np
 import ctypes
-from utils.path_utils import OUTPUT_DIR
 from static.shader import Shader
 from static.enums import RenderOrder
 from static.mesh import Mesh
 import glfw
 from typing import Union
-from PIL import Image
 
 class RenderManager(Manager):
     '''Manager of all rendering stuffs'''
@@ -249,12 +244,13 @@ class RenderManager(Manager):
             except Exception as e:
                 print(f"Render Task ({order}, {func}) Error. Msg: {e}. Skipped.")
         self._renderTasks._tempEvents.clear()
-    def _getTextureImg(self, gTexBufferID, glFormat, glDataType, npDataType, channel_num)->np.ndarray:
+    def _getTextureImg(self, gTexBufferID, glFormat, glDataType, npDataType, channel_num, flipY=True)->np.ndarray:
         gl.glBindTexture(gl.GL_TEXTURE_2D, gTexBufferID)
         data = gl.glGetTexImage(gl.GL_TEXTURE_2D, 0, glFormat, glDataType)
         data = np.frombuffer(data, dtype=npDataType)
         data = data.reshape((self.engine.WindowManager.WindowSize[1], self.engine.WindowManager.WindowSize[0], channel_num))
-        data = data[::-1, :, :] # flip array upside down
+        if flipY:
+            data = data[::-1, :, :] # flip array upside down
         return data
     # endregion
 
@@ -368,39 +364,20 @@ class RenderManager(Manager):
 
         # region SD
         # output data to SD
-        colorAndDepthData = self._getTextureImg(self._gBuffer_color_and_depth, gl.GL_RGBA, gl.GL_FLOAT, np.float32, 4)
+        colorAndDepthData = self._getTextureImg(self._gBuffer_color_and_depth, gl.GL_RGBA, gl.GL_FLOAT, np.float32, 4, flipY=True)
         colorData = colorAndDepthData[:, :, :3]
         depthData = colorAndDepthData[:, :, 3]
-        posData = self._getTextureImg(self._gBuffer_pos, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
-        normalData = self._getTextureImg(self._gBuffer_normal, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
-        idData = self._getTextureImg(self._gBuffer_id, gl.GL_RGB_INTEGER, gl.GL_INT, np.int32, 3)
+        posData = self._getTextureImg(self._gBuffer_pos, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3, flipY=True)
+        normalData = self._getTextureImg(self._gBuffer_normal, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3, flipY=True)
+        idData = self._getTextureImg(self._gBuffer_id, gl.GL_RGB_INTEGER, gl.GL_INT, np.int32, 3, flipY=True)
 
-        if self.engine.IsDebugMode:
-            print('[DEBUG] Color data is empty: ', np.array_equal(colorData, np.zeros_like(colorData)))
-            print('[DEBUG] Pos data is empty: ', np.array_equal(posData, np.zeros_like(posData)))
-            print('[DEBUG] Normal data is empty: ', np.array_equal(normalData, np.zeros_like(normalData)))
-            print('[DEBUG] Id data is empty: ', np.array_equal(idData, np.zeros_like(idData)))
-            print('[DEBUG] Depth data is empty: ', np.array_equal(depthData, np.zeros_like(depthData)))
-
-        if self.engine.RuntimeManager.FrameCount % self.engine.OutputManager.SaveMapPerNumFrame == 0:
-            color_img = Image.fromarray((colorData*255).astype(np.uint8), 'RGB')
-            color_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'color', f'color_img_{self.engine.RuntimeManager.FrameCount}.png'))
-
-            pos_img = Image.fromarray((posData * 255).astype(np.uint8), 'RGB')
-            pos_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'pos', f'pos_img_{self.engine.RuntimeManager.FrameCount}.png'))
-
-            normal_img = Image.fromarray((normalData * 255).astype(np.uint8), 'RGB')
-            normal_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'normal', f'normal_img_{self.engine.RuntimeManager.FrameCount}.png'))
-
-            #id_img = Image.fromarray((idData * 255).astype(np.uint8), 'RGB')
-            #id_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'id', f'id_img_{self.engine.RuntimeManager.FrameCount}.png'))
-
-            depth_data_max, depth_data_min = np.max(depthData), np.min(depthData)
-            print(f'[DEBUG] depth_data_max: {depth_data_max}, depth_data_min: {depth_data_min}')
-            depth_data_normalized = (depthData - depth_data_min) / (depth_data_max - depth_data_min)
-            depth_data_int8 = (depth_data_normalized * 255).astype(np.uint8)
-            depth_img = Image.fromarray(np.squeeze(depth_data_int8), mode='L')
-            depth_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'depth', f'depth_img_{self.engine.RuntimeManager.FrameCount}.png'))
+        if self.engine.SDManager.ShouldOutputFrame:
+            sdManager = self.engine.SDManager
+            sdManager.OutputMap('color', colorData)
+            sdManager.OutputMap('pos', posData)
+            sdManager.OutputMap('normal', normalData)
+            sdManager.OuputIdMap(idData)
+            sdManager.OutputDepthMap(depthData)
 
         # Code run normally until here, pending fixes for idData
         # get data back from SD

@@ -48,7 +48,7 @@ if __name__ == '__main__':
     generator = torch.Generator(device=config.device).manual_seed(config.seed)
 
     # 2. Prepare data
-    corr_map = CorrespondenceMap.from_existing_directory_img(
+    corr_map = CorrespondenceMap.Load_ID_Data_From_Dir(
         os.path.join(config.frames_dir, 'id'),
         enable_strict_checking=False,
         pixel_position_callback=lambda x,y: (x//8, y//8),

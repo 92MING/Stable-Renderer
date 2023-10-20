@@ -27,11 +27,7 @@ if __name__ == '__main__':
             self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, material=self.boatMaterial)
             self.boat.addComponent(AutoRotation)
 
-    if os.path.exists('./tmp'):
-        shutil.rmtree('./tmp')
     Sample.Run(enableGammaCorrection=True,
                debug=True,
                winSize=(1080, 720),
-               output_dir=get_map_output_dir(),
-               output_subfolders=['color', 'pos', 'normal', 'id', 'depth'],
-               save_map_per_num_frame=30)
+               needOutputMaps=True,)
