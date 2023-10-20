@@ -25,7 +25,7 @@ from transformers import CLIPTextModel, CLIPTokenizer
 from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, preprocess_image
 from ..data_classes.correspondenceMap import CorrespondenceMap
 from .. import log_utils as logu
-from concurrent.futures import ThreadPoolExecutor, wait
+import multiprocessing
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -920,29 +920,30 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         # logu.debug(f"[DEBUG] Shape of images: {images[0].shape}. Number of frames: {num_frames}.")
         # logu.debug(f"[DEBUG] Data type of images: {images[0].dtype}. Device of images: {images[0].device}.")
 
-        def process_pixel(image, value, count, h, w, i):
-            value[i][:, :, h, w] += image[:, :, h, w]
-            count[i][:, :, h, w] += 1
+        def process_pixel(lock, images, values, counts, h, w, i):
+            with lock:
+                values[i][:, :, h, w] += images[i][:, :, h, w]
+                counts[i][:, :, h, w] += 1
 
-        value = [torch.zeros_like(image) for image in images]  # [B, C, H, W]
-        count = value.copy()  # [B, C, H, W]
-        with ThreadPoolExecutor() as executor:
-            thread_pool = []
-            for id, vertex_infos in corr_map.Map.items():
-                for pixel_pos, frame_idx in vertex_infos:
-                    h, w = pixel_pos
-                    i = frame_idx - 1
-                    if i < num_frames and w >= 0 and w < screen_w and h >= 0 and h < screen_h:
-                        thread = executor.submit(process_pixel,
-                                                 images[i], value, count, h, w, i)
-                        thread_pool.append(thread)
-            wait(thread_pool)
+        values = [torch.zeros_like(image) for image in images]  # [B, C, H, W]
+        counts = values.copy()  # [B, C, H, W]
 
+        lock = multiprocessing.Lock()
+        process_pool = multiprocessing.Pool()
+        for id, vertex_infos in corr_map.Map.items():
+            for pixel_pos, frame_idx in vertex_infos:
+                h, w = pixel_pos
+                i = frame_idx - 1
+                if i < num_frames and w >= 0 and w < screen_w and h >= 0 and h < screen_h:
+                    process_pool.apply_async(process_pixel, 
+                                             (lock, images, values, counts, h, w, i))
+        process_pool.close()
+        process_pool.join()
         for i in range(num_frames):
-            value[i] = torch.where(count[i] > 0, value[i] / count[i], torch.zeros_like(images[i]))  # TODO: Test different last arguement
+            values[i] = torch.where(counts[i] > 0, values[i] / counts[i], torch.zeros_like(images[i]))  # TODO: Test different last arguement
             # value[i] = _encode(value[i])
 
-        return value
+        return values
 
 
 def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):

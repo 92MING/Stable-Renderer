@@ -47,7 +47,8 @@ if __name__ == '__main__':
         os.path.join(config.frames_dir, 'id'),
         enable_strict_checking=False,
         pixel_position_callback=lambda x,y: (x//8, y//8),
-        num_frames=config.num_frames)
+        num_frames=config.num_frames,
+        use_cache=True)
     images = ImageFrames.from_existing_directory(
         os.path.join(config.frames_dir, 'color'),
         num_frames=config.num_frames).Data
