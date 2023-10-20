@@ -4,7 +4,7 @@ from runtime.gameObj import GameObject
 from runtime.component import Component
 from runtime.engine import Engine
 from static import Material, Mesh, Texture
-from utils.path_utils import RESOURCES_DIR
+from utils.path_utils import *
 import shutil
 
 if __name__ == '__main__':
@@ -32,6 +32,6 @@ if __name__ == '__main__':
     Sample.Run(enableGammaCorrection=True,
                debug=True,
                winSize=(1080, 720),
-               output_dir='./tmp',
+               output_dir=get_map_output_dir(),
                output_subfolders=['color', 'pos', 'normal', 'id', 'depth'],
                save_map_per_num_frame=30)
