@@ -7,6 +7,7 @@ import re
 import pickle
 import numpy as np
 from tqdm import tqdm
+from typing import Callable, Tuple
 
 CACHE_DIR = "./.cache"
 
@@ -22,9 +23,12 @@ class CorrespondenceMap:
     """
 
     def __init__(self,
-                 correspondence_map: dict):
+                 correspondence_map: dict, width: int = None, height: int = None, num_frames: int = None):
         # avoid calling directly, should be initiated using classmethods
         self._correspondence_map = correspondence_map
+        self._width = width
+        self._height = height
+        self._num_frames = num_frames
 
     def __str__(self):
         return self._correspondence_map.__str__()
@@ -32,6 +36,22 @@ class CorrespondenceMap:
     @property
     def Map(self) -> dict:
         return self._correspondence_map
+
+    @property
+    def width(self) -> int:
+        return self._width
+
+    @property
+    def height(self) -> int:
+        return self._height
+
+    @property
+    def size(self) -> tuple:
+        return (self._width, self._height)
+
+    @property
+    def num_frames(self) -> int:
+        return self._num_frames
 
     @classmethod
     def from_existing_directory_img(cls,
@@ -61,7 +81,7 @@ class CorrespondenceMap:
         # Load and sort image maps from directory according to frame number
         assert os.path.exists(directory), f"Directory {directory} not found"
         id_data_container = []
-        for file in os.listdir(directory):
+        for i, file in enumerate(os.listdir(directory)):
             if not file.endswith((".jpeg", ".png", ".bmp", ".jpg")):
                 logu.warn(f"[INFO] Skipping non-image file {file}")
                 continue
@@ -69,13 +89,18 @@ class CorrespondenceMap:
             if match:
                 frame_idx = int(match.group())
                 id_data_img = Image.open(os.path.join(directory, file))
+                if i == 0:
+                    width, height = id_data_img.size
                 id_data_array = np.array(id_data_img)
                 id_data_container.append(SortableElement(value=frame_idx, object=id_data_array))
             else:
                 raise RuntimeError(f"{file} has no numeric component in filename.")
+
         sorted_ids = sorted(id_data_container)
         if num_frames is not None:
             sorted_ids = sorted_ids[:num_frames]
+        else:
+            num_frames = len(sorted_ids)
         # Prepare correspondence map
         logu.info("[INFO] Preparing correspondence map...")
         corr_map = {}
@@ -100,7 +125,7 @@ class CorrespondenceMap:
                                 continue
                         corr_map[id_key].append(([pix_xpos, pix_ypos], frame_idx))
 
-        ret = CorrespondenceMap(corr_map)
+        ret = CorrespondenceMap(corr_map, width, height, num_frames)
         if use_cache:
             cls._save_correspondence_map_to_cache(directory, ret)
         return ret
