@@ -9,6 +9,7 @@ from PIL import Image
 from pathlib import Path
 from . import config
 from . import log_utils as logu
+from .data_classes.correspondenceMap import CorrespondenceMap
 
 
 def list_frames(frame_dir):
@@ -89,7 +90,7 @@ def make_depth_images(images: List[Image.Image]):
     return depth_images
 
 
-def make_correspondence_map(from_dir, save_to_path):
+def make_correspondence_map(from_dir, save_to_path, force_recreate=False):
     """
     Make correspondence map from a directory of images.
     If the correspondence map already exists, then load it.
@@ -99,8 +100,7 @@ def make_correspondence_map(from_dir, save_to_path):
     :return: The correspondence map.
     """
     import pickle
-    from .data_classes.correspondenceMap import CorrespondenceMap
-    if save_to_path.is_file():
+    if save_to_path.is_file() and not force_recreate:
         try:
             with open(save_to_path, 'rb') as f:
                 corr_map = pickle.load(f)
@@ -117,11 +117,16 @@ def make_correspondence_map(from_dir, save_to_path):
     )
     with open(save_to_path, 'wb') as f:
         pickle.dump(corr_map, f)
+
+    # Optionally save as txt file
+    with open(save_to_path.with_suffix('.txt'), 'w') as f:
+        f.write(str(corr_map))
+
     logu.success(f"[SUCCESS] Correspondence map created and saved to {save_to_path}")
     return corr_map
 
 
-def save_latents(i, t, latents):
+def save_latents(i, t, latents, save_dir, stem='latents'):
     """
     Callback function to save vae-approx-decoded latents during inference.
     :param i: The current inference step.
@@ -130,11 +135,29 @@ def save_latents(i, t, latents):
     """
     from .vae_approx import latents_to_single_pil_approx
     logu.info(f"[INFO] Saving latents at inference step {i} and time step {t}")
-    save_dir = config.test_dir / 'latents'
+
+    save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
+
     if isinstance(latents, list):
         image = [latents_to_single_pil_approx(lat) for lat in latents]
-        [image.save(save_dir / f'latents_{i:02d}_{j:02d}.png') for j, image in enumerate(image)]
+        [image.save(save_dir / f'{stem}_{i:02d}_{j:02d}.png') for j, image in enumerate(image)]
     else:
         image = latents_to_single_pil_approx(latents)
-        image.save(save_dir / f'latents_{i:02d}.png')
+        image.save(save_dir / f'{stem}_{i:02d}.png')
+
+
+def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, n: int = 2, stem: str = 'corr_map'):
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    image_seq = [numpy.zeros((corr_map.height, corr_map.width, 3), dtype=numpy.uint8)] * min(n, corr_map.num_frames)
+    color_red = numpy.array([255, 0, 0], dtype=numpy.uint8)
+    color_white = numpy.array([255, 255, 255], dtype=numpy.uint8)
+    first_v_id, first_v_info = list(corr_map.Map.items())[0]
+    for v_id, v_info in corr_map.Map.items():
+        for t_pix_pos, t in v_info:
+            h, w = t_pix_pos
+            if t-1 < n and h >= 0 and h < corr_map.height and w >= 0 and w < corr_map.width:
+                image_seq[t-1][h, w, :] = color_red if v_id == first_v_id else color_white
+
+    [cv2.imwrite(str(save_dir / f'{stem}_{i:02d}.png'), cv2.cvtColor(image, cv2.COLOR_RGB2BGR)) for i, image in enumerate(image_seq)]

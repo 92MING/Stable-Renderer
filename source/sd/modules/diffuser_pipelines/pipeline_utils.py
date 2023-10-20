@@ -5,6 +5,7 @@ from typing import List
 from diffusers import ControlNetModel
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from .multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
+from .. import log_utils as logu
 
 
 def load_pipe(
@@ -13,15 +14,19 @@ def load_pipe(
     use_safetensors: bool = True,
     scheduler_type: str = "euler-ancestral",
     no_half: bool = False,
+    device='cpu',
+    torch_dtype=torch.float16,
     local_files_only: bool = False,
 ) -> StableDiffusionImg2VideoPipeline:
     """
     Load a Stable Diffusion pipeline with some controlnets.
     """
+    logu.info(f"[INFO] Loading Stable Diffusion pipeline from {model_path} with controlnets {control_net_model_paths}.")
     no_half = no_half or (platform == 'darwin')
-    torch_dtype = torch.float32 if no_half else torch.float16
+    torch_dtype = torch.float32 if no_half else torch_dtype
     model_path = os.path.abspath(model_path)
     control_net_model_paths = [str(path) for path in control_net_model_paths]
+
     if isinstance(control_net_model_paths, str):
         controlnet = ControlNetModel.from_pretrained(
             control_net_model_paths,
@@ -57,6 +62,7 @@ def load_pipe(
         )
 
     pipe.safety_checker = None
+    pipe.to(device)
 
     # Enable XFormers
     try:
@@ -64,4 +70,7 @@ def load_pipe(
     except ModuleNotFoundError:
         print("[WARNING] XFormers not found. You can install XFormers with `pip install xformers` to speed up the generation.")
     # pipe.enable_model_cpu_offload()
+
+    logu.success(f"[SUCCESS] Pipe loaded on {device} with dtype {torch_dtype}.")
+
     return pipe
