@@ -12,35 +12,6 @@ layout (std140) uniform Matrices {
 	vec3 cameraPos;
 	vec3 cameraDir;
 };
-struct LightInfo {
-	int type; // 0: directional, 1: point, 2: spot
-	// common
-	vec3 position; // world position
-	vec3 direction; // world direction
-	vec3 color;
-	float intensity;
-
-	// attenuation
-	float constant;
-	float linear;
-	float quadratic;
-
-	// spot light
-	float cutOff;
-	float outerCutOff;
-
-	// shadow
-	int castShadow;
-	mat4 lightSpaceMatrix;
-	sampler2D shadowMap2D; // for directional light
-	samplerCube shadowMapCube; // for point light, spot light
-};
-layout (std140) uniform Lights{
-	vec3 ambient_color;
-	float ambient_intensity;
-	LightInfo lights[MAX_LIGHTS_NUM];
-	int lightCount;
-};
 
 layout (location = 0) out vec4 outColorAndDepth; // (r, g, b, depth)
 layout (location = 1) out vec3 outPos;

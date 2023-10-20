@@ -392,8 +392,8 @@ class RenderManager(Manager):
             normal_img = Image.fromarray((normalData * 255).astype(np.uint8), 'RGB')
             normal_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'normal', f'normal_img_{self.engine.RuntimeManager.FrameCount}.png'))
 
-            id_img = Image.fromarray((idData * 255).astype(np.uint8), 'RGB')
-            id_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'id', f'id_img_{self.engine.RuntimeManager.FrameCount}.png'))
+            #id_img = Image.fromarray((idData * 255).astype(np.uint8), 'RGB')
+            #id_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'id', f'id_img_{self.engine.RuntimeManager.FrameCount}.png'))
 
             depth_data_max, depth_data_min = np.max(depthData), np.min(depthData)
             print(f'[DEBUG] depth_data_max: {depth_data_max}, depth_data_min: {depth_data_min}')
