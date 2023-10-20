@@ -33,7 +33,10 @@ if __name__ == '__main__':
     print("[INFO] Loading pipeline...")
     pipe: StableDiffusionImg2VideoPipeline = load_pipe(
         model_path=config.model_path,  # Stable Diffusion model path
-        control_net_model_paths=config.control_net_model_paths,       use_safetensors=True,
+        control_net_model_paths=config.control_net_model_paths,
+        use_safetensors=True,
+        torch_dtype=torch.float16,
+        device=config.device,
         no_half=(platform == 'darwin')  # Disable fp16 on MacOS
     )
     scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
@@ -67,13 +70,15 @@ if __name__ == '__main__':
         control_images=controlnet_images,
         width=config.width,
         height=config.height,
-        num_inference_steps=32,
+        num_inference_steps=20,
         strength=1,
         generator=generator,
         guidance_scale=7,
         controlnet_conditioning_scale=0.5,
         add_predicted_noise=True,
         correspondence_map=corr_map,
+        overlap_algorithm='resize_overlap',
+        callback_kwargs={'save_dir': "./sample"}
         # callback=utils.view_latents,
     ).images
 

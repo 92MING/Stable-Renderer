@@ -421,6 +421,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         control_guidance_start: Union[float, List[float]] = 0.0,
         control_guidance_end: Union[float, List[float]] = 1.0,
         correspondence_map: Optional[CorrespondenceMap] = None,
+        overlap_algorithm: str = 'resize_overlap',
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -842,13 +843,31 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 # logu.debug(f"[DEBUG] Mean latents before overlapping: {[lat.mean().float() for lat in denoised_latents_frame_list]}")
                 if do_overlapping:
                     # logu.debug(f"[DEBUG] Mean latents after overlapping: {[lat.mean().float() for lat in latents_list]}")
-                    latents_seq = self.resize_overlap(
-                        latents_seq,
-                        corr_map=correspondence_map,
-                        step=i,
-                        timestep=t,
-                        save_dir=callback_kwargs.get('save_dir')
-                    )
+                    if overlap_algorithm == "resize_overlap":
+                        latents_seq = self.resize_overlap(
+                            latents_seq,
+                            corr_map=correspondence_map,
+                            step=i,
+                            timestep=t,
+                            **callback_kwargs
+                        )
+                    elif overlap_algorithm == "overlap":
+                        latents_seq = overlap(
+                            latents_seq,
+                            corr_map=correspondence_map,
+                            step=i,
+                            timestep=t,
+                        )
+                    elif overlap_algorithm == "vae_overlap":
+                        latents_seq = self.vae_overlap(
+                            latents_seq,
+                            corr_map=correspondence_map,
+                            generator=generator,
+                            step=i,
+                            timestep=t,
+                        )
+                    else:
+                        raise NotImplementedError(f"Unknown overlap algorithm {overlap_algorithm}")
 
                 # call the callback, if provided
                 if s == len(timesteps) - 1 or ((s + 1) > num_warmup_steps and (s + 1) % self.scheduler.order == 0):
@@ -1015,7 +1034,10 @@ def overlap(
             cf.wait(futures)
 
     # DEBUG
-    save_latents(step, timestep, frame_seq, kwargs.get('save_dir'), stem='before_overlap')
-    save_latents(step, timestep, overlapped_frame_seq, kwargs.get('save_dir'), stem='after_overlap')
+    try:
+        save_latents(step, timestep, frame_seq, kwargs.get('save_dir'), stem='before_overlap')
+        save_latents(step, timestep, overlapped_frame_seq, kwargs.get('save_dir'), stem='after_overlap')
+    except Exception as e:
+        logu.error(f"[ERROR] {e}, latents not saved")
 
     return overlapped_frame_seq
