@@ -6,13 +6,19 @@ from collections import OrderedDict
 from utils.type_utils import valueTypeCheck
 from utils.global_utils import GetOrAddGlobalValue
 _overloadFuncDict = GetOrAddGlobalValue("_overloadFuncDict", dict()) # {clsName: {funcName: [(prams,func, acceptArgs, accreptKws),]}}
+_overLoadModuleFuncDict = GetOrAddGlobalValue("_overLoadModuleFuncDict", dict()) # {moduleName: {funcName: [(prams,func, acceptArgs, accreptKws),]}}
 
-def _getClsAndFuncName(func):
-    funcName = func.__qualname__
-    if '.' not in funcName:
-        raise TypeError('The function must be a class method.')
-    clsName, funcName = funcName.split('.')[-2:]
-    return clsName, funcName
+def _getNames(func):
+    # return (clsName or moduleName, funcName, whether from module)
+    fromModule = False
+    upperLevelName = func.__qualname__
+    if '.' not in upperLevelName:
+        fromModule = True
+        funcName = upperLevelName
+        upperLevelName = func.__module__
+    else:
+        upperLevelName, funcName = upperLevelName.split('.')[-2:]
+    return upperLevelName, funcName, fromModule
 
 class _WrongInputError(Exception):
     pass
@@ -22,20 +28,21 @@ class WrongCallingError(Exception):
     pass
 
 class Overload:
-    '''Class method overload. Must be used inside class definition.'''
+    '''Must be used inside class definition.'''
     def __init__(self, func):
         self._instance = None
-        clsname, funcname = _getClsAndFuncName(func)
-        self._funcname = funcname
-        if clsname not in _overloadFuncDict:
-            _overloadFuncDict[clsname] = dict()
-        if funcname not in _overloadFuncDict[clsname]:
-            _overloadFuncDict[clsname][funcname] = []
-        varnames = func.__code__.co_varnames
-        if len(varnames)==0:
-            raise TypeError('The function must be a class method.')
+        upperName, funcName, fromModule = _getNames(func)
+        self._fromModule = fromModule
+        self._upperName = upperName
+        self._funcname = funcName
+        targetDict = _overloadFuncDict if not fromModule else _overLoadModuleFuncDict
+        if upperName not in targetDict:
+            targetDict[upperName] = dict()
+        if funcName not in targetDict[upperName]:
+            targetDict[upperName][funcName] = []
         prams:OrderedDict = signature(func).parameters.copy()
-        prams.popitem(last=False) # remove 'self'
+        if not fromModule:
+            prams.popitem(last=False) # remove 'self'
         acceptArgs = False
         acceptKws = False
         for key in tuple(prams.keys()):
@@ -45,7 +52,7 @@ class Overload:
             elif prams[key].kind == Parameter.VAR_POSITIONAL:
                 prams.pop(key)
                 acceptArgs = True
-        _overloadFuncDict[clsname][funcname].append((prams, func, acceptArgs, acceptKws))
+        targetDict[upperName][funcName].append((prams, func, acceptArgs, acceptKws))
 
     def _getArgsAndKws(self, prams: OrderedDict, args, kwargs, acceptArgs, acceptKws):
 
@@ -89,17 +96,27 @@ class Overload:
         self._instance = instance
         return self
     def __call__(self, *args, **kwargs):
-        if self._instance is None:
-            raise WrongCallingError('The function must be called by an instance of class.')
-        clsnames = [cls.__qualname__ for cls in getmro(self._instance.__class__)][:-1]
-        for clsname in clsnames:
-            if clsname in _overloadFuncDict and self._funcname in _overloadFuncDict[clsname]:
-                for prams, func, acceptArgs, acceptKws in _overloadFuncDict[clsname][self._funcname]:
+        if not self._fromModule:
+            if self._instance is None:
+                raise WrongCallingError('The function must be called by an instance of class.')
+            clsnames = [cls.__qualname__ for cls in getmro(self._instance.__class__)][:-1]
+            for clsname in clsnames:
+                if clsname in _overloadFuncDict and self._funcname in _overloadFuncDict[clsname]:
+                    for prams, func, acceptArgs, acceptKws in _overloadFuncDict[clsname][self._funcname]:
+                        try:
+                            callingArgs, callingKws = self._getArgsAndKws(prams, args, kwargs, acceptArgs, acceptKws)
+                            return func(self._instance, *callingArgs, **callingKws)
+                        except _WrongInputError:
+                            pass
+            raise NoSuchFunctionError(f'No such function with args: {args} and kwargs:{kwargs}')
+        else:
+            if self._upperName in _overLoadModuleFuncDict and self._funcname in _overLoadModuleFuncDict[self._upperName]:
+                for prams, func, acceptArgs, acceptKws in _overLoadModuleFuncDict[self._upperName][self._funcname]:
                     try:
                         callingArgs, callingKws = self._getArgsAndKws(prams, args, kwargs, acceptArgs, acceptKws)
-                        return func(self._instance, *callingArgs, **callingKws)
+                        return func(*callingArgs, **callingKws)
                     except _WrongInputError:
                         pass
-        raise NoSuchFunctionError(f'No such function with args: {args} and kwargs:{kwargs}')
+            raise NoSuchFunctionError(f'No such function with args: {args} and kwargs:{kwargs}')
 
 __all__ = ["Overload", "NoSuchFunctionError", "WrongCallingError"]

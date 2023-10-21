@@ -1,20 +1,15 @@
 import os.path
-import time
-
 from .manager import Manager
 from .runtimeManager import RuntimeManager
 from utils.data_struct.event import AutoSortTask
-import glm
 import OpenGL.GL as gl
 import numpy as np
 import ctypes
-from utils.path_utils import OUTPUT_DIR
 from static.shader import Shader
 from static.enums import RenderOrder
 from static.mesh import Mesh
 import glfw
 from typing import Union
-from PIL import Image
 
 
 class RenderManager(Manager):
@@ -36,7 +31,6 @@ class RenderManager(Manager):
         self._deferRenderTasks = AutoSortTask()
         self._postProcessTasks = AutoSortTask()
         self._init_opengl()  # opengl settings
-        self._init_UBO_data()  # UBO for MVP matrices
         self._init_defer_render()  # framebuffers for post-processing
         self._init_post_process(enableHDR=enableHDR, enableGammaCorrection=enableGammaCorrection, gamma=gamma, exposure=exposure,
                                 saturation=saturation, brightness=brightness, contrast=contrast)
@@ -47,32 +41,6 @@ class RenderManager(Manager):
         gl.glClearColor(0, 0, 0, 0)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glEnable(gl.GL_CULL_FACE)
-
-    def _init_UBO_data(self):
-        self._UBO_modelMatrix = glm.mat4(1.0)
-        self._UBO_viewMatrix = glm.mat4(1.0)
-        self._UBO_projectionMatrix = glm.mat4(1.0)
-        self._UBO_MVP = glm.mat4(1.0)
-        self._UBO_MVP_IT = glm.mat4(1.0)
-        self._UBO_MV = glm.mat4(1.0)
-        self._UBO_MV_IT = glm.mat4(1.0)
-        self._UBO_cam_pos = glm.vec3(0.0, 0.0, 0.0)  # world camera position
-        self._UBO_cam_dir = glm.vec3(0.0, 0.0, 0.0)  # world camera direction
-
-        self._matrixUBO = gl.glGenBuffers(1)
-        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self._matrixUBO)
-        gl.glBufferData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + 2 * glm.sizeof(glm.vec3), None, gl.GL_DYNAMIC_DRAW)
-        gl.glBindBufferBase(gl.GL_UNIFORM_BUFFER, self.MatrixUBO_BindingPoint, self._matrixUBO)
-
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 0, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_modelMatrix))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 1 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_viewMatrix))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 2 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_projectionMatrix))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))  # MVP
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))  # MVP_IT
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 5 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV))  # MV
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 6 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV_IT))  # MV_IT
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_pos))  # camera world position
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + glm.sizeof(glm.vec3), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_dir))  # camera world forward direction
 
     def _init_defer_render(self):
         self._default_gBuffer_shader = Shader.Default_GBuffer_Shader()
@@ -286,89 +254,14 @@ class RenderManager(Manager):
                 print(f"Render Task ({order}, {func}) Error. Msg: {e}. Skipped.")
         self._renderTasks._tempEvents.clear()
 
-    def _getTextureImg(self, gTexBufferID, glFormat, glDataType, npDataType, channel_num) -> np.ndarray:
+    def _getTextureImg(self, gTexBufferID, glFormat, glDataType, npDataType, channel_num, flipY=True) -> np.ndarray:
         gl.glBindTexture(gl.GL_TEXTURE_2D, gTexBufferID)
         data = gl.glGetTexImage(gl.GL_TEXTURE_2D, 0, glFormat, glDataType)
         data = np.frombuffer(data, dtype=npDataType)
         data = data.reshape((self.engine.WindowManager.WindowSize[1], self.engine.WindowManager.WindowSize[0], channel_num))
-        data = data[::-1, :, :]  # flip array upside down
+        if flipY:
+            data = data[::-1, :, :]  # flip array upside down
         return data
-    # endregion
-
-    # region UBO
-    @property
-    def MatrixUBO(self):
-        return self._matrixUBO
-
-    @property
-    def MatrixUBO_BindingPoint(self):
-        return 0
-
-    @property
-    def UBO_ModelMatrix(self):
-        return self._UBO_modelMatrix
-
-    @property
-    def UBO_ViewMatrix(self):
-        return self._UBO_viewMatrix
-
-    @property
-    def UBO_ProjMatrix(self):
-        return self._UBO_projectionMatrix
-
-    @property
-    def UBO_CamPos(self):
-        return self._UBO_cam_pos
-
-    @property
-    def UBO_CamDir(self):
-        return self._UBO_cam_dir
-
-    def UpdateUBO_CamPos(self, camPos: glm.vec3):
-        self._UBO_cam_pos = camPos
-        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_pos))
-
-    def UpdateUBO_CamDir(self, camDir: glm.vec3):
-        self._UBO_cam_dir = camDir
-        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + glm.sizeof(glm.vec3), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_dir))
-
-    def UpdateUBO_ModelMatrix(self, modelMatrix: glm.mat4):
-        self._UBO_modelMatrix = modelMatrix
-        self._UBO_MV = self._UBO_viewMatrix * self._UBO_modelMatrix
-        self._UBO_MV_IT = glm.transpose(glm.inverse(self._UBO_MV))
-        self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_MV
-        self._UBO_MVP_IT = glm.transpose(glm.inverse(self._UBO_MVP))
-        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 0, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_modelMatrix))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 5 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 6 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV_IT))
-
-    def UpdateUBO_ViewMatrix(self, viewMatrix: glm.mat4):
-        self._UBO_viewMatrix = viewMatrix
-        self._UBO_MV = self._UBO_viewMatrix * self._UBO_modelMatrix
-        self._UBO_MV_IT = glm.transpose(glm.inverse(self._UBO_MV))
-        self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_MV
-        self._UBO_MVP_IT = glm.transpose(glm.inverse(self._UBO_MVP))
-        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, glm.sizeof(glm.mat4), glm.sizeof(glm.mat4),  glm.value_ptr(self._UBO_viewMatrix))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 5 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 6 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV_IT))
-
-    def UpdateUBO_ProjMatrix(self, projectionMatrix: glm.mat4):
-        self._UBO_projectionMatrix = projectionMatrix
-        self._UBO_MVP = self._UBO_projectionMatrix * self._UBO_MV
-        self._UBO_MVP_IT = glm.transpose(glm.inverse(self._UBO_MVP))
-        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 2 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4),  glm.value_ptr(self._UBO_projectionMatrix))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))
-
     # endregion
 
     # region post process
@@ -501,39 +394,20 @@ class RenderManager(Manager):
 
         # region SD
         # output data to SD
-        colorAndDepthData = self._getTextureImg(self._gBuffer_color_and_depth, gl.GL_RGBA, gl.GL_FLOAT, np.float32, 4)
+        colorAndDepthData = self._getTextureImg(self._gBuffer_color_and_depth, gl.GL_RGBA, gl.GL_FLOAT, np.float32, 4, flipY=True)
         colorData = colorAndDepthData[:, :, :3]
         depthData = colorAndDepthData[:, :, 3]
-        posData = self._getTextureImg(self._gBuffer_pos, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
-        normalData = self._getTextureImg(self._gBuffer_normal, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3)
-        idData = self._getTextureImg(self._gBuffer_id, gl.GL_RGB_INTEGER, gl.GL_INT, np.int32, 3)
+        posData = self._getTextureImg(self._gBuffer_pos, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3, flipY=True)
+        normalData = self._getTextureImg(self._gBuffer_normal, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3, flipY=True)
+        idData = self._getTextureImg(self._gBuffer_id, gl.GL_RGB_INTEGER, gl.GL_INT, np.int32, 3, flipY=True)
 
-        if self.engine.IsDebugMode:
-            print('[DEBUG] Color data is empty: ', np.array_equal(colorData, np.zeros_like(colorData)))
-            print('[DEBUG] Pos data is empty: ', np.array_equal(posData, np.zeros_like(posData)))
-            print('[DEBUG] Normal data is empty: ', np.array_equal(normalData, np.zeros_like(normalData)))
-            print('[DEBUG] Id data is empty: ', np.array_equal(idData, np.zeros_like(idData)))
-            print('[DEBUG] Depth data is empty: ', np.array_equal(depthData, np.zeros_like(depthData)))
-
-        if self.engine.RuntimeManager.FrameCount % self.engine.OutputManager.SaveMapPerNumFrame == 0:
-            color_img = Image.fromarray((colorData*255).astype(np.uint8), 'RGB')
-            color_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'color', f'color_img_{self.engine.RuntimeManager.FrameCount}.png'))
-
-            pos_img = Image.fromarray((posData * 255).astype(np.uint8), 'RGB')
-            pos_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'pos', f'pos_img_{self.engine.RuntimeManager.FrameCount}.png'))
-
-            normal_img = Image.fromarray((normalData * 255).astype(np.uint8), 'RGB')
-            normal_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'normal', f'normal_img_{self.engine.RuntimeManager.FrameCount}.png'))
-
-            id_img = Image.fromarray(idData.astype(np.uint8), 'RGB')
-            id_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'id', f'id_img_{self.engine.RuntimeManager.FrameCount}.png'))
-
-            depth_data_max, depth_data_min = np.max(depthData), np.min(depthData)
-            print(f'[DEBUG] depth_data_max: {depth_data_max}, depth_data_min: {depth_data_min}')
-            depth_data_normalized = (depthData - depth_data_min) / (depth_data_max - depth_data_min)
-            depth_data_int8 = (depth_data_normalized * 255).astype(np.uint8)
-            depth_img = Image.fromarray(np.squeeze(depth_data_int8), mode='L')
-            depth_img.save(os.path.join(self.engine.OutputManager.OutputDir, 'depth', f'depth_img_{self.engine.RuntimeManager.FrameCount}.png'))
+        if self.engine.SDManager.ShouldOutputFrame:
+            sdManager = self.engine.SDManager
+            sdManager.OutputMap('color', colorData)
+            sdManager.OutputMap('pos', posData)
+            sdManager.OutputMap('normal', normalData)
+            sdManager.OuputIdMap(idData)
+            sdManager.OutputDepthMap(depthData)
 
         # Code run normally until here, pending fixes for idData
         # get data back from SD

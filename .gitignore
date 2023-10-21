@@ -1,7 +1,7 @@
 test
 __pycache__
 models
-output/temp
+output
 .DS_Store
 test.py
 *.zip
@@ -9,3 +9,4 @@ rendered_frames
 *.ipynb
 source/tmp
 *.gif
+.cache/

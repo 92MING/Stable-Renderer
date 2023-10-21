@@ -39,9 +39,10 @@ class Engine:
                  brightness=1.0,
                  contrast=1.0,
                  debug=False,
-                 output_dir="./tmp",
-                 output_subfolders=None,
-                 save_map_per_num_frame=30):
+                 needOutputMaps=False,
+                 maxFrameCacheCount=24,
+                 mapSavingInterval=12,
+                 threadPoolSize=6,):
 
         self.AcceptedPrint('Engine is initializing...')
         self._debug = debug
@@ -61,7 +62,7 @@ class Engine:
                                             saturation=saturation, brightness=brightness, contrast=contrast,)
         self._sceneManager = SceneManager(self._scene)
         self._resourceManager = ResourcesManager()
-        self._outputManager = OutputManager(output_dir=output_dir, output_subfolders=output_subfolders, save_map_per_num_frame=save_map_per_num_frame)
+        self._sdManager = SDManager(needOutputMaps=needOutputMaps, maxFrameCacheCount=maxFrameCacheCount, mapSavingInterval=mapSavingInterval, threadPoolSize=threadPoolSize,)
         # endregion
 
     # region debug
@@ -123,8 +124,8 @@ class Engine:
     def ResourcesManager(self)->ResourcesManager:
         return self._resourceManager
     @property
-    def OutputManager(self)->OutputManager:
-        return self._outputManager
+    def SDManager(self)->SDManager:
+        return self._sdManager
     # endregion
 
     # region overridable methods
@@ -138,7 +139,7 @@ class Engine:
     # endregion
 
     def run(self):
-
+        self.AcceptedPrint('Engine is Preparing...')
         self.beforePrepare()
         Manager._RunPrepare()  # prepare work, mainly for sceneManager to build scene, load resources, etc.
         self.afterPrepare()
@@ -158,6 +159,7 @@ class Engine:
         self.beforeRelease()
         Manager._RunRelease()
         self.afterRelease()
+        self.AcceptedPrint('Engine is ended.')
 
     @classmethod
     def Run(cls, *args, **kwargs):

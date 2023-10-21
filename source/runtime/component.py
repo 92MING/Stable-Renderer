@@ -49,6 +49,7 @@ class Component(EngineObj, metaclass=ComponentMeta):
     # endregion
 
     def __init__(self, gameObj:'GameObject', enable=True):
+        '''Each component must start with super().__init__(gameObj, enable, ...)'''
         if self.__class__.__qualname__ == 'Component':
             raise Exception('Component is an abstract class. You can not create an instance of it.')
         if gameObj is None:

@@ -4,7 +4,7 @@ from runtime.gameObj import GameObject
 from runtime.component import Component
 from runtime.engine import Engine
 from static import Material, Mesh, Texture
-from utils.path_utils import RESOURCES_DIR
+from utils.path_utils import *
 import shutil
 
 if __name__ == '__main__':
@@ -27,11 +27,7 @@ if __name__ == '__main__':
             self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, material=self.boatMaterial)
             self.boat.addComponent(AutoRotation)
 
-    if os.path.exists('./tmp'):
-        shutil.rmtree('./tmp')
     Sample.Run(enableGammaCorrection=True,
                debug=True,
-               winSize=(512, 512),
-               output_dir='./tmp',
-               output_subfolders=['color', 'pos', 'normal', 'id', 'depth'],
-               save_map_per_num_frame=30)
+               winSize=(1080, 720),
+               needOutputMaps=True,)
