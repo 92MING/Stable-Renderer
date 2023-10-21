@@ -16,7 +16,7 @@ class MeshRenderer(Renderer):
         self._mesh = value
 
     def _renderTask(self, modelM, material, mesh):
-        self.engine.RenderManager.UpdateUBO_ModelMatrix(modelM)
+        self.engine.RuntimeManager.UpdateUBO_ModelMatrix(modelM)
         material.use()
         mesh.draw()
     def _draw(self):

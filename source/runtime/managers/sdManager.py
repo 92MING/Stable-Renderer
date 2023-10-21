@@ -1,9 +1,11 @@
+import os.path
+
 from .manager import Manager
 from utils.path_utils import *
-from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import numpy as np
+from PIL import Image
 
 @dataclass
 class FrameData:
@@ -29,30 +31,36 @@ class FrameData:
 
 class SDManager(Manager):
     def __init__(self,
-                 outputMaps=False,
+                 needOutputMaps=False,
                  maxFrameCacheCount=24,
                  mapSavingInterval=12,
                  threadPoolSize=6,):
         '''
-        :param outputMaps: if output maps result to disk
+        :param needOutputMaps: if output maps (id, color, depth...) result to disk
         :param maxFrameCacheCount: how many frames data should be stored in each
         :param mapSavingInterval: the frame interval between two map saving
         :param threadPoolSize: the size of thread pool. Threads are using for saving/loading maps asynchronously
         '''
         super().__init__()
-        self._outputMaps = outputMaps
+        self._needOutputMaps = needOutputMaps
         self._maxFrameCacheCount = maxFrameCacheCount
         self._mapSavingInterval = mapSavingInterval
 
-        self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize)
+        self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize) # for saving maps asynchronously
+        self._outputPath = get_map_output_dir(create_if_not_exists=False)
+
 
     # region properties
     @property
-    def OutputMaps(self)->bool:
-        return self._outputMaps
-    @OutputMaps.setter
-    def OutputMaps(self, value:bool):
-        self._outputMaps = value
+    def ShouldOutputFrame(self):
+        '''Return if the current frame's map data should be output to disk'''
+        return self._needOutputMaps and self.engine.RuntimeManager.FrameCount % self._mapSavingInterval == 0
+    @property
+    def NeedOutputMaps(self)->bool:
+        return self._needOutputMaps
+    @NeedOutputMaps.setter
+    def NeedOutputMaps(self, value:bool):
+        self._needOutputMaps = value
     @property
     def MaxFrameCacheCount(self)->int:
         return self._maxFrameCacheCount
@@ -67,6 +75,51 @@ class SDManager(Manager):
         self._mapSavingInterval = value
     # endregion
 
-
+    # region ouput maps
+    def _outputMap(self, name:str, mapData:np.ndarray, multi255=True, outputFormat='RGB', dataType=np.uint8):
+        '''this method will be pass to thread pool for saving maps asynchronously'''
+        if multi255:
+            mapData = mapData * 255
+        img = Image.fromarray(mapData.astype(dataType), outputFormat)
+        name = name.lower()
+        outputPath = os.path.join(self._outputPath, name)
+        if not os.path.exists(outputPath):
+            os.makedirs(outputPath)
+        img.save(os.path.join(outputPath, f'{name}_{self.engine.RuntimeManager.FrameCount}.png'))
+    def OutputMap(self, name:str, mapData:np.ndarray, multi255=True, outputFormat='RGB', dataType=np.uint8):
+        '''
+        output map data to OUTPUT_DIR/runtime_map/name/year-month-day-hour_index.png
+        :param name: name of the map and folder. will be created if not exist. will be changed to lower case
+        :param mapData: map data to output
+        :param multi255: if multiply 255 to map data
+        :param outputFormat: output format of the map
+        :param dataType: data type of the map
+        :return:
+        '''
+        if self._needOutputMaps:
+            self._threadPool.submit(self._outputMap, name, mapData, multi255, outputFormat, dataType)
+    def _ouputIdMap(self, mapData:np.ndarray):
+        outputPath = os.path.join(self._outputPath, 'id')
+        if not os.path.exists(outputPath):
+            os.makedirs(outputPath)
+        mapData.dump(os.path.join(outputPath, f'id_{self.engine.RuntimeManager.FrameCount}.npy'))
+    def OuputIdMap(self, mapData:np.ndarray):
+        '''output method especially for id map'''
+        if self._needOutputMaps:
+            self._threadPool.submit(self._ouputIdMap, mapData)
+    def _outputDepthMap(self, mapData:np.ndarray):
+        depth_data_max, depth_data_min = np.max(mapData), np.min(mapData)
+        depth_data_normalized = (mapData - depth_data_min) / (depth_data_max - depth_data_min)
+        depth_data_int8 = (depth_data_normalized * 255).astype(np.uint8)
+        depth_img = Image.fromarray(np.squeeze(depth_data_int8), mode='L')
+        outputPath = os.path.join(self._outputPath, 'depth')
+        if not os.path.exists(outputPath):
+            os.makedirs(outputPath)
+        depth_img.save(os.path.join(outputPath, f'depth_{self.engine.RuntimeManager.FrameCount}.png'))
+    def OutputDepthMap(self, mapData:np.ndarray):
+        '''output method especially for depth map'''
+        if self._needOutputMaps:
+            self._threadPool.submit(self._outputDepthMap, mapData)
+    # endregion
 
 __all__ = ['SDManager']

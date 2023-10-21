@@ -4,6 +4,7 @@ from .enums import ShaderType
 import glm, os
 from utils.path_utils import SHADER_DIR
 from runtime.engineObj import EngineObj
+import re
 
 class Shader(NamedObj, EngineObj):
 
@@ -14,13 +15,30 @@ class Shader(NamedObj, EngineObj):
 
     def __init__(self, name, vertex_source_path:str, fragment_source_path:str):
         super().__init__(name)
-        self._vertex_source = open(vertex_source_path, 'r').read()
-        self._fragment_source = open(fragment_source_path, 'r').read()
+        self._vertex_source = self._edit_shader_source_code(open(vertex_source_path, 'r').read())
+        self._fragment_source = self._edit_shader_source_code(open(fragment_source_path, 'r').read())
         self._v_shaderID = self._init_shader(self._vertex_source, ShaderType.VERTEX)
         self._f_shaderID = self._init_shader(self._fragment_source, ShaderType.FRAGMENT)
         self._programID = self._init_program(self._v_shaderID, self._f_shaderID)
         print('Loaded shader: ', name)
 
+    def _edit_shader_source_code(self, source_code:str):
+        '''edit constants, e.g. MAX_LIGHT_NUM'''
+        max_light_num = self.engine.RuntimeManager.MaxLightNum
+        pattern = r'#[ ]*?define[ ]+?MAX_LIGHTS_NUM[ ]+?(\d+)'
+        if len(re.findall(pattern, source_code)) > 0:
+            source_code = re.sub(pattern, f'#define MAX_LIGHTS_NUM {max_light_num}', source_code)
+        else:
+            glslLines = source_code.split('\n')
+            find_version_pattern = r'#[ ]*?version[ ]+?(\d+)[ ]+?(core|compatibility|es|glsl)?'
+            for i in range(len(glslLines)):
+                if len(re.findall(find_version_pattern, glslLines[i])) > 0:
+                    glslLines.insert(i + 1, f'#define MAX_LIGHTS_NUM {max_light_num}')
+                    break
+                if i == len(glslLines) - 1:
+                    glslLines.insert(0, f'#define MAX_LIGHTS_NUM {max_light_num}')
+            source_code = '\n'.join(glslLines)
+        return source_code
     def _init_shader(self, source:str, type:ShaderType):
         shaderID = gl.glCreateShader(type.value)
         if shaderID == 0:
@@ -47,7 +65,7 @@ class Shader(NamedObj, EngineObj):
         # try to bind uniform blocks
         matrixBlockIndex = gl.glGetUniformBlockIndex(program, "Matrices")
         if matrixBlockIndex != gl.GL_INVALID_INDEX:
-            gl.glUniformBlockBinding(program, matrixBlockIndex, self.engine.RenderManager.MatrixUBO_BindingPoint)
+            gl.glUniformBlockBinding(program, matrixBlockIndex, self.engine.RuntimeManager.MatrixUBO_BindingPoint)
 
         return program
 

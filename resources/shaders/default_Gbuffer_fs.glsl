@@ -1,5 +1,6 @@
 // default FS for late shading
 #version 330 core
+#define MAX_LIGHTS_NUM 256  // this constant will be edit by python script
 layout (std140) uniform Matrices {
 	mat4 model;
 	mat4 view;

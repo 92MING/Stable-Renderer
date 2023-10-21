@@ -9,8 +9,6 @@ class Camera(Component):
     # region class properties / methods
     _Main_Camera = None # current main camera
     _All_Cameras:Set['Camera'] = set()
-    _Has_Init_UBO = False
-    _Camera_UBO_ID = None
 
     RequireComponent = (Transform, )
 
@@ -100,13 +98,13 @@ class Camera(Component):
                 self.engine.WindowManager.BgColor = self.bgColor
             worldPos, worldForward = self.transform.globalPos, self.transform.forward
             viewMatrix, projectionMatrix = self.viewMatrix, self.projectionMatrix
-            if self.engine.RenderManager.UBO_ViewMatrix != viewMatrix:
-                self.engine.RenderManager.UpdateUBO_ViewMatrix(viewMatrix)
-            if self.engine.RenderManager.UBO_ProjMatrix != projectionMatrix:
-                self.engine.RenderManager.UpdateUBO_ProjMatrix(projectionMatrix)
-            if self.engine.RenderManager.UBO_CamPos != worldPos:
-                self.engine.RenderManager.UpdateUBO_CamPos(worldPos)
-            if self.engine.RenderManager.UBO_CamDir != worldForward:
-                self.engine.RenderManager.UpdateUBO_CamDir(worldForward)
+            if self.engine.RuntimeManager.UpdateUBO_ViewMatrix != viewMatrix:
+                self.engine.RuntimeManager.UpdateUBO_ViewMatrix(viewMatrix)
+            if self.engine.RuntimeManager.UpdateUBO_ProjMatrix != projectionMatrix:
+                self.engine.RuntimeManager.UpdateUBO_ProjMatrix(projectionMatrix)
+            if self.engine.RuntimeManager.UpdateUBO_CamPos != worldPos:
+                self.engine.RuntimeManager.UpdateUBO_CamPos(worldPos)
+            if self.engine.RuntimeManager.UpdateUBO_CamDir != worldForward:
+                self.engine.RuntimeManager.UpdateUBO_CamDir(worldForward)
 
 __all__ = ['Camera']
