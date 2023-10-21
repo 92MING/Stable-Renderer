@@ -17,22 +17,22 @@ class Config:
     control_net_model_paths=[
         "lllyasviel/sd-controlnet-depth",
     ]
+    device='cuda'
     # pipeline generation configs
     prompt="boat in van gogh style"
     neg_prompt="low quality, bad anatomy"
     width=512
     height=512
     seed=1234
-    device='cuda'
+    strength=1
     # data preparation configs
     num_frames=8
-    frames_dir="../rendered_frames/maps_per_30_512x512"
+    frames_dir="../rendered_frames/2023-10-21_13"
 
 if __name__ == '__main__':
     config = Config()
 
     # 1. Load pipeline
-    print("[INFO] Loading pipeline...")
     pipe: StableDiffusionImg2VideoPipeline = load_pipe(
         model_path=config.model_path,  # Stable Diffusion model path
         control_net_model_paths=config.control_net_model_paths,
@@ -48,10 +48,9 @@ if __name__ == '__main__':
     generator = torch.Generator(device=config.device).manual_seed(config.seed)
 
     # 2. Prepare data
-    corr_map = CorrespondenceMap.Load_ID_Data_From_Dir(
+    corr_map = CorrespondenceMap.from_existing_directory_numpy(
         os.path.join(config.frames_dir, 'id'),
         enable_strict_checking=False,
-        pixel_position_callback=lambda x,y: (x//8, y//8),
         num_frames=config.num_frames,
         use_cache=True)
     images = ImageFrames.from_existing_directory(
@@ -73,7 +72,7 @@ if __name__ == '__main__':
         width=config.width,
         height=config.height,
         num_inference_steps=10,
-        strength=0.75,
+        strength=config.strength,
         generator=generator,
         guidance_scale=7,
         controlnet_conditioning_scale=0.5,

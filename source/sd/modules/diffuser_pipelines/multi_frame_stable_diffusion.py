@@ -874,6 +874,13 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                             timestep=t,
                             **overlap_kwargs
                         )
+                    elif overlap_algorithm == "pooling_overlap":
+                        latents_seq = self.pooling_overlap(
+                            latents_seq,
+                            corr_map=correspondence_map,
+                            step=i,
+                            timestep=t,
+                        )
                     else:
                         raise NotImplementedError(f"Unknown overlap algorithm {overlap_algorithm}")
 
@@ -969,6 +976,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         step: int = None,
         timestep: int = None,
         max_workers: int = 4,
+        interpolate_mode: str = 'bilinear',
         **kwargs
     ):
         """
@@ -981,10 +989,25 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         """
         screen_w, screen_h = corr_map.size
         frame_h, frame_w = latents_seq[0].shape[2:]
-        resized_latents_list = [F.interpolate(latents, size=(screen_h, screen_w), mode='bilinear', align_corners=False) for latents in latents_seq]
+        resized_latents_list = [F.interpolate(latents, size=(screen_h, screen_w), mode=interpolate_mode, align_corners=False) for latents in latents_seq]
         resized_latents_list = overlap(resized_latents_list, corr_map=corr_map, step=step, timestep=timestep, max_workers=max_workers, **kwargs)
-        resized_latents_list = [F.interpolate(latents, size=(frame_h, frame_w), mode='bilinear', align_corners=False) for latents in resized_latents_list]
+        resized_latents_list = [F.interpolate(latents, size=(frame_h, frame_w), mode=interpolate_mode, align_corners=False) for latents in latents_seq]
         return resized_latents_list
+
+    def pooling_overlap(
+        self,
+        latents_seq: List[torch.Tensor],
+        corr_map: CorrespondenceMap,
+        step: int = None,
+        timestep: int = None,
+        pooling_option: str = 'max',
+        **kwargs
+    ):
+        screen_w, screen_h = corr_map.size
+        frame_h, frame_w = latents_seq[0].shape[2:]
+        logu.info(screen_w, screen_h)
+        logu.info(frame_h, frame_w)
+        pass
 
 
 def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
@@ -1013,9 +1036,12 @@ def overlap(
 ):
     """
     Do overlapping on a sequence of frames according to the corresponding map.
-    :param frame_seq: A sequence of frames. Each element is a tensor of shape [B, C, H, W].
-    :param corr_map: correspondence map
-    :return: A sequence of overlapped frames.
+    :param frame_seq: A list of frames. Each element is a tensor of shape [B, C, H, W].
+    :param corr_map: A correspondence map.
+    :param step: The current step.
+    :param timestep: The current timestep.
+    :param max_workers: The number of workers for multiprocessing.
+    :return: A list of overlapped frames.
     """
     assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
 
@@ -1024,9 +1050,6 @@ def overlap(
 
     # logu.debug(f"Frames are on device {overlapped_frame_seq[0].device}")
     ovlp_seq = [torch.zeros_like(frame_seq[i]) for i in range(num_frames)]  # Prepare overlapped frames
-    mean_frame_seq = torch.mean(torch.stack(frame_seq), dim=0)  # Mean of frame sequence
-    logu.debug(f"Mean frame shape {mean_frame_seq.shape}")
-    logu.debug(f"Overlapped frame shape {ovlp_seq[0].shape}")
 
     def _process(v_id, v_info):
         value = 0
@@ -1034,7 +1057,7 @@ def overlap(
         for t_pix_pos, t in v_info:
             h, w = t_pix_pos
             if t - 1 < num_frames and w >= 0 and w < frame_w and h >= 0 and h < frame_h:
-                value += mean_frame_seq[:, :, h, w]
+                value += ovlp_seq[t-1][:, :, h, w]
                 count += 1
 
         if count == 0:
