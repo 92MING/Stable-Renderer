@@ -27,7 +27,7 @@ class Config:
     strength=1
     # data preparation configs
     num_frames=8
-    frames_dir="../rendered_frames/2023-10-21_0"
+    frames_dir="../rendered_frames/2023-10-21_13"
 
 if __name__ == '__main__':
     config = Config()
@@ -48,10 +48,9 @@ if __name__ == '__main__':
     generator = torch.Generator(device=config.device).manual_seed(config.seed)
 
     # 2. Prepare data
-    corr_map = CorrespondenceMap.Load_ID_Data_From_Dir(
+    corr_map = CorrespondenceMap.from_existing_directory_numpy(
         os.path.join(config.frames_dir, 'id'),
         enable_strict_checking=False,
-        pixel_position_callback=lambda x,y: (x//8, y//8),
         num_frames=config.num_frames,
         use_cache=True)
     images = ImageFrames.from_existing_directory(
@@ -78,7 +77,7 @@ if __name__ == '__main__':
         guidance_scale=7,
         controlnet_conditioning_scale=0.5,
         add_predicted_noise=True,
-        # correspondence_map=corr_map,
+        correspondence_map=corr_map,
         overlap_algorithm='resize_overlap',
         callback_kwargs={'save_dir': "./sample"}
         # callback=utils.view_latents,

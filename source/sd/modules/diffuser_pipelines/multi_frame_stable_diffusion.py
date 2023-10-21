@@ -841,6 +841,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                     self.scheduler._step_index += 1
 
                 # logu.debug(f"[DEBUG] Mean latents before overlapping: {[lat.mean().float() for lat in denoised_latents_frame_list]}")
+                # TODO: Move the overlapping algorithms into a separate file
                 if do_overlapping:
                     # logu.debug(f"[DEBUG] Mean latents after overlapping: {[lat.mean().float() for lat in latents_list]}")
                     if overlap_algorithm == "resize_overlap":
@@ -866,6 +867,13 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                             step=i,
                             timestep=t,
                         )
+                    elif overlap_algorithm == "pooling_overlap":
+                        latents_seq = self.pooling_overlap(
+                            latents_seq,
+                            corr_map=correspondence_map,
+                            step=i,
+                            timestep=t,
+                        ) 
                     else:
                         raise NotImplementedError(f"Unknown overlap algorithm {overlap_algorithm}")
 
@@ -951,6 +959,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         corr_map: CorrespondenceMap,
         step: int = None,
         timestep: int = None,
+        resize_option: str = 'bilinear',
         **kwargs
     ):
         """
@@ -963,10 +972,26 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         """
         screen_w, screen_h = corr_map.size
         frame_h, frame_w = latents_seq[0].shape[2:]
-        resized_latents_list = [F.interpolate(latents, size=(screen_h, screen_w), mode='bilinear', align_corners=False) for latents in latents_seq]
+        resized_latents_list = [F.interpolate(latents, size=(screen_h, screen_w), mode=resize_option, align_corners=False) for latents in latents_seq]
         resized_latents_list = overlap(resized_latents_list, corr_map=corr_map, step=step, timestep=timestep, **kwargs)
-        resized_latents_list = [F.interpolate(latents, size=(frame_h, frame_w), mode='bilinear', align_corners=False) for latents in latents_seq]
+        resized_latents_list = [F.interpolate(latents, size=(frame_h, frame_w), mode=resize_option, align_corners=False) for latents in latents_seq]
         return resized_latents_list
+    
+    def pooling_overlap(
+        self,
+        latents_seq: List[torch.Tensor],
+        corr_map: CorrespondenceMap,
+        step: int = None,
+        timestep: int = None,
+        pooling_option: str = 'max',
+        **kwargs
+    ):
+        screen_w, screen_h = corr_map.size
+        frame_h, frame_w = latents_seq[0].shape[2:]
+        logu.info(screen_w, screen_h)
+        logu.info(frame_h, frame_w)
+        pass
+        
 
 
 def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):

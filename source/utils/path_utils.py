@@ -12,6 +12,8 @@ DEFAULT_QUAD_VS_SHADER_PATH = os.path.join(SHADER_DIR, 'quad_vs.glsl')
 DEFAULT_QUAD_FS_SHADER_PATH = os.path.join(SHADER_DIR, 'quad_fs.glsl')
 '''Default quad fragment shader path'''
 
+CACHE_DIR = os.path.join(PROJECT_DIR, '.cache')
+'''cache directory, for caching corr map'''
 OUTPUT_DIR = os.path.join(PROJECT_DIR, 'output')
 '''output directory, for runtime map, etc.'''
 MAP_OUTPUT_DIR = os.path.join(OUTPUT_DIR, 'runtime_map')
