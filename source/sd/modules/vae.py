@@ -31,7 +31,7 @@ def preprocess_image(image: Union[Image.Image, numpy.ndarray, torch.Tensor], bat
 
 
 @torch.no_grad()
-def encode(vae: AutoencoderKL, image: Union[torch.Tensor, Image.Image, numpy.ndarray], device: torch.device, dtype: torch.dtype, generator: torch.Generator,):
+def encode(image: Union[torch.Tensor, Image.Image, numpy.ndarray], vae: AutoencoderKL, device: torch.device, dtype: torch.dtype, generator: torch.Generator,):
     """
     Encode an image to a latent vector.
     :param vae: VAE model
@@ -50,7 +50,7 @@ def encode(vae: AutoencoderKL, image: Union[torch.Tensor, Image.Image, numpy.nda
 
 
 @torch.no_grad()
-def decode(vae: AutoencoderKL, latents, return_pil: bool = False) -> list:
+def decode(latents, vae: AutoencoderKL, return_pil: bool = False) -> list:
     """
     Decode a latent vector to images. Since latents can be a batch, a list of images is returned.
     :param vae: VAE model

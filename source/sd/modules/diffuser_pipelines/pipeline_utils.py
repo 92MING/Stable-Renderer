@@ -21,17 +21,23 @@ def load_pipe(
     """
     Load a Stable Diffusion pipeline with some controlnets.
     """
-    logu.info(f"[INFO] Loading Stable Diffusion pipeline from {model_path} with controlnets {control_net_model_paths}.")
+    logu.info(f"Loading Stable Diffusion pipeline from {model_path} with controlnets {control_net_model_paths}.")
     no_half = no_half or (platform == 'darwin')
     torch_dtype = torch.float32 if no_half else torch.float16
-    control_net_model_paths = [str(path) for path in control_net_model_paths]
 
     if isinstance(control_net_model_paths, str):
+        control_net_model_paths = [control_net_model_paths]
+
+    control_net_model_paths = [str(path) for path in control_net_model_paths]
+
+    if len(control_net_model_paths) == 0:
+        controlnet = None
+    elif len(control_net_model_paths) == 1:
         controlnet = ControlNetModel.from_pretrained(
-            control_net_model_paths,
+            control_net_model_paths[0],
             torch_dtype=torch_dtype
         )
-    elif isinstance(control_net_model_paths, list):
+    else:
         controlnets = []
         for control_net_model_path in control_net_model_paths:
             controlnet = ControlNetModel.from_pretrained(
@@ -69,9 +75,9 @@ def load_pipe(
     try:
         pipe.enable_xformers_memory_efficient_attention(attention_op=None)
     except ModuleNotFoundError:
-        print("[WARNING] XFormers not found. You can install XFormers with `pip install xformers` to speed up the generation.")
+        logu.warn("XFormers not found. You can install XFormers with `pip install xformers` to speed up the generation.")
     # pipe.enable_model_cpu_offload()
 
-    logu.success(f"[SUCCESS] Pipe loaded on {device} with dtype {torch_dtype}.")
+    logu.success(f"Pipe loaded on {device}, dtype: {torch_dtype}.")
 
     return pipe

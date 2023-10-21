@@ -3,6 +3,7 @@ import cv2
 import os
 import numpy
 import torch
+import json
 import torchvision.transforms as transforms
 from typing import List
 from PIL import Image
@@ -90,7 +91,7 @@ def make_depth_images(images: List[Image.Image]):
     return depth_images
 
 
-def make_correspondence_map(from_dir, save_to_path, force_recreate=False):
+def make_correspondence_map(from_dir, save_to_path, num_frames=8, force_recreate=False):
     """
     Make correspondence map from a directory of images.
     If the correspondence map already exists, then load it.
@@ -104,48 +105,67 @@ def make_correspondence_map(from_dir, save_to_path, force_recreate=False):
         try:
             with open(save_to_path, 'rb') as f:
                 corr_map = pickle.load(f)
-            return corr_map
         except ModuleNotFoundError as e:
             os.remove(save_to_path)
-            logu.warn(f"[WARNING] Correspondence map {save_to_path} is corrupted. It will be re-created.")
+            logu.warn(f"Correspondence map {save_to_path} is corrupted. It will be re-created.")
+    else:
+        logu.info(f"Creating correspondence map from {from_dir}")
+        corr_map = CorrespondenceMap.Load_ID_Data_From_Dir(
+            from_dir,
+            enable_strict_checking=False,
+            # pixel_position_callback=lambda x, y: (x//8, y//8),
+            num_frames=num_frames
+        )
+        with open(save_to_path, 'wb') as f:
+            pickle.dump(corr_map, f)
+        logu.success(f"Correspondence map created and saved to {save_to_path}")
 
-    logu.info(f"[INFO] Creating correspondence map from {from_dir}")
-    corr_map = CorrespondenceMap.from_existing_directory_img(
-        from_dir,
-        enable_strict_checking=False,
-        pixel_position_callback=lambda x, y: (x//8, y//8),
-        num_frames=10
-    )
-    with open(save_to_path, 'wb') as f:
-        pickle.dump(corr_map, f)
+    # Optionally save as json file
+    json_path = save_to_path.with_suffix('.json')
+    if not json_path.is_file():
+        logu.info(f"Jsonifying correspondence map...")
+        json_map = {}
+        for key, value in corr_map.Map.items():
+            json_map[str(key)] = str(value)
 
-    # Optionally save as txt file
-    with open(save_to_path.with_suffix('.txt'), 'w') as f:
-        f.write(str(corr_map))
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(json_map, f, indent=4)
 
-    logu.success(f"[SUCCESS] Correspondence map created and saved to {save_to_path}")
     return corr_map
 
 
-def save_latents(i, t, latents, save_dir, stem='latents'):
+def save_latents(i, t, latents, save_dir, stem='latents', decoder='vae-approx', vae=None, **kwargs):
     r"""
     Callback function to save vae-approx-decoded latents during inference.
     :param i: The current inference step.
     :param t: The current time step.
     :param latents: The current latents. If is list type, then process the first element.
     """
-    from .vae_approx import latents_to_single_pil_approx
-    logu.info(f"[INFO] Saving latents at inference step {i} and time step {t}")
+    if decoder.lower() == 'vae':
+        if vae is None:
+            raise ValueError("VAE must be provided when decoder is 'vae'")
+
+        from .vae import decode
+        decode_func = decode
+        decode_kwargs = dict(vae=vae, return_pil=True)
+    elif decoder.lower() == 'vae-approx':
+        from .vae_approx import latents_to_single_pil_approx
+        decode_func = latents_to_single_pil_approx
+        decode_kwargs = dict()
+    else:
+        raise ValueError(f"Unknown decoder type: {decoder}. Must be 'vae' or 'vae-approx'")
+
+    logu.info(f"Saving latents: step {i} | timestep {t:0f} | decoder {decoder}")
 
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
     if isinstance(latents, list):
-        image = [latents_to_single_pil_approx(lat) for lat in latents]
-        [image.save(save_dir / f'{stem}_{i:02d}_{j:02d}.png') for j, image in enumerate(image)]
+        image = [decode_func(lat, **decode_kwargs) for lat in latents]
+        [image.save(save_dir / f'{stem}_s{i:02d}_f{j:02d}.png') for j, image in enumerate(image)]
     else:
-        image = latents_to_single_pil_approx(latents)
-        image.save(save_dir / f'{stem}_{i:02d}.png')
+        image = decode_func(latents, **decode_kwargs)
+        image.save(save_dir / f'{stem}_s{i:02d}.png')
 
 
 def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, n: int = 2, stem: str = 'corr_map'):
@@ -156,6 +176,7 @@ def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, n: 
     :param n: The number of frames to visualize.
     :param stem: The stem of the saved file.
     """
+    logu.info(f"Saving correspondence map visualization...")
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     n = min(n, corr_map.num_frames)
@@ -163,6 +184,10 @@ def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, n: 
 
     color_red = numpy.array([255, 0, 0], dtype=numpy.uint8)
     color_white = numpy.array([255, 255, 255], dtype=numpy.uint8)
+    color_cyan = numpy.array([0, 255, 255], dtype=numpy.uint8)
+
+    trace_id = list(corr_map.Map.keys())[0]
+
     for v_id, v_info in corr_map.Map.items():
         info_length = len(v_info)
         for i in range(info_length):
@@ -170,8 +195,17 @@ def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, n: 
             h, w = t_pix_pos
             if t < n and h >= 0 and h < corr_map.height and w >= 0 and w < corr_map.width:
                 if (i+1 < info_length and v_info[i+1][1] == t) or (i-1 >= 0 and v_info[i-1][1] == t):
-                    image_seq[t][h, w, :] = color_red
+                    image_seq[t][h, w, :] = color_cyan
                 else:
                     image_seq[t][h, w, :] = color_white
 
+    # Trace vertex
+    for t_pix_pos, t in corr_map.Map[trace_id]:
+        h, w = t_pix_pos
+        if t < n and h >= 0 and h < corr_map.height and w >= 0 and w < corr_map.width:
+            image_seq[t][h-3:h+3, w-3:w+3, :] = color_red
+            logu.debug(f"Trace ID: {trace_id} | t: {t} | h: {h} | w: {w}")
+
     [cv2.imwrite(str(save_dir / f'{stem}_{i:02d}.png'), cv2.cvtColor(image, cv2.COLOR_RGB2BGR)) for i, image in enumerate(image_seq)]
+
+    logu.success(f"CM visualization saved to {save_dir}")

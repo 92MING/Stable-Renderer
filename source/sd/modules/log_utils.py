@@ -53,20 +53,20 @@ def stylize(string: str, *ansi_styles, format_spec: str = "", newline: bool = Fa
 
 
 def warn(msg: str):
-    print(stylize(msg, ANSI.YELLOW))
+    print('[WARNING] ' + stylize(msg, ANSI.YELLOW))
 
 
 def debug(msg: str):
-    print(stylize(msg, ANSI.BRIGHT_WHITE))
+    print('[DEBUG] ' + stylize(msg, ANSI.BOLD, ANSI.BRIGHT_WHITE))
 
 
 def info(msg: str):
-    print(stylize(msg, ANSI.BRIGHT_CYAN))
+    print('[INFO] ' + stylize(msg, ANSI.BRIGHT_CYAN))
 
 
 def error(msg: str):
-    print(stylize(msg, ANSI.BRIGHT_RED))
+    print('[ERROR] ' + stylize(msg, ANSI.BRIGHT_RED))
 
 
 def success(msg: str):
-    print(stylize(msg, ANSI.BRIGHT_GREEN))
+    print('[INFO] ' + stylize(msg, ANSI.BRIGHT_GREEN))

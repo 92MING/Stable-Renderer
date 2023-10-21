@@ -1,7 +1,6 @@
 import numpy
-
 from .utils.sortableElement import SortableElement
-from .. import log_utils as logu
+from .. import log_utils as logu, config
 from PIL import Image
 from utils.path_utils import MAP_OUTPUT_DIR
 import os
@@ -12,6 +11,8 @@ from tqdm import tqdm
 from typing import Callable, Tuple
 
 CACHE_DIR = "./.cache"
+# MAP_OUTPUT_DIR = config.test_dir / 'boat'
+
 
 class CorrespondenceMap:
     r"""
@@ -57,7 +58,7 @@ class CorrespondenceMap:
 
     @classmethod
     def Load_ID_Data_From_Dir(cls,
-                              directory: str=None,
+                              directory: str = None,
                               num_frames: int = None,
                               pixel_position_callback: Callable[[int, int], Tuple[int, int]] = None,
                               enable_strict_checking: bool = True,
@@ -91,15 +92,15 @@ class CorrespondenceMap:
         assert os.path.exists(directory), f"Directory {directory} not found"
         id_data_container = []
         for i, file in enumerate(os.listdir(directory)):
-            if not file.endswith((".jpeg", ".png", ".bmp", ".jpg")):
-                logu.warn(f"[INFO] Skipping non-image file {file}")
+            if not file.endswith((".jpeg", ".png", ".bmp", ".jpg", ".npy")):
+                logu.warn(f"Skipping non-image file {file}")
                 continue
             match = re.search(r"\d+", file)
             if match:
                 frame_idx = int(match.group())
-                id_data_array = numpy.load(os.path.join(directory, file))
+                id_data_array = numpy.load(os.path.join(directory, file), allow_pickle=True)  # [height, width, ...]
                 if i == 0:
-                    width, height = id_data_array.shape[0], id_data_array.shape[1]
+                    width, height = id_data_array.shape[1], id_data_array.shape[0]
                 id_data_container.append(SortableElement(value=frame_idx, object=id_data_array))
             else:
                 raise RuntimeError(f"{file} has no numeric component in filename.")
@@ -110,7 +111,7 @@ class CorrespondenceMap:
         else:
             num_frames = len(sorted_ids)
         # Prepare correspondence map
-        logu.info("[INFO] Preparing correspondence map...")
+        logu.info("Preparing correspondence map...")
         corr_map = {}
         for frame_idx, id_data in tqdm(enumerate(sorted_ids), total=len(sorted_ids)):
             assert len(id_data.Object.shape) >= 2, "id_data should be at least 2D."
@@ -155,7 +156,7 @@ class CorrespondenceMap:
             except Exception as e:
                 os.remove(cached_fname)
         return None
-    
+
     @staticmethod
     def _save_correspondence_map_to_cache(img_from_dir: str, corr_map):
         cache_fname = CorrespondenceMap._get_cache_path(img_from_dir)
