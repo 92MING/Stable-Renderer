@@ -25,9 +25,6 @@ def load_pipe(
     no_half = no_half or (platform == 'darwin')
     torch_dtype = torch.float32 if no_half else torch.float16
 
-    if isinstance(control_net_model_paths, str):
-        control_net_model_paths = [control_net_model_paths]
-
     control_net_model_paths = [str(path) for path in control_net_model_paths]
 
     if len(control_net_model_paths) == 0:

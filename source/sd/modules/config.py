@@ -1,9 +1,14 @@
 import torch
 import os
 import sys
+try:
+    from utils.path_utils import PROJECT_DIR
+except Exception as e:
+    print(e)
+    PROJECT_DIR = "."
 from pathlib import Path
 
-sd_root = Path(os.getcwd()) / "source/sd"
+sd_root = Path(PROJECT_DIR) / "source/sd"
 device = torch.device("cuda" if torch.cuda.is_available() else
                       "mps" if torch.backends.mps.is_available() else
                       "cpu")

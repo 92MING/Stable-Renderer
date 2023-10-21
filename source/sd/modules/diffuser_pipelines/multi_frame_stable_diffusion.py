@@ -842,12 +842,15 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                     self.scheduler._step_index += 1
 
                 if do_overlapping:
-                    # save_latents(step, t, latents_seq,
-                    #              save_dir=callback_kwargs.get('save_dir'),
-                    #              stem='before_overlap',
-                    #              decoder=callback_kwargs.get('decoder', 'vae-approx'),
-                    #              vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
-                    #              )
+                    try:
+                        save_latents(step, t, latents_seq,
+                                    save_dir=callback_kwargs.get('save_dir'),
+                                    stem='before_overlap',
+                                    decoder=callback_kwargs.get('decoder', 'vae-approx'),
+                                    vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
+                                    )
+                    except Exception as e:
+                        logu.error(f"{e}, latent not saved")
 
                     if overlap_algorithm == "resize_overlap":
                         latents_seq = self.resize_overlap(
@@ -883,13 +886,15 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                         )
                     else:
                         raise NotImplementedError(f"Unknown overlap algorithm {overlap_algorithm}")
-
-                    # save_latents(step, t, latents_seq,
-                    #              save_dir=callback_kwargs.get('save_dir'),
-                    #              stem='after_overlap',
-                    #              decoder=callback_kwargs.get('decoder', 'vae-approx'),
-                    #              vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
-                    #              )
+                    try:
+                        save_latents(step, t, latents_seq,
+                                    save_dir=callback_kwargs.get('save_dir'),
+                                    stem='after_overlap',
+                                    decoder=callback_kwargs.get('decoder', 'vae-approx'),
+                                    vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
+                                    )
+                    except Exception as e:
+                        logu.error(f"{e}, latent not saved")
 
                 # call the callback, if provided
                 if step == len(timesteps) - 1 or ((step + 1) > num_warmup_steps and (step + 1) % self.scheduler.order == 0):
@@ -991,7 +996,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         frame_h, frame_w = latents_seq[0].shape[2:]
         resized_latents_list = [F.interpolate(latents, size=(screen_h, screen_w), mode=interpolate_mode, align_corners=False) for latents in latents_seq]
         resized_latents_list = overlap(resized_latents_list, corr_map=corr_map, step=step, timestep=timestep, max_workers=max_workers, **kwargs)
-        resized_latents_list = [F.interpolate(latents, size=(frame_h, frame_w), mode=interpolate_mode, align_corners=False) for latents in latents_seq]
+        resized_latents_list = [F.interpolate(latents, size=(frame_h, frame_w), mode=interpolate_mode, align_corners=False) for latents in resized_latents_list]
         return resized_latents_list
 
     def pooling_overlap(
@@ -1080,4 +1085,4 @@ def overlap(
     for i in range(num_frames):
         ovlp_seq[i] = torch.where(ovlp_seq[i] > 0, ovlp_seq[i], frame_seq[0])  # Use the first frame as the background
 
-    return frame_seq
+    return ovlp_seq
