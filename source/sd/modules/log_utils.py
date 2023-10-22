@@ -52,21 +52,21 @@ def stylize(string: str, *ansi_styles, format_spec: str = "", newline: bool = Fa
     return ansi_styles + string + ANSI.RESET
 
 
-def warn(msg: str):
-    print('[WARNING] ' + stylize(msg, ANSI.YELLOW))
+def warn(msg: str, *args, **kwargs):
+    print('[WARNING] ' + stylize(msg, ANSI.YELLOW), *args, **kwargs)
 
 
-def debug(msg: str):
-    print('[DEBUG] ' + stylize(msg, ANSI.BOLD, ANSI.BRIGHT_WHITE))
+def debug(msg: str, *args, **kwargs):
+    print('[DEBUG] ' + stylize(msg, ANSI.BOLD, ANSI.BRIGHT_WHITE), *args, **kwargs)
 
 
-def info(msg: str):
-    print('[INFO] ' + stylize(msg, ANSI.BRIGHT_CYAN))
+def info(msg: str, *args, **kwargs):
+    print('[INFO] ' + stylize(msg, ANSI.BRIGHT_CYAN), *args, **kwargs)
 
 
-def error(msg: str):
-    print('[ERROR] ' + stylize(msg, ANSI.BRIGHT_RED))
+def error(msg: str, *args, **kwargs):
+    print('[ERROR] ' + stylize(msg, ANSI.BRIGHT_RED), *args, **kwargs)
 
 
-def success(msg: str):
-    print('[INFO] ' + stylize(msg, ANSI.BRIGHT_GREEN))
+def success(msg: str, *args, **kwargs):
+    print('[INFO] ' + stylize(msg, ANSI.BRIGHT_GREEN), *args, **kwargs)

@@ -1,4 +1,3 @@
-from ..utils import save_latents
 import torch
 import PIL
 import numpy
@@ -28,6 +27,7 @@ from transformers import CLIPTextModel, CLIPTokenizer
 from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, preprocess_image
 from ..data_classes.correspondenceMap import CorrespondenceMap
 from .. import log_utils as logu
+from ..utils import save_latents
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -422,7 +422,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         control_guidance_end: Union[float, List[float]] = 1.0,
         correspondence_map: Optional[CorrespondenceMap] = None,
         overlap_algorithm: str = 'resize_overlap',
-        overlap_kwargs: dict = {},
+        overlap_max_workers: int = 1,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -539,6 +539,11 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         do_inpainting = masks is not None
         do_controlnet = control_images is not None
         do_overlapping = correspondence_map is not None
+
+        logu.debug(f"Do Image2Image: {do_img2img}")
+        logu.debug(f"Do Inpainting: {do_inpainting}")
+        logu.debug(f"Do ControlNet: {do_controlnet}")
+        logu.debug(f"Do Overlapping: {do_overlapping}")
 
         # 1. Align format for control guidance
         controlnet = self.controlnet._orig_mod if is_compiled_module(self.controlnet) else self.controlnet
@@ -844,11 +849,12 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 if do_overlapping:
                     try:
                         save_latents(step, t, latents_seq,
-                                    save_dir=callback_kwargs.get('save_dir'),
-                                    stem='before_overlap',
-                                    decoder=callback_kwargs.get('decoder', 'vae-approx'),
-                                    vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
-                                    )
+                                     save_dir=callback_kwargs.get('save_dir') / 'overlapped',
+                                     prefix='latents',
+                                     postfix='before_overlap',
+                                     decoder=callback_kwargs.get('decoder', 'vae-approx'),
+                                     vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
+                                     )
                     except Exception as e:
                         logu.error(f"{e}, latent not saved")
 
@@ -858,7 +864,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                             corr_map=correspondence_map,
                             step=step,
                             timestep=t,
-                            **overlap_kwargs
+                            max_workers=overlap_max_workers,
                         )
                     elif overlap_algorithm == "overlap":
                         latents_seq = overlap(
@@ -866,7 +872,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                             corr_map=correspondence_map,
                             step=step,
                             timestep=t,
-                            **overlap_kwargs
+                            max_workers=overlap_max_workers,
                         )
                     elif overlap_algorithm == "vae_overlap":
                         latents_seq = self.vae_overlap(
@@ -875,7 +881,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                             generator=generator,
                             step=step,
                             timestep=t,
-                            **overlap_kwargs
+                            max_workers=overlap_max_workers,
                         )
                     elif overlap_algorithm == "pooling_overlap":
                         latents_seq = self.pooling_overlap(
@@ -888,11 +894,12 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                         raise NotImplementedError(f"Unknown overlap algorithm {overlap_algorithm}")
                     try:
                         save_latents(step, t, latents_seq,
-                                    save_dir=callback_kwargs.get('save_dir'),
-                                    stem='after_overlap',
-                                    decoder=callback_kwargs.get('decoder', 'vae-approx'),
-                                    vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
-                                    )
+                                     save_dir=callback_kwargs.get('save_dir') / 'overlapped',
+                                     prefix='latents',
+                                     postfix='after_overlap',
+                                     decoder=callback_kwargs.get('decoder', 'vae-approx'),
+                                     vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
+                                     )
                     except Exception as e:
                         logu.error(f"{e}, latent not saved")
 
@@ -965,14 +972,24 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
             image = self.vae.decode(latents).sample
             return image
 
-        # corr_map_max_length = max([len(vertex_info) for _, vertex_info in corr_map.Map.items()])
-        # assert len(latents_list) <= corr_map_max_length, f"Correspondence map max length {corr_map_max_length} larger than number of latent {len(latents_list)}"
+        num_frames = len(latents_seq)
+        screen_w, screen_h = corr_map.size
+        frame_h, frame_w = latents_seq[0].shape[-2:]
 
-        pix_val_seq = [_decode(latents) for latents in latents_seq]
-        pix_val_seq = overlap(pix_val_seq, corr_map, step=step, timestep=timestep, max_workers=max_workers, **kwargs)
-        pix_val_seq = [_encode(pix_val) for pix_val in pix_val_seq]
+        #! IMPORTANT:
+        #! (1) After VAE encoding, 0's in the latents will not be 0's anymore
+        #! (2) After VAE decoding, the number of channels will change from 4 to 3. Encoding will do reverse.
+        #! (3) Do not overlap original in pixel space and then encode to latent space. This will destroy generation.
+        # TODO: However, if we can overlap original at latent space directly, then the destruction might be much less.
 
-        return pix_val_seq
+        pix_seq = [_decode(latents) for latents in latents_seq]
+        ovlp_seq = overlap(pix_seq, corr_map, step=step, timestep=timestep, max_workers=max_workers, **kwargs)
+        ovlp_seq = [torch.where(ovlp_seq[i] != 0, ovlp_seq[i], pix_seq[i]) for i in range(num_frames)]  # Overlap with original
+        ovlp_seq = [_encode(ovlp_img) for ovlp_img in ovlp_seq]
+
+        # ovlp_seq = [torch.where(abs(ovlp_seq[i] - latents_seq[i]) > 0.1, ovlp_seq[i], latents_seq[i]) for i in range(num_frames)]
+
+        return ovlp_seq
 
     def resize_overlap(
         self,
@@ -992,12 +1009,20 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         :param timestep: current inference timestep
         :return: A list of overlapped frame latents.
         """
+        num_frames = len(latents_seq)
         screen_w, screen_h = corr_map.size
-        frame_h, frame_w = latents_seq[0].shape[2:]
-        resized_latents_list = [F.interpolate(latents, size=(screen_h, screen_w), mode=interpolate_mode, align_corners=False) for latents in latents_seq]
-        resized_latents_list = overlap(resized_latents_list, corr_map=corr_map, step=step, timestep=timestep, max_workers=max_workers, **kwargs)
-        resized_latents_list = [F.interpolate(latents, size=(frame_h, frame_w), mode=interpolate_mode, align_corners=False) for latents in resized_latents_list]
-        return resized_latents_list
+        frame_h, frame_w = latents_seq[0].shape[-2:]
+
+        ovlp_seq = [F.interpolate(latents, size=(screen_h, screen_w), mode=interpolate_mode, align_corners=False) for latents in latents_seq]
+        ovlp_seq = overlap(ovlp_seq, corr_map=corr_map, step=step, timestep=timestep, max_workers=max_workers, **kwargs)
+        ovlp_seq = [F.interpolate(latents, size=(frame_h, frame_w), mode=interpolate_mode, align_corners=False) for latents in ovlp_seq]
+
+        logu.debug(f"Resize scale factor: {screen_h / frame_h:.2f} | Overlap ratio: {100 * overlap_rate(ovlp_seq, threshold=0):.2f}%")
+
+        # Overlap with original
+        ovlp_seq = [torch.where(ovlp_seq[i] != 0, ovlp_seq[i], latents_seq[i]) for i in range(num_frames)]
+
+        return ovlp_seq
 
     def pooling_overlap(
         self,
@@ -1028,19 +1053,18 @@ def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
     noise_cfg = guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg
     return noise_cfg
 
-# TODO: Optimize this function
-
 
 def overlap(
     frame_seq: List[torch.Tensor],
     corr_map: CorrespondenceMap,
     step: int = None,
     timestep: int = None,
-    max_workers: int = 4,
+    max_workers: int = 1,
     **kwargs
 ):
     """
     Do overlapping on a sequence of frames according to the corresponding map.
+    ONLY OVERLAP WITH SELF BUT NOT THE ORIGINAL FRAME.
     :param frame_seq: A list of frames. Each element is a tensor of shape [B, C, H, W].
     :param corr_map: A correspondence map.
     :param step: The current step.
@@ -1052,17 +1076,18 @@ def overlap(
 
     num_frames = len(frame_seq)
     frame_h, frame_w = frame_seq[0].shape[-2:]
+    ovlp_seq = [torch.zeros_like(frame_seq[i]) for i in range(num_frames)]
+    ovlp_count = [torch.zeros_like(frame_seq[i]) for i in range(num_frames)]
 
-    # logu.debug(f"Frames are on device {overlapped_frame_seq[0].device}")
-    ovlp_seq = [torch.zeros_like(frame_seq[i]) for i in range(num_frames)]  # Prepare overlapped frames
+    assert ovlp_seq[0].device == frame_seq[0].device and ovlp_count[0].device == frame_seq[0].device, "ovlp_seq and ovlp_count should be on the same device as frame_seq"
 
     def _process(v_id, v_info):
         value = 0
         count = 0
         for t_pix_pos, t in v_info:
             h, w = t_pix_pos
-            if t - 1 < num_frames and w >= 0 and w < frame_w and h >= 0 and h < frame_h:
-                value += ovlp_seq[t-1][:, :, h, w]
+            if t < num_frames and w >= 0 and w < frame_w and h >= 0 and h < frame_h:
+                value += frame_seq[t][:, :, h, w]
                 count += 1
 
         if count == 0:
@@ -1071,8 +1096,9 @@ def overlap(
 
         for t_pix_pos, t in v_info:
             h, w = t_pix_pos
-            if t-1 < num_frames and w >= 0 and w < frame_w and h >= 0 and h < frame_h:
-                ovlp_seq[t-1][:, :, h, w] = value
+            if t < num_frames and w >= 0 and w < frame_w and h >= 0 and h < frame_h:
+                ovlp_seq[t][:, :, h, w] += value
+                ovlp_count[t][:, :, h, w] += 1
 
     if max_workers == 1:
         for v_id, v_info in corr_map.Map.items():
@@ -1082,7 +1108,16 @@ def overlap(
             for v_id, v_info in corr_map.Map.items():
                 pool.apply_async(_process, (v_id, v_info))
 
-    for i in range(num_frames):
-        ovlp_seq[i] = torch.where(ovlp_seq[i] > 0, ovlp_seq[i], frame_seq[0])  # Use the first frame as the background
-
+    # Overlap with self
+    ovlp_seq = [torch.where(ovlp_count[i] != 0, ovlp_seq[i] / ovlp_count[i], ovlp_seq[i]) for i in range(num_frames)]
     return ovlp_seq
+
+
+def overlap_rate(ovlp_seq: List[torch.Tensor], threshold: float = 0.0):
+    """
+    Debug function to calculate the overlap rate of a sequence of frames.
+    :param ovlp_seq: A list of overlapped frames. Note that this should haven't been overlapped with the original frames.
+    """
+    num_zeros = torch.sum(torch.stack([torch.sum(abs(latents - threshold) <= 0) for latents in ovlp_seq]))
+    num_nonzeros = torch.sum(torch.stack([torch.sum(abs(latents - threshold) > 0) for latents in ovlp_seq]))
+    return num_nonzeros / (num_nonzeros + num_zeros)

@@ -24,7 +24,7 @@ def main():
         torch_dtype=torch.float16,  # Float16 is much more faster on GPU
     )
 
-    prompt = "a boat, lake, water, scenery, best quality"
+    prompt = "a boat on the lake, sunset"
     neg_prompt = "low quality, bad anatomy"
 
     # OPTIONAL: load a negative textual inversion model
@@ -35,74 +35,75 @@ def main():
     except Exception as e:
         logu.warn(f"Failed to load negative textual inversion model: {e}")
 
-    width = 1080
-    height = 720
-
     # Prepare torch generator
-    seed = random.randint(0, 9999999999)  # Random seed
+    seed = 42  # Random seed
     generator = torch.Generator(device=config.device).manual_seed(seed)
 
     # 2. Prepare images
-    n = 4  # Number of frames to utilize
+    n = 8  # Number of frames to use
     test_dir = config.test_dir / 'boat'
 
     frame_dir = test_dir / "color"
     frame_path_list = utils.list_frames(frame_dir)[:n]
+    frames = utils.open_images(frame_path_list)
 
-    frames = [Image.open(img_path).convert('RGB') for img_path in frame_path_list]
+    width, height = frames[0].size
 
-    logu.debug(f"Color: {[Path(path).name for path in frame_path_list]}")
-
-    # 4. Prepare control images.
+    # 3. Prepare control images.
     depth_dir = test_dir / "depth"
     normal_dir = test_dir / "normal"
     depth_img_paths = utils.list_frames(depth_dir)[:n]
-    depth_images = [Image.open(img_path).convert('RGB') for img_path in depth_img_paths]
+    depth_images = utils.open_images(depth_img_paths)
     normal_img_paths = utils.list_frames(normal_dir)[:n]
-    normal_images = [Image.open(img_path).convert('RGB') for img_path in normal_img_paths]
+    normal_images = utils.open_images(normal_img_paths)
 
-    logu.debug(f"Depth: {[Path(path).name for path in depth_img_paths]}")
-    logu.debug(f"Normal: {[Path(path).name for path in normal_img_paths]}")
+    logu.debug(f"Frame size: {width}x{height}")
+    logu.debug(f"Color map: {[Path(path).name for path in frame_path_list]}")
+    logu.debug(f"Depth map: {[Path(path).name for path in depth_img_paths]}")
+    logu.debug(f"Normal map: {[Path(path).name for path in normal_img_paths]}")
 
     control_images = [[e[0], e[1]] for e in zip(depth_images, normal_images)]
 
-    # 5. Prepare correspondence map
+    # 4. Prepare correspondence map
     corr_map = utils.make_correspondence_map(test_dir / "id", test_dir / "corr_map.pkl", force_recreate=False)
-    # utils.save_corr_map_visualization(corr_map, save_dir=test_dir / "corr_map_vis", n=2)
+    # corr_map = utils.scale_corr_map(corr_map, scale_factor=0.25)
 
     output_dir = test_dir / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
     latents_dir = test_dir / "latents"
     latents_dir.mkdir(parents=True, exist_ok=True)
-    [os.remove(filepath) for filepath in latents_dir.glob("*")]
-    assert len(os.listdir(latents_dir)) == 0, f"Latents dir {latents_dir} is not empty!"
+    utils.clear_dir(latents_dir)
+    num_inference_steps = 16
 
     tic = time.time()
+    # 5. Run inference
     output_frame_list = pipe.__call__(
         prompt=prompt,
         negative_prompt=neg_prompt,
-        # correspondence_map=corr_map,
+        correspondence_map=corr_map,
         images=frames,
         # masks=masks,  # Optional: mask images
         control_images=control_images,
         width=width,
         height=height,
-        num_inference_steps=16,
-        strength=0.75,
+        num_inference_steps=24,
+        strength=0.5,
         generator=generator,
-        guidance_scale=7,
+        guidance_scale=5,
         controlnet_conditioning_scale=0.5,
         add_predicted_noise=True,
         callback=utils.save_latents,
         callback_kwargs=dict(save_dir=latents_dir),
-        overlap_kwargs=dict(max_workers=4)
+        overlap_algorithm="vae_overlap",
     ).images
-    toc = time.time()
-    logu.info(f"Total inference time: {toc - tic:.2f}s")
 
+    # 6. Save outputs
+    toc = time.time()
+    utils.clear_dir(output_dir)
     for i, image in enumerate(output_frame_list):
         image[0].save(output_dir.joinpath(f"output_{i}.png"))
-
+    utils.make_gif([image[0] for image in output_frame_list], output_dir.joinpath("output.gif"))
+    logu.info(f"Inference cost: {toc - tic:.2f}s | {(toc - tic) / num_inference_steps:.2f}s/it | {(toc - tic) / (n*num_inference_steps):.2f}s/frame_it")
     logu.success(f"Saved output frames to {output_dir}")
 
 

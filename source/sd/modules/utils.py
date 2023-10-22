@@ -4,6 +4,7 @@ import os
 import numpy
 import torch
 import json
+import shutil
 import torchvision.transforms as transforms
 from typing import List, Union
 from PIL import Image
@@ -14,6 +15,12 @@ from .data_classes.correspondenceMap import CorrespondenceMap
 
 
 def list_frames(frame_dir, return_type: type = Path):
+    r"""
+    List and sort files with format `*_xxx.png` in a directory.
+    :param frame_dir: Directory to list files from.
+    :param return_type: Type to return. If None, returns the type of the `frame_dir`.
+    :return: List of files in the directory.
+    """
     pattern = re.compile(r".*_(\d+).png")
     try:
         frame_list = sorted(listfiles(frame_dir, exts='.png', return_type=Path, return_path=True), key=lambda filename: int(pattern.match(str(filename)).group(1)))
@@ -28,10 +35,24 @@ def list_frames(frame_dir, return_type: type = Path):
     return frame_list
 
 
+def open_images(img_path_lst):
+    return [Image.open(img_path).convert('RGB') for img_path in img_path_lst]
+
+
 def listfiles(directory, exts=None, return_type: type = None, return_path: bool = False, return_dir: bool = False, recur: bool = False):
+    r"""
+    List files in a directory.
+    :param directory: Directory to list files from.
+    :param exts: List of extensions to filter files by. If None, all files are returned.
+    :param return_type: Type to return. If None, returns the type of the `directory`. If `return_path` is True, this must be str.
+    :param return_path: Whether to return the path of the file or just the name.
+    :param return_dir: Whether to return directories instead of files.
+    :param recur: Whether to recursively list files in subdirectories.
+    :return: List of files in the directory.
+    """
     if exts and return_dir:
         raise ValueError("Cannot return both files and directories")
-    if return_type != str and not return_path:
+    if not return_path and return_type != str:
         raise ValueError("Cannot return non-str type when returning name")
     return_type = return_type or type(directory) if return_path else str
     directory = Path(directory)
@@ -47,54 +68,6 @@ def listfiles(directory, exts=None, return_type: type = None, return_path: bool 
             files.extend(listfiles(subdir, exts=exts, return_type=return_type, return_path=return_path))
 
     return files
-
-
-def make_canny_images(images: List[Image.Image], threshold1=100, threshold2=200) -> List[Image.Image]:
-    """
-    Make canny images from a list of PIL images.
-    :param images: list of PIL images
-    :param threshold1: first threshold for the hysteresis procedure
-    :param threshold2: second threshold for the hysteresis procedure
-    :return: list of PIL canny images
-    """
-    canny_images = []
-    for image in images:
-        image = numpy.array(image)
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        image = cv2.Canny(image, threshold1, threshold2)
-        image = Image.fromarray(image)
-        canny_images.append(image)
-    return canny_images
-
-
-def make_depth_images(images: List[Image.Image]):
-    """
-    Make depth images from a list of PIL images.
-    :param images: list of PIL images
-    :return: list of depth images
-    """
-    model_type = "DPT_Large"
-    model = torch.hub.load("intel-isl/MiDaS", model_type)
-    model.to("cuda")
-    model.eval()
-    depth_images = []
-    for img in images:
-
-        transform = transforms.Compose(
-            [
-                transforms.Resize(384),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ]
-        )
-        img_tensor = transform(img).unsqueeze(0).to("cuda")  # add a batch dimension
-
-        with torch.no_grad():
-            depth = model(img_tensor)
-
-        depth_img = depth[0].squeeze().cpu().numpy()
-        depth_images.append(depth_img)
-    return depth_images
 
 
 def make_correspondence_map(from_dir, save_to_path, num_frames=8, force_recreate=False):
@@ -140,7 +113,7 @@ def make_correspondence_map(from_dir, save_to_path, num_frames=8, force_recreate
     return corr_map
 
 
-def save_latents(i, t, latents, save_dir, stem='latents', decoder='vae-approx', vae=None, save_timestep=False, **kwargs):
+def save_latents(i, t, latents, save_dir, prefix='latents', postfix: str = '', decoder='vae-approx', vae=None, save_timestep=False, **kwargs):
     r"""
     Callback function to save vae-approx-decoded latents during inference.
     :param i: The current inference step.
@@ -161,23 +134,26 @@ def save_latents(i, t, latents, save_dir, stem='latents', decoder='vae-approx', 
     else:
         raise ValueError(f"Unknown decoder type: {decoder}. Must be 'vae' or 'vae-approx'")
 
-    logu.info(f"Saving latents: step {i} | timestep {t:0f} | decoder {decoder}")
+    # logu.debug(f"Saving latents: step {i} | timestep {t:0f} | decoder {decoder}")
 
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
+    prefix = f"{prefix}_" if prefix != '' else ''
+    postfix = f"_{postfix}" if postfix != '' else ''
+
     if isinstance(latents, list):
         image = [decode_func(lat, **decode_kwargs) for lat in latents]
         if save_timestep:
-            [image.save(save_dir / f'{stem}_s{i:02d}_t{int(t):03d}_f{j:02d}.png') for j, image in enumerate(image)]
+            [image.save(save_dir / f'{prefix}s{i:02d}_t{int(t):03d}_f{j:02d}{postfix}.png') for j, image in enumerate(image)]
         else:
-            [image.save(save_dir / f'{stem}_s{i:02d}_f{j:02d}.png') for j, image in enumerate(image)]
+            [image.save(save_dir / f'{prefix}s{i:02d}_f{j:02d}{postfix}.png') for j, image in enumerate(image)]
     else:
         image = decode_func(latents, **decode_kwargs)
-        image.save(save_dir / f'{stem}_s{i:02d}.png')
+        image.save(save_dir / f'{prefix}_s{i:02d}.png')
 
 
-def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, n: int = 2, stem: str = 'corr_map'):
+def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, n: int = 8, division: int = 1, stem: str = 'corr_map'):
     r"""
     Visualize the correspondence map and save it to the given directory.
     :param corr_map: The correspondence map.
@@ -188,33 +164,74 @@ def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, n: 
     logu.info(f"Saving correspondence map visualization...")
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
+    clear_dir(save_dir)
     n = min(n, corr_map.num_frames)
-    image_seq = [numpy.zeros((corr_map.height, corr_map.width, 3), dtype=numpy.uint8) for _ in range(n)]
+    frame_w = corr_map.width // division
+    frame_h = corr_map.height // division
+    image_seq = [numpy.zeros((frame_h, frame_w, 3), dtype=numpy.uint8) for _ in range(n)]
+    ovlp_count = [numpy.zeros((frame_h, frame_w), dtype=numpy.uint8) for _ in range(n)]
 
     color_red = numpy.array([255, 0, 0], dtype=numpy.uint8)
+    color_green = numpy.array([0, 255, 0], dtype=numpy.uint8)
+    color_blue = numpy.array([0, 0, 255], dtype=numpy.uint8)
     color_white = numpy.array([255, 255, 255], dtype=numpy.uint8)
     color_cyan = numpy.array([0, 255, 255], dtype=numpy.uint8)
 
     trace_id = list(corr_map.Map.keys())[0]
-
     for v_id, v_info in corr_map.Map.items():
-        info_length = len(v_info)
-        for i in range(info_length):
+        info_len = len([t for t_pix_pos, t in v_info if t < n])
+        for i in range(info_len):
             t_pix_pos, t = v_info[i]
             h, w = t_pix_pos
-            if t < n and h >= 0 and h < corr_map.height and w >= 0 and w < corr_map.width:
-                if (i+1 < info_length and v_info[i+1][1] == t) or (i-1 >= 0 and v_info[i-1][1] == t):
-                    image_seq[t][h, w, :] = color_cyan
-                else:
-                    image_seq[t][h, w, :] = color_white
+            h //= division
+            w //= division
+            if t < n and h >= 0 and h < frame_h and w >= 0 and w < frame_w:
+                ovlp_count[t][h, w] += 1
 
     # Trace vertex
-    for t_pix_pos, t in corr_map.Map[trace_id]:
-        h, w = t_pix_pos
-        if t < n and h >= 0 and h < corr_map.height and w >= 0 and w < corr_map.width:
-            image_seq[t][h-3:h+3, w-3:w+3, :] = color_red
-            logu.debug(f"Trace ID: {trace_id} | t: {t} | h: {h} | w: {w}")
+    for i in range(n):
+        for h in range(frame_h):
+            for w in range(frame_w):
+                if ovlp_count[i][h, w] > 0:
+                    ovlp_ratio = ovlp_count[i][h, w] / n
+                    image_seq[i][h, w, :] = color_red * ovlp_ratio + color_white * (1 - ovlp_ratio)
 
-    [cv2.imwrite(str(save_dir / f'{stem}_{i:02d}.png'), cv2.cvtColor(image, cv2.COLOR_RGB2BGR)) for i, image in enumerate(image_seq)]
+    images = [Image.fromarray(image) for image in image_seq]
+    [image.save(save_dir / f"{stem}_{i:02d}.png") for i, image in enumerate(images)]
+    make_gif(images, save_dir / f'{stem}.gif', fps=10)
 
     logu.success(f"CM visualization saved to {save_dir}")
+
+
+def make_gif(images, save_path: Path, fps: int = 10):
+    save_path = Path(save_path)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    images[0].save(save_path, save_all=True, append_images=images[1:], duration=1000//fps, loop=0)
+    logu.success(f"Gif saved to {save_path}")
+
+
+def clear_dir(dirpath):
+    r"""
+    Clear the given directory.
+    :param dirpath: The directory path.
+    """
+    dirpath = Path(dirpath)
+    if dirpath.is_dir():
+        shutil.rmtree(dirpath)
+    dirpath.mkdir(parents=True, exist_ok=True)
+
+
+def scale_corr_map(corr_map: CorrespondenceMap, scale_factor: float = 0.125):
+    r"""
+    Scale the correspondence map.
+    :param corr_map: The correspondence map.
+    :param scale_factor: The scale factor.
+    :return: The scaled correspondence map.
+    """
+    scaled_map = dict()
+    for v_id, v_info in corr_map.Map.items():
+        v_info = [((int(t_pix_pos[0] * scale_factor), int(t_pix_pos[1] * scale_factor)), t) for t_pix_pos, t in v_info]
+        scaled_map[v_id] = v_info
+    scaled_w = int(corr_map.width * scale_factor)
+    scaled_h = int(corr_map.height * scale_factor)
+    return CorrespondenceMap(scaled_map, scaled_w, scaled_h, corr_map.num_frames)
