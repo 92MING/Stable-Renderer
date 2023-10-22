@@ -17,7 +17,7 @@ class Config:
     control_net_model_paths=[
         "lllyasviel/sd-controlnet-depth",
     ]
-    device='cuda'
+    device='mps'
     # pipeline generation configs
     prompt="boat in van gogh style"
     neg_prompt="low quality, bad anatomy"
@@ -60,7 +60,7 @@ if __name__ == '__main__':
         os.path.join(config.frames_dir, 'depth'),
         num_frames=config.num_frames
     ).Data
-    controlnet_images = [[img] for img in depth_images]
+    controlnet_images = [img for img in depth_images]
 
     # 3. Generate frames
     output_frame_list = pipe.__call__(
@@ -71,7 +71,7 @@ if __name__ == '__main__':
         control_images=controlnet_images,
         width=config.width,
         height=config.height,
-        num_inference_steps=10,
+        num_inference_steps=5,
         strength=config.strength,
         generator=generator,
         guidance_scale=7,

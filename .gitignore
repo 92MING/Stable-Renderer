@@ -10,3 +10,4 @@ rendered_frames
 source/tmp
 *.gif
 .cache/
+sample/

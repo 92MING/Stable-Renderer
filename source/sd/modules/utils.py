@@ -140,7 +140,7 @@ def make_correspondence_map(from_dir, save_to_path, num_frames=8, force_recreate
     return corr_map
 
 
-def save_latents(i, t, latents, save_dir, stem='latents', decoder='vae-approx', vae=None, **kwargs):
+def save_latents(i, t, latents, save_dir, stem='latents', decoder='vae-approx', vae=None, save_timestep=False, **kwargs):
     r"""
     Callback function to save vae-approx-decoded latents during inference.
     :param i: The current inference step.
@@ -168,7 +168,10 @@ def save_latents(i, t, latents, save_dir, stem='latents', decoder='vae-approx', 
 
     if isinstance(latents, list):
         image = [decode_func(lat, **decode_kwargs) for lat in latents]
-        [image.save(save_dir / f'{stem}_s{i:02d}_f{j:02d}.png') for j, image in enumerate(image)]
+        if save_timestep:
+            [image.save(save_dir / f'{stem}_s{i:02d}_t{int(t):03d}_f{j:02d}.png') for j, image in enumerate(image)]
+        else:
+            [image.save(save_dir / f'{stem}_s{i:02d}_f{j:02d}.png') for j, image in enumerate(image)]
     else:
         image = decode_func(latents, **decode_kwargs)
         image.save(save_dir / f'{stem}_s{i:02d}.png')
