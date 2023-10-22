@@ -1,11 +1,11 @@
 import os.path
+import shutil
 from runtime.components import Camera, MeshRenderer
 from runtime.gameObj import GameObject
 from runtime.component import Component
 from runtime.engine import Engine
 from static import Material, Mesh, Texture
 from utils.path_utils import *
-import shutil
 
 if __name__ == '__main__':
     class AutoRotation(Component):
@@ -29,5 +29,5 @@ if __name__ == '__main__':
 
     Sample.Run(enableGammaCorrection=True,
                debug=True,
-               winSize=(1080, 720),
+               winSize=(512, 512),
                needOutputMaps=True,)

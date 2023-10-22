@@ -1080,4 +1080,4 @@ def overlap(
     for i in range(num_frames):
         ovlp_seq[i] = torch.where(ovlp_seq[i] > 0, ovlp_seq[i], frame_seq[0])  # Use the first frame as the background
 
-    return frame_seq
+    return ovlp_seq

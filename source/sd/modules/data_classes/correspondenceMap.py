@@ -2,7 +2,7 @@ import numpy
 from .utils.sortableElement import SortableElement
 from .. import log_utils as logu, config
 from PIL import Image
-from utils.path_utils import MAP_OUTPUT_DIR, CACHE_DIR
+# from utils.path_utils import MAP_OUTPUT_DIR, CACHE_DIR
 import os
 import re
 import pickle
@@ -11,7 +11,7 @@ from tqdm import tqdm
 from typing import Callable, Tuple
 
 CACHE_DIR = "./.cache"
-# MAP_OUTPUT_DIR = config.test_dir / 'boat'
+MAP_OUTPUT_DIR = config.test_dir / 'boat'
 
 
 class CorrespondenceMap:

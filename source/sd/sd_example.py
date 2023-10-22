@@ -14,8 +14,8 @@ def main():
     pipe: StableDiffusionImg2VideoPipeline = load_pipe(
         model_path=config.sd_model_path,  # Stable Diffusion model path
         control_net_model_paths=[
-            # "lllyasviel/sd-controlnet-canny",  # Canny model
-            "lllyasviel/sd-controlnet-depth"  # Depth model
+            "lllyasviel/sd-controlnet-depth",  # Depth model
+            "lllyasviel/sd-controlnet-normal",  # Normal model
         ],
         use_safetensors=True,
         scheduler_type="euler-ancestral",
@@ -43,29 +43,31 @@ def main():
     generator = torch.Generator(device=config.device).manual_seed(seed)
 
     # 2. Prepare images
-    n = 8  # Number of frames to utilize
+    n = 4  # Number of frames to utilize
     test_dir = config.test_dir / 'boat'
 
     frame_dir = test_dir / "color"
     frame_path_list = utils.list_frames(frame_dir)[:n]
+
     frames = [Image.open(img_path).convert('RGB') for img_path in frame_path_list]
 
-    logu.debug(f"Use frames: {[Path(path).name for path in frame_path_list]}")
-
-    # 3. Prepare masks
-    # masks = [Image.open(test_dir / "masks/mask.png")]*n  # Simply use single mask for all frames for testing
+    logu.debug(f"Color: {[Path(path).name for path in frame_path_list]}")
 
     # 4. Prepare control images.
-    # Simply use canny and depth images for test.
-    # canny_images = utils.make_canny_images(frames)
-    depth_img_dir = test_dir / "depth"
-    depth_img_paths = utils.list_frames(depth_img_dir)[:n]
+    depth_dir = test_dir / "depth"
+    normal_dir = test_dir / "normal"
+    depth_img_paths = utils.list_frames(depth_dir)[:n]
     depth_images = [Image.open(img_path).convert('RGB') for img_path in depth_img_paths]
+    normal_img_paths = utils.list_frames(normal_dir)[:n]
+    normal_images = [Image.open(img_path).convert('RGB') for img_path in normal_img_paths]
 
-    # control_images = [[e[0], e[1]] for e in zip(canny_images, depth_images)]
+    logu.debug(f"Depth: {[Path(path).name for path in depth_img_paths]}")
+    logu.debug(f"Normal: {[Path(path).name for path in normal_img_paths]}")
+
+    control_images = [[e[0], e[1]] for e in zip(depth_images, normal_images)]
 
     # 5. Prepare correspondence map
-    corr_map = utils.make_correspondence_map(test_dir / "id", test_dir / "corr_map.pkl", force_recreate=True)
+    corr_map = utils.make_correspondence_map(test_dir / "id", test_dir / "corr_map.pkl", force_recreate=False)
     # utils.save_corr_map_visualization(corr_map, save_dir=test_dir / "corr_map_vis", n=2)
 
     output_dir = test_dir / "outputs"
@@ -79,21 +81,21 @@ def main():
     output_frame_list = pipe.__call__(
         prompt=prompt,
         negative_prompt=neg_prompt,
-        correspondence_map=corr_map,
+        # correspondence_map=corr_map,
         images=frames,
         # masks=masks,  # Optional: mask images
-        # control_images=depth_images,
+        control_images=control_images,
         width=width,
         height=height,
-        num_inference_steps=32,
+        num_inference_steps=16,
         strength=0.75,
         generator=generator,
-        guidance_scale=5,
+        guidance_scale=7,
         controlnet_conditioning_scale=0.5,
         add_predicted_noise=True,
         callback=utils.save_latents,
         callback_kwargs=dict(save_dir=latents_dir),
-        overlap_kwargs=dict(max_workers=1)
+        overlap_kwargs=dict(max_workers=4)
     ).images
     toc = time.time()
     logu.info(f"Total inference time: {toc - tic:.2f}s")

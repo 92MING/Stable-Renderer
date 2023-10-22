@@ -5,7 +5,7 @@ import numpy
 import torch
 import json
 import torchvision.transforms as transforms
-from typing import List
+from typing import List, Union
 from PIL import Image
 from pathlib import Path
 from . import config
@@ -13,12 +13,18 @@ from . import log_utils as logu
 from .data_classes.correspondenceMap import CorrespondenceMap
 
 
-def list_frames(frame_dir):
+def list_frames(frame_dir, return_type: type = Path):
     pattern = re.compile(r".*_(\d+).png")
     try:
         frame_list = sorted(listfiles(frame_dir, exts='.png', return_type=Path, return_path=True), key=lambda filename: int(pattern.match(str(filename)).group(1)))
     except AttributeError as e:
         raise AttributeError(f"Frame filename format is not correct. Please make sure all filenames follow format `*_xxx.png`, where `xxx` is an integer.") from e
+    if return_type == Path:
+        pass
+    elif return_type == str:
+        frame_list = [str(frame) for frame in frame_list]
+    elif return_type == Image.Image:
+        frame_list = [Image.open(frame).convert('RGB') for frame in frame_list]
     return frame_list
 
 
