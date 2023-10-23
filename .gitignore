@@ -11,3 +11,4 @@ source/tmp
 *.gif
 .cache/
 sample/
+.env

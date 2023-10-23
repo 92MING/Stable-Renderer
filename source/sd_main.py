@@ -6,18 +6,22 @@ from diffusers import EulerAncestralDiscreteScheduler
 from sys import platform
 import torch
 import os
+from utils.global_utils import GetEnv
+from utils.path_utils import GIF_OUTPUT_DIR
+from datetime import datetime
 
 def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
-    images[0].save(output_fname, format="GIF", save_all=True, append_images=images[1:], loop=0)
+    if not os.path.exists(GIF_OUTPUT_DIR):
+        os.makedirs(GIF_OUTPUT_DIR)
+    path = os.path.join(GIF_OUTPUT_DIR, datetime.now().strftime(f"%Y-%m-%d_%H-%M_{output_fname}"))
+    images[0].save(path, format="GIF", save_all=True, append_images=images[1:], loop=0)
     logu.success(f'[SUCESS] Saved image sequence as {output_fname}')
 
 class Config:
     # pipeline init configs
-    model_path="runwayml/stable-diffusion-v1-5"
-    control_net_model_paths=[
-        "lllyasviel/sd-controlnet-depth",
-    ]
-    device='mps'
+    model_path = GetEnv('SD_URL')
+    control_net_model_paths=[GetEnv('CONTROLNET_DEPTH_URL'), GetEnv('CONTROLNET_NORMAL_URL'),]
+    device='cuda'
     # pipeline generation configs
     prompt="boat in van gogh style"
     neg_prompt="low quality, bad anatomy"
@@ -27,7 +31,7 @@ class Config:
     strength=1
     # data preparation configs
     num_frames=8
-    frames_dir="../rendered_frames/2023-10-21_13"
+    frames_dir="../output/runtime_map/2023-10-23_0"
 
 if __name__ == '__main__':
     config = Config()
@@ -60,7 +64,11 @@ if __name__ == '__main__':
         os.path.join(config.frames_dir, 'depth'),
         num_frames=config.num_frames
     ).Data
-    controlnet_images = [img for img in depth_images]
+    normal_images = ImageFrames.from_existing_directory(
+        os.path.join(config.frames_dir, 'normal'),
+        num_frames=config.num_frames
+    ).Data
+    controlnet_images = [[depth, normal] for depth, normal in zip(depth_images, normal_images)]
 
     # 3. Generate frames
     output_frame_list = pipe.__call__(

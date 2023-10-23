@@ -2,16 +2,16 @@ import os
 import torch
 import time
 from sys import platform
-from typing import List
+from typing import Sequence
 from diffusers import ControlNetModel
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from .multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
 from .. import log_utils as logu
-
+from utils.global_utils import GetEnv
 
 def load_pipe(
-    model_path: str = "runwayml/stable-diffusion-v1-5",
-    control_net_model_paths: List[str] = ["lllyasviel/sd-controlnet-depth"],
+    model_path: str = GetEnv('SD_URL'),
+    control_net_model_paths: Sequence[str] = (GetEnv('CONTROLNET_DEPTH_URL'), ),
     use_safetensors: bool = True,
     scheduler_type: str = "euler-ancestral",
     no_half: bool = False,
