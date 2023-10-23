@@ -1111,6 +1111,7 @@ def overlap(
             h, w = pos
             ovlp_seq[t, :, h, w] += frame_seq[t][0, :, h, w]
             ovlp_count[t, h, w] += 1
+            continue
         value = 0
         count = 0
         for pos, t in v_info:
