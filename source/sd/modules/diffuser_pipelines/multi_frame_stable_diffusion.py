@@ -426,6 +426,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         correspondence_map: Optional[CorrespondenceMap] = None,
         overlap_algorithm: str = 'resize_overlap',
         overlap_max_workers: int = 1,
+        overlap_kwargs: dict = {},
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -881,6 +882,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                             step=step,
                             timestep=t,
                             max_workers=overlap_max_workers,
+                            overlap_kwargs=overlap_kwargs,
                         )
                     elif overlap_algorithm == "overlap":
                         latents_seq = overlap(
@@ -889,6 +891,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                             step=step,
                             timestep=t,
                             max_workers=overlap_max_workers,
+                            overlap_kwargs=overlap_kwargs,
                         )
                     elif overlap_algorithm == "vae_overlap":
                         latents_seq = self.vae_overlap(
@@ -898,6 +901,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                             step=step,
                             timestep=t,
                             max_workers=overlap_max_workers,
+                            overlap_kwargs=overlap_kwargs,
                         )
                     elif overlap_algorithm == "pooling_overlap":
                         latents_seq = self.pooling_overlap(
@@ -905,6 +909,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                             corr_map=correspondence_map,
                             step=i,
                             timestep=t,
+                            overlap_kwargs=overlap_kwargs,
                         )
                     else:
                         raise NotImplementedError(f"Unknown overlap algorithm {overlap_algorithm}")
@@ -1089,7 +1094,7 @@ def overlap(
     timestep: int = None,
     alpha=0.5,
     max_workers: int = 1,
-    **kwargs
+    overlap_kwargs: dict = {},
 ):
     """
     Do overlapping on a sequence of frames according to the corresponding map.
@@ -1102,6 +1107,15 @@ def overlap(
     :return: A list of overlapped frames.
     """
     assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
+
+    try:
+        start_corr = overlap_kwargs.get('start_corr')
+        end_corr = overlap_kwargs.get('end_corr')
+        if int(timestep) < start_corr or int(timestep) > end_corr:
+            logu.info(f"Scheduling activated, current timestep {timestep}")
+            return frame_seq
+    except Exception as e:
+        logu.error(e)
 
     num_frames = len(frame_seq)
     batch_size, channels, frame_h, frame_w = frame_seq[0].shape
