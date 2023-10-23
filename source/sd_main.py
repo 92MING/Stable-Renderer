@@ -27,7 +27,7 @@ class Config:
     ]
     device=GetEnv('DEVICE', 'mps')
     # pipeline generation configs
-    prompt="boat in van gogh style"
+    prompt="boat in van gogh style, anime boat, best quality"
     neg_prompt="low quality, bad anatomy"
     width=512
     height=512
