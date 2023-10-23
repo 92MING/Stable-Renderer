@@ -29,6 +29,7 @@ from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, pr
 from ..data_classes.correspondenceMap import CorrespondenceMap
 from .. import log_utils as logu
 from ..utils import save_latents
+from .overlap import Overlap, ResizeOverlap, VAEOverlap
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -424,7 +425,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         control_guidance_start: Union[float, List[float]] = 0.0,
         control_guidance_end: Union[float, List[float]] = 1.0,
         correspondence_map: Optional[CorrespondenceMap] = None,
-        overlap_algorithm: str = 'resize_overlap',
+        overlap_algorithm: Union[str, Overlap] = 'resize_overlap',
         overlap_max_workers: int = 1,
         overlap_kwargs: dict = {},
     ):
@@ -556,6 +557,19 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         logu.debug(f"Do Inpainting: {do_inpainting}")
         logu.debug(f"Do ControlNet: {do_controlnet}")
         logu.debug(f"Do Overlapping: {do_overlapping}")
+
+        # Init overlap functions
+        if do_overlapping:
+            if isinstance(overlap_algorithm, Overlap):
+                overlap_function = overlap_algorithm
+            elif overlap_algorithm == 'overlap':
+                overlap_function = Overlap(alpha=0.5, max_workers=overlap_max_workers)
+            elif overlap_algorithm == 'resize_overlap':
+                overlap_function = ResizeOverlap(alpha=0.5, max_workers=overlap_max_workers, interpolate_mode='bilinear')
+            elif overlap_algorithm == 'vae_overlap':
+                overlap_function = VAEOverlap(alpha=0.5, max_workers=overlap_max_workers, vae=self.vae, generator=generator)
+            else:
+                raise NotImplementedError(f"Unknown overlapping algorithm {overlap_algorithm}")
 
         # 1. Align format for control guidance
         controlnet = self.controlnet._orig_mod if is_compiled_module(self.controlnet) else self.controlnet
@@ -875,44 +889,14 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                     except Exception as e:
                         logu.error(f"{e}, latent not saved")
 
-                    if overlap_algorithm == "resize_overlap":
-                        latents_seq = self.resize_overlap(
-                            latents_seq,
-                            corr_map=correspondence_map,
-                            step=step,
-                            timestep=t,
-                            max_workers=overlap_max_workers,
-                            overlap_kwargs=overlap_kwargs,
-                        )
-                    elif overlap_algorithm == "overlap":
-                        latents_seq = overlap(
-                            latents_seq,
-                            corr_map=correspondence_map,
-                            step=step,
-                            timestep=t,
-                            max_workers=overlap_max_workers,
-                            overlap_kwargs=overlap_kwargs,
-                        )
-                    elif overlap_algorithm == "vae_overlap":
-                        latents_seq = self.vae_overlap(
-                            latents_seq,
-                            corr_map=correspondence_map,
-                            generator=generator,
-                            step=step,
-                            timestep=t,
-                            max_workers=overlap_max_workers,
-                            overlap_kwargs=overlap_kwargs,
-                        )
-                    elif overlap_algorithm == "pooling_overlap":
-                        latents_seq = self.pooling_overlap(
-                            latents_seq,
-                            corr_map=correspondence_map,
-                            step=i,
-                            timestep=t,
-                            overlap_kwargs=overlap_kwargs,
-                        )
-                    else:
-                        raise NotImplementedError(f"Unknown overlap algorithm {overlap_algorithm}")
+                    latents_seq = overlap_function(
+                        latents_seq,
+                        corr_map=correspondence_map,
+                        step=step,
+                        timestep=t,
+                        overlap_kwargs=overlap_kwargs,
+                    )
+
                     try:
                         save_dir = callback_kwargs.get('save_dir')
                         if isinstance(save_dir, str):
@@ -966,112 +950,6 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
         return StableDiffusionPipelineOutput(images=images, nsfw_content_detected=None)
 
-    # TODO: Optimize this function
-    def vae_overlap(
-        self,
-        latents_seq: List[torch.Tensor],
-        corr_map: CorrespondenceMap,
-        generator: torch.Generator,
-        step: int = None,
-        timestep: int = None,
-        max_workers: int = 4,
-        **kwargs,
-    ):
-        """
-        Do overlapping with VAE decode/encode a latents to pixel space.
-        :param latents_seq: A sequence of latents.
-        :param corr_map: A correspondence map.
-        :param generator: A torch.Generator.
-        :param step: The current step.
-        :param timestep: The current timestep.
-        :return: A sequence of overlapped latents.
-        """
-
-        def _encode(image):
-            latent_dist = self.vae.encode(image).latent_dist
-            latents = latent_dist.sample(generator=generator)
-            latents = self.vae.config.scaling_factor * latents
-            return latents
-
-        def _decode(latents):
-            latents = 1 / self.vae.config.scaling_factor * latents
-            image = self.vae.decode(latents).sample
-            return image
-
-        num_frames = len(latents_seq)
-        screen_w, screen_h = corr_map.size
-        frame_h, frame_w = latents_seq[0].shape[-2:]
-
-        #! IMPORTANT:
-        #! (1) After VAE encoding, 0's in the latents will not be 0's anymore
-        #! (2) After VAE decoding, the number of channels will change from 4 to 3. Encoding will do reverse.
-        #! (3) Do not overlap original in pixel space and then encode to latent space. This will destroy generation.
-        # TODO: However, if we can overlap original at latent space directly, then the destruction might be much less.
-
-        pix_seq = [_decode(latents) for latents in latents_seq]
-        ovlp_seq = overlap(pix_seq, corr_map, step=step, timestep=timestep, max_workers=max_workers, **kwargs)
-        ovlp_seq = [torch.where(ovlp_seq[i] != 0, ovlp_seq[i], pix_seq[i]) for i in range(num_frames)]  # Overlap with original
-        ovlp_seq = [_encode(ovlp_img) for ovlp_img in ovlp_seq]
-
-        # ovlp_seq = [torch.where(abs(ovlp_seq[i] - latents_seq[i]) > 0.1, ovlp_seq[i], latents_seq[i]) for i in range(num_frames)]
-
-        return ovlp_seq
-
-    def resize_overlap(
-        self,
-        latents_seq: List[torch.Tensor],
-        corr_map: CorrespondenceMap,
-        step: int = None,
-        timestep: int = None,
-        max_workers: int = 4,
-        interpolate_mode: str = 'bilinear',
-        **kwargs
-    ):
-        """
-        Do overlapping with resizing the latents list to the size of the correspondence map.
-        :param latents_seq: A list of frame latents. Each element is a tensor of shape [B, C, H, W].
-        :param corr_map: correspondence map
-        :param step: current inference step
-        :param timestep: current inference timestep
-        :return: A list of overlapped frame latents.
-        """
-        num_frames = len(latents_seq)
-        screen_w, screen_h = corr_map.size
-        frame_h, frame_w = latents_seq[0].shape[-2:]
-        align_corners = False if interpolate_mode in ['linear', 'bilinear', 'bicubic', 'trilinear'] else ...
-
-        ovlp_seq = [F.interpolate(latents, size=(screen_h, screen_w), mode=interpolate_mode, align_corners=align_corners) for latents in latents_seq]
-        ovlp_seq = overlap(
-            ovlp_seq,
-            corr_map=corr_map,
-            step=step,
-            timestep=timestep,
-            max_workers=max_workers,
-            **kwargs
-        )
-        ovlp_seq = [F.interpolate(latents, size=(frame_h, frame_w), mode=interpolate_mode, align_corners=align_corners) for latents in ovlp_seq]
-
-        logu.debug(f"Resize scale factor: {screen_h / frame_h:.2f} | Overlap ratio: {100 * overlap_rate(ovlp_seq, threshold=0):.2f}%")
-
-        # Overlap with original
-        ovlp_seq = [torch.where(ovlp_seq[i] != 0, ovlp_seq[i], latents_seq[i]) for i in range(num_frames)]
-        return ovlp_seq
-
-    def pooling_overlap(
-        self,
-        latents_seq: List[torch.Tensor],
-        corr_map: CorrespondenceMap,
-        step: int = None,
-        timestep: int = None,
-        pooling_option: str = 'max',
-        **kwargs
-    ):
-        screen_w, screen_h = corr_map.size
-        frame_h, frame_w = latents_seq[0].shape[2:]
-        logu.info(screen_w, screen_h)
-        logu.info(frame_h, frame_w)
-        pass
-
 
 def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
     """
@@ -1085,88 +963,3 @@ def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
     # mix with the original results from guidance by factor guidance_rescale to avoid "plain looking" images
     noise_cfg = guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg
     return noise_cfg
-
-
-def overlap(
-    frame_seq: List[torch.Tensor],
-    corr_map: CorrespondenceMap,
-    step: int = None,
-    timestep: int = None,
-    alpha=0.5,
-    max_workers: int = 1,
-    overlap_kwargs: dict = {},
-):
-    """
-    Do overlapping on a sequence of frames according to the corresponding map.
-    ONLY OVERLAP WITH SELF BUT NOT THE ORIGINAL FRAME.
-    :param frame_seq: A list of frames. Each element is a tensor of shape [B, C, H, W].
-    :param corr_map: A correspondence map.
-    :param step: The current step.
-    :param timestep: The current timestep.
-    :param max_workers: The number of workers for multiprocessing.
-    :return: A list of overlapped frames.
-    """
-    assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
-
-    try:
-        start_corr = overlap_kwargs.get('start_corr')
-        end_corr = overlap_kwargs.get('end_corr')
-        if int(timestep) < start_corr or int(timestep) > end_corr:
-            logu.info(f"Scheduling activated, current timestep {timestep}")
-            return frame_seq
-    except Exception as e:
-        logu.error(e)
-
-    num_frames = len(frame_seq)
-    batch_size, channels, frame_h, frame_w = frame_seq[0].shape
-    device = frame_seq[0].device
-    ovlp_seq = torch.zeros((num_frames, channels, frame_h, frame_w), dtype=torch.float16, device=device)  # [C, H, W]
-    ovlp_count = torch.zeros((num_frames, frame_h, frame_w), dtype=torch.uint8, device=device)  # [H, W]
-
-    # assert ovlp_seq.device == frame_seq[0].device and ovlp_count.device == frame_seq[0].device, "ovlp_seq and ovlp_count should be on the same device as frame_seq"
-
-    tic = time.time()
-    for v_info in corr_map.Map.values():
-        v_info = [(pos, t) for pos, t in v_info if t < num_frames]
-        if len(v_info) == 0:
-            continue
-        elif len(v_info) == 1:
-            pos, t = v_info[0]
-            h, w = pos
-            ovlp_seq[t, :, h, w] += frame_seq[t][0, :, h, w]
-            ovlp_count[t, h, w] += 1
-            continue
-        value = 0
-        count = 0
-        for pos, t in v_info:
-            h, w = pos
-            value += frame_seq[t][0, :, h, w]
-            count += 1
-
-        value /= count
-
-        for pos, t in v_info:
-            h, w = pos
-            ovlp_seq[t, :, h, w] += alpha * value + (1 - alpha) * frame_seq[t][0, :, h, w]
-            ovlp_count[t, h, w] += 1
-
-    # Overlap with self (very fast)
-    ovlp_count = ovlp_count.unsqueeze(1).expand(num_frames, channels, -1, -1)
-    ovlp_seq = torch.where(ovlp_count != 0, ovlp_seq / ovlp_count, ovlp_seq)
-    ovlp_seq = ovlp_seq.unsqueeze(1)
-    ovlp_seq = [ovlp_seq[i] for i in range(num_frames)]
-
-    toc = time.time()
-    logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame")
-
-    return ovlp_seq
-
-
-def overlap_rate(ovlp_seq: List[torch.Tensor], threshold: float = 0.0):
-    """
-    Debug function to calculate the overlap rate of a sequence of frames.
-    :param ovlp_seq: A list of overlapped frames. Note that this should haven't been overlapped with the original frames.
-    """
-    num_zeros = torch.sum(torch.stack([torch.sum(abs(latents - threshold) <= 0) for latents in ovlp_seq]))
-    num_nonzeros = torch.sum(torch.stack([torch.sum(abs(latents - threshold) > 0) for latents in ovlp_seq]))
-    return num_nonzeros / (num_nonzeros + num_zeros)

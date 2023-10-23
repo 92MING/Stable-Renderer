@@ -83,16 +83,16 @@ if __name__ == '__main__':
         control_images=controlnet_images,
         width=config.width,
         height=config.height,
-        num_inference_steps=10,
+        num_inference_steps=3,
         strength=config.strength,
         generator=generator,
         guidance_scale=7,
         controlnet_conditioning_scale=0.95,
         add_predicted_noise=True, 
         correspondence_map=corr_map,
-        overlap_algorithm='resize_overlap',
+        overlap_algorithm='vae_overlap',
         callback_kwargs={'save_dir': "./sample"},
-        overlap_kwargs={'start_corr': 0, 'end_corr': 600}
+        overlap_kwargs={'start_corr': 600, 'end_corr': 1000}
         # callback=utils.view_latents,
     ).images
 
