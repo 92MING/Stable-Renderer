@@ -859,8 +859,13 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
                 if do_overlapping:
                     try:
+                        save_dir = callback_kwargs.get('save_dir')
+                        if isinstance(save_dir, str):
+                            save_dir = os.path.join(save_dir, 'overlapped')
+                        else:
+                            save_dir = save_dir / 'overlapped'
                         save_latents(step, t, latents_seq,
-                                     save_dir=callback_kwargs.get('save_dir') / 'overlapped',
+                                     save_dir=save_dir,
                                      prefix='latents',
                                      postfix='before_overlap',
                                      decoder=callback_kwargs.get('decoder', 'vae-approx'),
@@ -904,8 +909,13 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                     else:
                         raise NotImplementedError(f"Unknown overlap algorithm {overlap_algorithm}")
                     try:
+                        save_dir = callback_kwargs.get('save_dir')
+                        if isinstance(save_dir, str):
+                            save_dir = os.path.join(save_dir, 'overlapped')
+                        else:
+                            save_dir = save_dir / 'overlapped'
                         save_latents(step, t, latents_seq,
-                                     save_dir=callback_kwargs.get('save_dir') / 'overlapped',
+                                     save_dir=save_dir,
                                      prefix='latents',
                                      postfix='after_overlap',
                                      decoder=callback_kwargs.get('decoder', 'vae-approx'),
