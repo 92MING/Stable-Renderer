@@ -66,6 +66,9 @@ class Shader(NamedObj, EngineObj):
         matrixBlockIndex = gl.glGetUniformBlockIndex(program, "Matrices")
         if matrixBlockIndex != gl.GL_INVALID_INDEX:
             gl.glUniformBlockBinding(program, matrixBlockIndex, self.engine.RuntimeManager.MatrixUBO_BindingPoint)
+        lightBlockIndex = gl.glGetUniformBlockIndex(program, "Lights")
+        if lightBlockIndex != gl.GL_INVALID_INDEX:
+            gl.glUniformBlockBinding(program, lightBlockIndex, self.engine.RuntimeManager.LightUBO_BindingPoint)
 
         return program
 

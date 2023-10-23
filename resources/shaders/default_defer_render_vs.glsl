@@ -7,5 +7,5 @@ out vec2 uv;
 
 void main() {
     gl_Position = vec4(position, 1.0);
-    uv = vUV;
+    uv = vec2(vUV.x, 1.0 - vUV.y); // flip y axis, since it is data just load from img
 }

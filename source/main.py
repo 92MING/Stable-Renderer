@@ -29,4 +29,4 @@ if __name__ == '__main__':
     Sample.Run(enableGammaCorrection=True,
                debug=True,
                winSize=(512, 512),
-               needOutputMaps=True,)
+               needOutputMaps=False,)

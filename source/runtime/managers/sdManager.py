@@ -51,13 +51,6 @@ class SDManager(Manager):
 
         self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize) # for saving maps asynchronously
         self._outputPath = get_map_output_dir(create_if_not_exists=False)
-        self._initUBO()
-
-    def _initUBO(self):
-        self._corrMapUBO = gl.glGenBuffers(1)
-        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self._corrMapUBO)
-        gl.glBufferData(gl.GL_UNIFORM_BUFFER, 4, None, gl.GL_DYNAMIC_DRAW)
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 0, 4, self.MapMinimizeRatio)
 
     # region properties
     @property
@@ -65,15 +58,9 @@ class SDManager(Manager):
         return self._mapMinimizeRatio
     @MapMinimizeRatio.setter
     def MapMinimizeRatio(self, value:int):
+        '''Ratio should be a perfect square'''
         assert (value > 0 and glm.sqrt(value) == int(glm.sqrt(value))), 'MapMinimizeRatio must be a perfect square'
-        if value == self._mapMinimizeRatio:
-            return
         self._mapMinimizeRatio = value
-        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self._corrMapUBO)
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 0, 4, self.MapMinimizeRatio)
-    @property
-    def CorrMapUBOBindingPoint(self) -> int:
-        return 2
     @property
     def ShouldOutputFrame(self):
         '''Return if the current frame's map data should be output to disk'''
