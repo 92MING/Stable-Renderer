@@ -10,12 +10,13 @@ from .. import log_utils as logu
 from utils.global_utils import GetEnv
 
 def load_pipe(
-    model_path: str = GetEnv('SD_URL', 'runwayml/stable-diffusion-v1-5'),
-    control_net_model_paths: Sequence[str] = (GetEnv('CONTROLNET_DEPTH_URL','lllyasviel/sd-controlnet-depth'), GetEnv('CONTROLNET_NORMAL_URL','lllyasviel/sd-controlnet-normal'), ),
+    model_path: str = GetEnv('SD_PATH', 'runwayml/stable-diffusion-v1-5'),
+    control_net_model_paths: Sequence[str] = (GetEnv('CONTROLNET_DEPTH_PATH','lllyasviel/sd-controlnet-depth'),
+                                              GetEnv('CONTROLNET_NORMAL_PATH','lllyasviel/sd-controlnet-normal'), ),
     use_safetensors: bool = True,
     scheduler_type: str = "euler-ancestral",
     no_half: bool = False,
-    device='cpu',
+    device=GetEnv('DEVICE','cpu'),
     torch_dtype=torch.float16,
     local_files_only: bool = False,
 ) -> StableDiffusionImg2VideoPipeline:

@@ -4,8 +4,6 @@ from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
 import sd.modules.log_utils as logu
 from diffusers import EulerAncestralDiscreteScheduler
 from sys import platform
-from typing import List
-from PIL import Image
 import torch
 import os
 from utils.global_utils import GetEnv
@@ -22,12 +20,12 @@ def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
 
 class Config:
     # pipeline init configs
-    model_path="runwayml/stable-diffusion-v1-5"
+    model_path=GetEnv('SD_PATH', 'runwayml/stable-diffusion-v1-5')
     control_net_model_paths=[
-        "lllyasviel/sd-controlnet-depth",
-        "lllyasviel/sd-controlnet-normal",
+        GetEnv('CONTROLNET_DEPTH_PATH','lllyasviel/sd-controlnet-depth'),
+        GetEnv('CONTROLNET_NORMAL_PATH','lllyasviel/sd-controlnet-normal'),
     ]
-    device='mps' if platform == 'darwin' else 'cuda'
+    device=GetEnv('DEVICE', 'mps')
     # pipeline generation configs
     prompt="boat in van gogh style"
     neg_prompt="low quality, bad anatomy"
