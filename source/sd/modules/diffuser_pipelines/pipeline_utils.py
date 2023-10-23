@@ -1,5 +1,6 @@
 import os
 import torch
+import time
 from sys import platform
 from typing import List
 from diffusers import ControlNetModel
@@ -22,6 +23,8 @@ def load_pipe(
     Load a Stable Diffusion pipeline with some controlnets.
     """
     logu.info(f"Loading Stable Diffusion pipeline from {model_path} with controlnets {control_net_model_paths}.")
+    tic = time.time()
+
     no_half = no_half or (platform == 'darwin')
     torch_dtype = torch.float32 if no_half else torch.float16
 
@@ -75,6 +78,7 @@ def load_pipe(
         logu.warn("XFormers not found. You can install XFormers with `pip install xformers` to speed up the generation.")
     # pipe.enable_model_cpu_offload()
 
-    logu.success(f"Pipe loaded on {device}, dtype: {torch_dtype}.")
+    toc = time.time()
+    logu.success(f"Pipe loaded in {toc-tic:.2f}s | device: {device} | dtype: {torch_dtype}.")
 
     return pipe

@@ -3,6 +3,7 @@ import cv2
 import os
 import numpy
 import torch
+import tqdm
 import json
 import shutil
 import torchvision.transforms as transforms
@@ -238,3 +239,32 @@ def scale_corr_map(corr_map: CorrespondenceMap, scale_factor: float = 0.125):
     scaled_w = int(corr_map.width * scale_factor)
     scaled_h = int(corr_map.height * scale_factor)
     return CorrespondenceMap(scaled_map, scaled_w, scaled_h, corr_map.num_frames)
+
+
+def make_base_map(base_image: Image.Image, corr_map: CorrespondenceMap, num_frames=None, save_to_dir=None, return_pil: bool = True):
+    width, height = corr_map.size
+    num_frames = num_frames or corr_map.num_frames
+    if isinstance(base_image, Image.Image):
+        base_numpy = numpy.array(base_image)
+    base_map = [numpy.zeros_like(base_numpy) for _ in range(num_frames)]
+    assert base_numpy.shape[:2] == (height, width), f"base_image shape {base_numpy.shape[2:]} does not match corr_map shape {(height, width)}"
+
+    for v_id, v_info in tqdm.tqdm(corr_map.Map.items(), desc="Creating base map"):
+        for t_pix_pos, t in v_info:
+            h, w = t_pix_pos
+            if t < num_frames and w >= 0 and w < width and h >= 0 and h < height:
+                fh, fw = v_info[0][0]
+                base_map[t][h, w, :] = base_numpy[fh, fw, :]
+            else:
+                break
+
+    if save_to_dir:
+        save_to_dir = Path(save_to_dir)
+        save_to_dir.mkdir(parents=True, exist_ok=True)
+        [cv2.imwrite(str(save_to_dir / f"base_map_{i:02d}.png"), cv2.cvtColor(base_map[i], cv2.COLOR_RGB2BGR)) for i in range(num_frames)]
+        logu.success(f"Base map saved to {save_to_dir}")
+
+    if return_pil:
+        base_map = [Image.fromarray(base_map[i]) for i in range(num_frames)]
+
+    return base_map
