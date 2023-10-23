@@ -4,8 +4,25 @@ from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
 import sd.modules.log_utils as logu
 from diffusers import EulerAncestralDiscreteScheduler
 from sys import platform
+from typing import List
+from PIL import Image
 import torch
 import os
+
+def numpy_to_pil(images):
+    """
+    Convert a numpy image or a batch of images to a PIL image.
+    """
+    if images.ndim == 3:
+        images = images[None, ...]
+    images = (images * 255).round().astype("uint8")
+    if images.shape[-1] == 1:
+        # special case for grayscale (single channel) images
+        pil_images = [Image.fromarray(image.squeeze(), mode="L") for image in images]
+    else:
+        pil_images = [Image.fromarray(image) for image in images]
+
+    return pil_images
 
 def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
     images[0].save(output_fname, format="GIF", save_all=True, append_images=images[1:], loop=0)
@@ -16,6 +33,7 @@ class Config:
     model_path="runwayml/stable-diffusion-v1-5"
     control_net_model_paths=[
         "lllyasviel/sd-controlnet-depth",
+        "lllyasviel/sd-controlnet-normal",
     ]
     device='mps'
     # pipeline generation configs
@@ -24,7 +42,7 @@ class Config:
     width=512
     height=512
     seed=1234
-    strength=1
+    strength=0.5
     # data preparation configs
     num_frames=8
     frames_dir="../rendered_frames/2023-10-21_13"
@@ -60,12 +78,16 @@ if __name__ == '__main__':
         os.path.join(config.frames_dir, 'depth'),
         num_frames=config.num_frames
     ).Data
-    controlnet_images = [img for img in depth_images]
-
+    normal_images = ImageFrames.from_existing_directory(
+        os.path.join(config.frames_dir, 'normal'),
+        num_frames=config.num_frames
+    ).Data
+    controlnet_images = [[depth, normal] for depth, normal in zip(depth_images, normal_images)]
     # 3. Generate frames
     output_frame_list = pipe.__call__(
         prompt=config.prompt,
         negative_prompt=config.neg_prompt,
+        num_frames=config.num_frames,
         images=images,
         # masks=masks,  # Optional: mask images
         control_images=controlnet_images,
