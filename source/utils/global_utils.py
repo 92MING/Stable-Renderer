@@ -18,6 +18,22 @@ if _needInit:
     from dotenv import load_dotenv
     load_dotenv(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env')))
 
+def GetEnv(key: str, default = None, type = str):
+    '''
+    Get value from os.environ.
+    :param key: the key of the value
+    :param default: default value if key not found
+    :param type: type of the value(try to convert to this type, if failed, return default)
+    '''
+    try:
+        val = os.environ[key]
+    except KeyError:
+        return default
+    try:
+        return type(val)
+    except ValueError:
+        return default
+
 def SetGlobalValue(key: str, value: object):
     _globalValues[key] = value
 def GetGlobalValue(key: str):

@@ -18,6 +18,7 @@ OUTPUT_DIR = os.path.join(PROJECT_DIR, 'output')
 '''output directory, for runtime map, etc.'''
 MAP_OUTPUT_DIR = os.path.join(OUTPUT_DIR, 'runtime_map')
 '''runtime map output directory, for saving normal map, pos map, id map, etc., during runtime.'''
+GIF_OUTPUT_DIR = os.path.join(OUTPUT_DIR, 'gif')
 TEMP_OUTPUT_DIR = os.path.join(OUTPUT_DIR, 'temp')
 
 @Overload

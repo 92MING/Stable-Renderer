@@ -8,24 +8,16 @@ from typing import List
 from PIL import Image
 import torch
 import os
+from utils.global_utils import GetEnv
+from utils.path_utils import GIF_OUTPUT_DIR
+from datetime import datetime
 
-def numpy_to_pil(images):
-    """
-    Convert a numpy image or a batch of images to a PIL image.
-    """
-    if images.ndim == 3:
-        images = images[None, ...]
-    images = (images * 255).round().astype("uint8")
-    if images.shape[-1] == 1:
-        # special case for grayscale (single channel) images
-        pil_images = [Image.fromarray(image.squeeze(), mode="L") for image in images]
-    else:
-        pil_images = [Image.fromarray(image) for image in images]
-
-    return pil_images
 
 def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
-    images[0].save(output_fname, format="GIF", save_all=True, append_images=images[1:], loop=0)
+    if not os.path.exists(GIF_OUTPUT_DIR):
+        os.makedirs(GIF_OUTPUT_DIR)
+    path = os.path.join(GIF_OUTPUT_DIR, datetime.now().strftime(f"%Y-%m-%d_%H-%M_{output_fname}"))
+    images[0].save(path, format="GIF", save_all=True, append_images=images[1:], loop=0)
     logu.success(f'[SUCESS] Saved image sequence as {output_fname}')
 
 class Config:
@@ -45,7 +37,7 @@ class Config:
     strength=0.5
     # data preparation configs
     num_frames=8
-    frames_dir="../rendered_frames/2023-10-21_13"
+    frames_dir="../output/runtime_map/2023-10-23_0"
 
 if __name__ == '__main__':
     config = Config()
