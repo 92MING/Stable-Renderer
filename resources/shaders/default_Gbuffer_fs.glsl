@@ -36,7 +36,7 @@ void main() {
     outPos = worldPos;
 
 	// get normal
-    outNormal = normalize((MV_IT * vec4(texture(normalTex, vertexUV).xyz, 0.0)).xyz);
+	outNormal = texture(normalTex, vertexUV).xyz;
 
 	// get id
 	ivec2 uv = ivec2(vertexUV * ivec2(textureSize(diffuseTex, 0)));

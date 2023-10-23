@@ -16,7 +16,7 @@ dtype = torch.float16
 
 test_dir = sd_root / 'test'
 model_dir = sd_root / 'models'
-sd_model_path = model_dir / "Stable-Diffusion/AIDv2.10.safetensors"
+sd_model_path = model_dir / "Stable-Diffusion/dreamshaper_8.safetensors"
 vae_model_path = model_dir / "VAE/vae-ft-mse-840000-ema-pruned.ckpt"
 vae_approx_model_path = model_dir / "VAE-Approx/vae-approx.pt"
 neg_emb_path = model_dir / "embeddings/aid210.pt"

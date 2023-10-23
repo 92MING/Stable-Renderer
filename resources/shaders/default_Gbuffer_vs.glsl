@@ -24,6 +24,5 @@ void main()
 	worldPos = (MV * vec4(pos, 1.0)).xyz;
 	worldNormal = normalize(MV_IT * vec4(normal, 0.0)).xyz;
 	vertexUV = texcoord;
-
 	gl_Position = projection * vec4(worldPos, 1.0);
 }

@@ -1,10 +1,11 @@
 import os.path
-
+import OpenGL.GL as gl
 from .manager import Manager
 from utils.path_utils import *
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import numpy as np
+import glm
 from PIL import Image
 
 @dataclass
@@ -32,6 +33,7 @@ class FrameData:
 class SDManager(Manager):
     def __init__(self,
                  needOutputMaps=False,
+                 mapMinimizeRatio=64,
                  maxFrameCacheCount=24,
                  mapSavingInterval=12,
                  threadPoolSize=6,):
@@ -43,14 +45,22 @@ class SDManager(Manager):
         '''
         super().__init__()
         self._needOutputMaps = needOutputMaps
+        self._mapMinimizeRatio = mapMinimizeRatio
         self._maxFrameCacheCount = maxFrameCacheCount
         self._mapSavingInterval = mapSavingInterval
 
         self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize) # for saving maps asynchronously
         self._outputPath = get_map_output_dir(create_if_not_exists=False)
 
-
     # region properties
+    @property
+    def MapMinimizeRatio(self)->int:
+        return self._mapMinimizeRatio
+    @MapMinimizeRatio.setter
+    def MapMinimizeRatio(self, value:int):
+        '''Ratio should be a perfect square'''
+        assert (value > 0 and glm.sqrt(value) == int(glm.sqrt(value))), 'MapMinimizeRatio must be a perfect square'
+        self._mapMinimizeRatio = value
     @property
     def ShouldOutputFrame(self):
         '''Return if the current frame's map data should be output to disk'''

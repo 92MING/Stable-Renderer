@@ -40,6 +40,7 @@ class Engine:
                  contrast=1.0,
                  debug=False,
                  needOutputMaps=False,
+                 mapMinimizeRatio = 64,
                  maxFrameCacheCount=24,
                  mapSavingInterval=12,
                  threadPoolSize=6,):
@@ -62,7 +63,8 @@ class Engine:
                                             saturation=saturation, brightness=brightness, contrast=contrast,)
         self._sceneManager = SceneManager(self._scene)
         self._resourceManager = ResourcesManager()
-        self._sdManager = SDManager(needOutputMaps=needOutputMaps, maxFrameCacheCount=maxFrameCacheCount, mapSavingInterval=mapSavingInterval, threadPoolSize=threadPoolSize,)
+        self._sdManager = SDManager(needOutputMaps=needOutputMaps, maxFrameCacheCount=maxFrameCacheCount, mapSavingInterval=mapSavingInterval, threadPoolSize=threadPoolSize,
+                                    mapMinimizeRatio=mapMinimizeRatio)
         # endregion
 
     # region debug

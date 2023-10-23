@@ -4,6 +4,7 @@ import numpy
 import cv2
 import torch.nn.functional as F
 import tqdm
+import time
 import os
 from torch.multiprocessing import Pool
 from PIL import Image
@@ -391,6 +392,8 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         self,
         prompt: Union[str, List[str]],
         negative_prompt: Optional[Union[str, List[str]]] = None,
+        num_frames: int = 1,
+        base_image: PipelineImageInput = None,
         images: List[PipelineImageInput] = None,
         masks: List[PipelineImageInput] = None,
         control_images: Union[List[PipelineImageInput], List[List[PipelineImageInput]]] = None,
@@ -539,6 +542,14 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         do_inpainting = masks is not None
         do_controlnet = control_images is not None
         do_overlapping = correspondence_map is not None
+
+        if num_frames:
+            if do_img2img:
+                images = images[:num_frames]
+            if do_inpainting:
+                masks = masks[:num_frames]
+            if do_controlnet:
+                control_images = control_images[:num_frames]
 
         logu.debug(f"Do Image2Image: {do_img2img}")
         logu.debug(f"Do Inpainting: {do_inpainting}")
@@ -1022,16 +1033,23 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         num_frames = len(latents_seq)
         screen_w, screen_h = corr_map.size
         frame_h, frame_w = latents_seq[0].shape[-2:]
+        align_corners = False if interpolate_mode in ['linear', 'bilinear', 'bicubic', 'trilinear'] else ...
 
-        ovlp_seq = [F.interpolate(latents, size=(screen_h, screen_w), mode=interpolate_mode, align_corners=False) for latents in latents_seq]
-        ovlp_seq = overlap(ovlp_seq, corr_map=corr_map, step=step, timestep=timestep, max_workers=max_workers, **kwargs)
-        ovlp_seq = [F.interpolate(latents, size=(frame_h, frame_w), mode=interpolate_mode, align_corners=False) for latents in ovlp_seq]
+        ovlp_seq = [F.interpolate(latents, size=(screen_h, screen_w), mode=interpolate_mode, align_corners=align_corners) for latents in latents_seq]
+        ovlp_seq = overlap(
+            ovlp_seq,
+            corr_map=corr_map,
+            step=step,
+            timestep=timestep,
+            max_workers=max_workers,
+            **kwargs
+        )
+        ovlp_seq = [F.interpolate(latents, size=(frame_h, frame_w), mode=interpolate_mode, align_corners=align_corners) for latents in ovlp_seq]
 
         logu.debug(f"Resize scale factor: {screen_h / frame_h:.2f} | Overlap ratio: {100 * overlap_rate(ovlp_seq, threshold=0):.2f}%")
 
         # Overlap with original
         ovlp_seq = [torch.where(ovlp_seq[i] != 0, ovlp_seq[i], latents_seq[i]) for i in range(num_frames)]
-
         return ovlp_seq
 
     def pooling_overlap(
@@ -1069,6 +1087,7 @@ def overlap(
     corr_map: CorrespondenceMap,
     step: int = None,
     timestep: int = None,
+    alpha=0.5,
     max_workers: int = 1,
     **kwargs
 ):
@@ -1085,45 +1104,47 @@ def overlap(
     assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
 
     num_frames = len(frame_seq)
-    frame_h, frame_w = frame_seq[0].shape[-2:]
-    ovlp_seq = [torch.zeros_like(frame_seq[i]) for i in range(num_frames)]
-    ovlp_count = [torch.zeros_like(frame_seq[i]) for i in range(num_frames)]
+    batch_size, channels, frame_h, frame_w = frame_seq[0].shape
+    device = frame_seq[0].device
+    ovlp_seq = torch.zeros((num_frames, channels, frame_h, frame_w), dtype=torch.float16, device=device)  # [C, H, W]
+    ovlp_count = torch.zeros((num_frames, frame_h, frame_w), dtype=torch.uint8, device=device)  # [H, W]
 
-    assert ovlp_seq[0].device == frame_seq[0].device and ovlp_count[0].device == frame_seq[0].device, "ovlp_seq and ovlp_count should be on the same device as frame_seq"
+    # assert ovlp_seq.device == frame_seq[0].device and ovlp_count.device == frame_seq[0].device, "ovlp_seq and ovlp_count should be on the same device as frame_seq"
 
-    def _process(v_id, v_info):
+    tic = time.time()
+    for v_info in corr_map.Map.values():
+        v_info = [(pos, t) for pos, t in v_info if t < num_frames]
+        if len(v_info) == 0:
+            continue
+        elif len(v_info) == 1:
+            pos, t = v_info[0]
+            h, w = pos
+            ovlp_seq[t, :, h, w] += frame_seq[t][0, :, h, w]
+            ovlp_count[t, h, w] += 1
+            continue
         value = 0
         count = 0
-        for t_pix_pos, t in v_info:
-            h, w = t_pix_pos
-            if t < num_frames and w >= 0 and w < frame_w and h >= 0 and h < frame_h:
-                value += frame_seq[t][:, :, h, w]
-                count += 1
-            elif t >= num_frames:
-                break
+        for pos, t in v_info:
+            h, w = pos
+            value += frame_seq[t][0, :, h, w]
+            count += 1
 
-        if count == 0:
-            return
         value /= count
 
-        for t_pix_pos, t in v_info:
-            h, w = t_pix_pos
-            if t < num_frames and w >= 0 and w < frame_w and h >= 0 and h < frame_h:
-                ovlp_seq[t][:, :, h, w] += value
-                ovlp_count[t][:, :, h, w] += 1
-            elif t >= num_frames:
-                break
+        for pos, t in v_info:
+            h, w = pos
+            ovlp_seq[t, :, h, w] += alpha * value + (1 - alpha) * frame_seq[t][0, :, h, w]
+            ovlp_count[t, h, w] += 1
 
-    if max_workers == 1:
-        for v_id, v_info in corr_map.Map.items():
-            _process(v_id, v_info)
-    else:
-        with Pool(processes=max_workers) as pool:
-            for v_id, v_info in corr_map.Map.items():
-                pool.apply_async(_process, (v_id, v_info))
+    # Overlap with self (very fast)
+    ovlp_count = ovlp_count.unsqueeze(1).expand(num_frames, channels, -1, -1)
+    ovlp_seq = torch.where(ovlp_count != 0, ovlp_seq / ovlp_count, ovlp_seq)
+    ovlp_seq = ovlp_seq.unsqueeze(1)
+    ovlp_seq = [ovlp_seq[i] for i in range(num_frames)]
 
-    # Overlap with self
-    ovlp_seq = [torch.where(ovlp_count[i] != 0, ovlp_seq[i] / ovlp_count[i], ovlp_seq[i]) for i in range(num_frames)]
+    toc = time.time()
+    logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame")
+
     return ovlp_seq
 
 
