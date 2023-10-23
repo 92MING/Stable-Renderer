@@ -1,5 +1,4 @@
 import os.path
-import shutil
 from runtime.components import Camera, MeshRenderer
 from runtime.gameObj import GameObject
 from runtime.component import Component
