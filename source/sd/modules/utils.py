@@ -89,7 +89,7 @@ def make_correspondence_map(from_dir, save_to_path, num_frames=8, force_recreate
             logu.warn(f"Correspondence map {save_to_path} is corrupted. It will be re-created.")
     else:
         logu.info(f"Creating correspondence map from {from_dir}")
-        corr_map = CorrespondenceMap.Load_ID_Data_From_Dir(
+        corr_map = CorrespondenceMap.from_existing_directory_numpy(
             from_dir,
             enable_strict_checking=False,
             # pixel_position_callback=lambda x, y: (x//8, y//8),
@@ -183,8 +183,6 @@ def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, n: 
         for i in range(info_len):
             t_pix_pos, t = v_info[i]
             h, w = t_pix_pos
-            h //= division
-            w //= division
             if t < n and h >= 0 and h < frame_h and w >= 0 and w < frame_w:
                 ovlp_count[t][h, w] += 1
 
@@ -195,6 +193,11 @@ def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, n: 
                 if ovlp_count[i][h, w] > 0:
                     ovlp_ratio = ovlp_count[i][h, w] / n
                     image_seq[i][h, w, :] = color_red * ovlp_ratio + color_white * (1 - ovlp_ratio)
+
+    for t_pix_pos, t in corr_map.Map[trace_id]:
+        h, w = t_pix_pos
+        if t < n and h >= 0 and h < frame_h and w >= 0 and w < frame_w:
+            image_seq[t][h-3:h+3, w-3:w+3, :] = color_green
 
     images = [Image.fromarray(image) for image in image_seq]
     [image.save(save_dir / f"{stem}_{i:02d}.png") for i, image in enumerate(images)]

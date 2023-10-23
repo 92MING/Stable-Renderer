@@ -1,10 +1,13 @@
-from modules.utils import make_correspondence_map, save_corr_map_visualization
+from modules.utils import make_correspondence_map, save_corr_map_visualization, scale_corr_map
 from modules import config
 
-test_dir = config.test_dir / 'boat'
+test_dir = config.test_dir / '2023-10-23_3'
+division = 1
 corr_map = make_correspondence_map(
     test_dir / "id",
     test_dir / "corr_map.pkl",
-    force_recreate=False,
+    num_frames=16,
+    force_recreate=True,
 )
-save_corr_map_visualization(corr_map, save_dir=test_dir / "corr_map_vis", n=8, division=4)
+corr_map = scale_corr_map(corr_map, scale_factor=1 / division)
+save_corr_map_visualization(corr_map, save_dir=test_dir / "corr_map_vis", n=32, division=division)

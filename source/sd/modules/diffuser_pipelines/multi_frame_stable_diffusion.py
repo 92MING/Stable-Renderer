@@ -1089,6 +1089,8 @@ def overlap(
             if t < num_frames and w >= 0 and w < frame_w and h >= 0 and h < frame_h:
                 value += frame_seq[t][:, :, h, w]
                 count += 1
+            elif t >= num_frames:
+                break
 
         if count == 0:
             return
@@ -1099,6 +1101,8 @@ def overlap(
             if t < num_frames and w >= 0 and w < frame_w and h >= 0 and h < frame_h:
                 ovlp_seq[t][:, :, h, w] += value
                 ovlp_count[t][:, :, h, w] += 1
+            elif t >= num_frames:
+                break
 
     if max_workers == 1:
         for v_id, v_info in corr_map.Map.items():

@@ -24,7 +24,7 @@ def main():
         torch_dtype=torch.float16,  # Float16 is much more faster on GPU
     )
 
-    prompt = "a boat on the lake, sunset"
+    prompt = "a boat on the lake, water, best quality, "
     neg_prompt = "low quality, bad anatomy"
 
     # OPTIONAL: load a negative textual inversion model
@@ -40,8 +40,8 @@ def main():
     generator = torch.Generator(device=config.device).manual_seed(seed)
 
     # 2. Prepare images
-    n = 8  # Number of frames to use
-    test_dir = config.test_dir / 'boat'
+    n = 16  # Number of frames to use
+    test_dir = config.test_dir / '2023-10-23_3'
 
     frame_dir = test_dir / "color"
     frame_path_list = utils.list_frames(frame_dir)[:n]
@@ -66,7 +66,7 @@ def main():
 
     # 4. Prepare correspondence map
     corr_map = utils.make_correspondence_map(test_dir / "id", test_dir / "corr_map.pkl", force_recreate=False)
-    # corr_map = utils.scale_corr_map(corr_map, scale_factor=0.25)
+    # corr_map = utils.scale_corr_map(corr_map, scale_factor=1)
 
     output_dir = test_dir / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -86,15 +86,15 @@ def main():
         control_images=control_images,
         width=width,
         height=height,
-        num_inference_steps=24,
-        strength=0.5,
+        num_inference_steps=num_inference_steps,
+        strength=0.75,
         generator=generator,
         guidance_scale=5,
         controlnet_conditioning_scale=0.5,
         add_predicted_noise=True,
         callback=utils.save_latents,
         callback_kwargs=dict(save_dir=latents_dir),
-        overlap_algorithm="vae_overlap",
+        overlap_algorithm="resize_overlap",
     ).images
 
     # 6. Save outputs
