@@ -26,7 +26,7 @@ class Overlap:
         :param torch_dtype: Data type of function return
         :param verbose: Enable runtime messages
         """
-        assert alpha < 0 or alpha > 1, "Value of alpha should lie between 0 to 1"
+        assert alpha >= 0 and alpha <= 1, "Value of alpha should lie between 0 to 1"
         assert max_workers > 0, "Number of max workers is at least 1"
         self._alpha = alpha
         self._max_workers = max_workers

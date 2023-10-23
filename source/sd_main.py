@@ -16,7 +16,7 @@ def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
         os.makedirs(GIF_OUTPUT_DIR)
     path = os.path.join(GIF_OUTPUT_DIR, datetime.now().strftime(f"%Y-%m-%d_%H-%M_{output_fname}"))
     images[0].save(path, format="GIF", save_all=True, append_images=images[1:], loop=0)
-    logu.success(f'[SUCESS] Saved image sequence as {path}')
+    logu.success(f'[SUCESS] Saved image sequence at {path}')
 
 class Config:
     # pipeline init configs
