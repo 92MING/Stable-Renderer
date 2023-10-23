@@ -16,7 +16,7 @@ def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
         os.makedirs(GIF_OUTPUT_DIR)
     path = os.path.join(GIF_OUTPUT_DIR, datetime.now().strftime(f"%Y-%m-%d_%H-%M_{output_fname}"))
     images[0].save(path, format="GIF", save_all=True, append_images=images[1:], loop=0)
-    logu.success(f'[SUCESS] Saved image sequence as {output_fname}')
+    logu.success(f'[SUCESS] Saved image sequence at {path}')
 
 class Config:
     # pipeline init configs
@@ -32,10 +32,10 @@ class Config:
     width=512
     height=512
     seed=1234
-    strength=0.5
+    strength=1
     # data preparation configs
     num_frames=8
-    frames_dir="../output/runtime_map/2023-10-23_0"
+    frames_dir="../rendered_frames/2023-10-21_13"
 
 if __name__ == '__main__':
     config = Config()
@@ -83,15 +83,16 @@ if __name__ == '__main__':
         control_images=controlnet_images,
         width=config.width,
         height=config.height,
-        num_inference_steps=5,
+        num_inference_steps=3,
         strength=config.strength,
         generator=generator,
         guidance_scale=7,
-        controlnet_conditioning_scale=0.5,
-        add_predicted_noise=True,
+        controlnet_conditioning_scale=0.95,
+        add_predicted_noise=True, 
         correspondence_map=corr_map,
-        overlap_algorithm='resize_overlap',
-        callback_kwargs={'save_dir': "./sample"}
+        overlap_algorithm='vae_overlap',
+        callback_kwargs={'save_dir': "./sample"},
+        overlap_kwargs={'start_corr': 600, 'end_corr': 1000}
         # callback=utils.view_latents,
     ).images
 
