@@ -1,7 +1,7 @@
 from sd.modules.data_classes import CorrespondenceMap, ImageFrames
 from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
 from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
-from sd.modules.diffuser_pipelines.overlap import StartEndScheduler, Overlap, ResizeOverlap, VAEOverlap
+from sd.modules.diffuser_pipelines.overlap import StartEndScheduler, AlphaScheduler, Overlap, ResizeOverlap, VAEOverlap
 import sd.modules.log_utils as logu
 from diffusers import EulerAncestralDiscreteScheduler
 from sys import platform
@@ -64,8 +64,8 @@ if __name__ == '__main__':
     # 2. Define overlap algorithm
     overlap_algorithm = VAEOverlap(
         vae=pipe.vae, generator=generator, alpha=config.alpha, max_workers=config.max_workers)
-    scheduled_overlap_algorithm = StartEndScheduler(
-        start_timestep=600, end_timestep=1000, overlap=overlap_algorithm)
+    scheduled_overlap_algorithm = AlphaScheduler(
+        alpha_start=0.8, alpha_end=0.4, schedule_mode='linear', overlap=overlap_algorithm)
 
     # 3. Prepare data
     corr_map = CorrespondenceMap.from_existing_directory_numpy(
