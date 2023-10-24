@@ -26,14 +26,14 @@ class Config:
         GetEnv('CONTROLNET_DEPTH_PATH','lllyasviel/sd-controlnet-depth'),
         GetEnv('CONTROLNET_NORMAL_PATH','lllyasviel/sd-controlnet-normal'),
     ]
-    device=GetEnv('DEVICE', 'mps')
+    device=GetEnv('DEVICE', ('mps' if platform == 'darwin' else 'cuda'))
     # pipeline generation configs
     prompt="boat in van gogh style"
     neg_prompt="low quality, bad anatomy"
     width=512
     height=512
     seed=1234
-    strength=0.75
+    strength=1
     # data preparation configs
     num_frames=8
     frames_dir="../rendered_frames/2023-10-21_13"
@@ -96,15 +96,16 @@ if __name__ == '__main__':
         control_images=controlnet_images,
         width=config.width,
         height=config.height,
-        num_inference_steps=3,
+        num_inference_steps=5,
         strength=config.strength,
         generator=generator,
         guidance_scale=7,
-        controlnet_conditioning_scale=0.95,
+        controlnet_conditioning_scale=0.5,
         add_predicted_noise=True, 
         correspondence_map=corr_map,
         overlap_algorithm=scheduled_overlap_algorithm,
         callback_kwargs={'save_dir': "./sample"},
+        same_init_latents=False
         # callback=utils.view_latents,
     ).images
 

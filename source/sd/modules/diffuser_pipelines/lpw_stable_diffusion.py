@@ -828,6 +828,8 @@ class StableDiffusionLongPromptWeightingPipeline(
         device,
         generator,
         latents=None,
+        num_frames=None,
+        same_init_latents=False,
     ):
         if image is None:
             batch_size = batch_size * num_images_per_prompt
@@ -839,7 +841,12 @@ class StableDiffusionLongPromptWeightingPipeline(
                 )
 
             if latents is None:
-                latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+                if same_init_latents:
+                    shape = (batch_size, num_channels_latents, 1, height // self.vae_scale_factor, width // self.vae_scale_factor)
+                    latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+                    latents = latents.repeat(1, 1, num_frames, 1, 1)
+                else:
+                    latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
             else:
                 latents = latents.to(device)
 

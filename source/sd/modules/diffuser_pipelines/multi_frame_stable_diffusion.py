@@ -428,6 +428,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         overlap_algorithm: Union[str, OverlapAlgorithm] = 'resize_overlap',
         overlap_max_workers: int = 1,
         overlap_kwargs: dict = {},
+        same_init_latents: bool = False,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -744,6 +745,8 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                     device,
                     generator,
                     latents,
+                    num_frames=num_frames,
+                    same_init_latents=same_init_latents,
                 )
                 latents_seq.append(init_latents)
                 init_latents_orig_seq.append(init_latents_orig)
@@ -762,6 +765,8 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 device,
                 generator,
                 latents,
+                num_frames=num_frames,
+                same_init_latents=same_init_latents,
             )
             latents_seq = [init_latents]
             init_latents_orig_seq = [init_latents_orig]
