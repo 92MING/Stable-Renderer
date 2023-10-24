@@ -29,7 +29,7 @@ from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, pr
 from ..data_classes.correspondenceMap import CorrespondenceMap
 from .. import log_utils as logu
 from ..utils import save_latents
-from .overlap import Overlap, ResizeOverlap, VAEOverlap
+from .overlap import OverlapAlgorithm, Overlap, ResizeOverlap, VAEOverlap
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -425,7 +425,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         control_guidance_start: Union[float, List[float]] = 0.0,
         control_guidance_end: Union[float, List[float]] = 1.0,
         correspondence_map: Optional[CorrespondenceMap] = None,
-        overlap_algorithm: Union[str, Overlap] = 'resize_overlap',
+        overlap_algorithm: Union[str, OverlapAlgorithm] = 'resize_overlap',
         overlap_max_workers: int = 1,
         overlap_kwargs: dict = {},
     ):
@@ -560,7 +560,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
         # Init overlap functions
         if do_overlapping:
-            if isinstance(overlap_algorithm, Overlap):
+            if isinstance(overlap_algorithm, OverlapAlgorithm):
                 overlap_function = overlap_algorithm
             elif overlap_algorithm == 'overlap':
                 overlap_function = Overlap(alpha=0.5, max_workers=overlap_max_workers)
@@ -894,7 +894,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                         corr_map=correspondence_map,
                         step=step,
                         timestep=t,
-                        overlap_kwargs=overlap_kwargs,
+                        **overlap_kwargs,
                     )
 
                     try:
