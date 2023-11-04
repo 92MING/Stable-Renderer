@@ -2,13 +2,29 @@ import torch
 import time
 from typing import List
 import torch.nn.functional as F
+from abc import abstractmethod, ABC
 from diffusers import AutoencoderKL
 from .utils import overlap_rate
 from ...data_classes.correspondenceMap import CorrespondenceMap
 from ... import log_utils as logu
 
 
-class Overlap:
+class OverlapAlgorithm(ABC):
+    r"""
+    Interface for overlap algorithms
+    """
+    @abstractmethod
+    def __call__(
+        self,
+        frame_seq: List[torch.Tensor],
+        corr_map: CorrespondenceMap,
+        step: int = None,
+        timestep: int = None,
+        **kwargs,
+    ):
+        pass
+
+class Overlap(OverlapAlgorithm):
     r"""
     Parent class for all overlapping algorithms used in multi_frame_stable_diffusion.py
     """
@@ -83,15 +99,6 @@ class Overlap:
         """
         assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
 
-        try:
-            start_corr = overlap_kwargs.get('start_corr')
-            end_corr = overlap_kwargs.get('end_corr')
-            if int(timestep) < start_corr or int(timestep) > end_corr:
-                logu.info(f"Scheduling activated, current timestep {timestep}") if self.verbose else ...
-                return frame_seq
-        except Exception as e:
-            logu.error(e)
-
         num_frames = len(frame_seq)
         batch_size, channels, frame_h, frame_w = frame_seq[0].shape
         device = frame_seq[0].device
@@ -159,7 +166,7 @@ class ResizeOverlap(Overlap):
         self._interpolate_mode = value
     
     def __call__(self,
-        latents_seq: List[torch.Tensor],
+        frame_seq: List[torch.Tensor],
         corr_map: CorrespondenceMap,
         step: int = None,
         timestep: int = None,
@@ -173,12 +180,12 @@ class ResizeOverlap(Overlap):
         :param timestep: current inference timestep
         :return: A list of overlapped frame latents.
         """
-        num_frames = len(latents_seq)
+        num_frames = len(frame_seq)
         screen_w, screen_h = corr_map.size
-        frame_h, frame_w = latents_seq[0].shape[-2:]
+        frame_h, frame_w = frame_seq[0].shape[-2:]
         align_corners = False if self.interpolate_mode in ['linear', 'bilinear', 'bicubic', 'trilinear'] else ...
 
-        ovlp_seq = [F.interpolate(latents, size=(screen_h, screen_w), mode=self.interpolate_mode, align_corners=align_corners) for latents in latents_seq]
+        ovlp_seq = [F.interpolate(latents, size=(screen_h, screen_w), mode=self.interpolate_mode, align_corners=align_corners) for latents in frame_seq]
         ovlp_seq = super().__call__(
             ovlp_seq,
             corr_map=corr_map,
@@ -191,7 +198,7 @@ class ResizeOverlap(Overlap):
         logu.debug(f"Resize scale factor: {screen_h / frame_h:.2f} | Overlap ratio: {100 * self.overlap_rate(ovlp_seq, threshold=0):.2f}%")
 
         # Overlap with original
-        ovlp_seq = [torch.where(ovlp_seq[i] != 0, ovlp_seq[i], latents_seq[i]) for i in range(num_frames)]
+        ovlp_seq = [torch.where(ovlp_seq[i] != 0, ovlp_seq[i], frame_seq[i]) for i in range(num_frames)]
         return ovlp_seq
 
 class VAEOverlap(Overlap):
@@ -221,14 +228,14 @@ class VAEOverlap(Overlap):
         return latents
 
     def _decode(self, latents):
-            latents = 1 / self.vae.config.scaling_factor * latents
-            image = self.vae.decode(latents).sample
-            return image
+        latents = 1 / self.vae.config.scaling_factor * latents
+        image = self.vae.decode(latents).sample
+        return image
     
     # TODO: Optimize this function
     def __call__(
         self,
-        latents_seq: List[torch.Tensor],
+        frame_seq: List[torch.Tensor],
         corr_map: CorrespondenceMap,
         step: int = None,
         timestep: int = None,
@@ -243,9 +250,9 @@ class VAEOverlap(Overlap):
         :return: A sequence of overlapped latents.
         """
 
-        num_frames = len(latents_seq)
+        num_frames = len(frame_seq)
         screen_w, screen_h = corr_map.size
-        frame_h, frame_w = latents_seq[0].shape[-2:]
+        frame_h, frame_w = frame_seq[0].shape[-2:]
 
         #! IMPORTANT:
         #! (1) After VAE encoding, 0's in the latents will not be 0's anymore
@@ -253,7 +260,7 @@ class VAEOverlap(Overlap):
         #! (3) Do not overlap original in pixel space and then encode to latent space. This will destroy generation.
         # TODO: However, if we can overlap original at latent space directly, then the destruction might be much less.
 
-        pix_seq = [self._decode(latents) for latents in latents_seq]
+        pix_seq = [self._decode(latents) for latents in frame_seq]
         ovlp_seq = super().__call__(
             pix_seq,
             corr_map=corr_map,

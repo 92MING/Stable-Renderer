@@ -1,6 +1,7 @@
 from sd.modules.data_classes import CorrespondenceMap, ImageFrames
 from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
 from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
+from sd.modules.diffuser_pipelines.overlap import StartEndScheduler, AlphaScheduler, Overlap, ResizeOverlap, VAEOverlap
 import sd.modules.log_utils as logu
 from diffusers import EulerAncestralDiscreteScheduler
 from sys import platform
@@ -25,17 +26,22 @@ class Config:
         GetEnv('CONTROLNET_DEPTH_PATH','lllyasviel/sd-controlnet-depth'),
         GetEnv('CONTROLNET_NORMAL_PATH','lllyasviel/sd-controlnet-normal'),
     ]
-    device=GetEnv('DEVICE', 'mps')
+    device=GetEnv('DEVICE', ('mps' if platform == 'darwin' else 'cuda'))
     # pipeline generation configs
-    prompt="boat in van gogh style, anime boat, best quality"
+    prompt="boat in van gogh style"
     neg_prompt="low quality, bad anatomy"
     width=512
     height=512
     seed=1234
-    strength=0.5
+    strength=1
     # data preparation configs
     num_frames=None
     frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-10-21_13")
+    # Overlap algorithm configs
+    alpha = 0.5
+    max_workers = 1
+    start_corr = 600
+    end_corr = 1000
 
 if __name__ == '__main__':
     config = Config()
@@ -55,7 +61,13 @@ if __name__ == '__main__':
 
     generator = torch.Generator(device=config.device).manual_seed(config.seed)
 
-    # 2. Prepare data
+    # 2. Define overlap algorithm
+    overlap_algorithm = VAEOverlap(
+        vae=pipe.vae, generator=generator, alpha=config.alpha, max_workers=config.max_workers)
+    scheduled_overlap_algorithm = AlphaScheduler(
+        alpha_start=0.8, alpha_end=0.4, schedule_mode='linear', overlap=overlap_algorithm)
+
+    # 3. Prepare data
     corr_map = CorrespondenceMap.from_existing_directory_numpy(
         os.path.join(config.frames_dir, 'id'),
         enable_strict_checking=False,
@@ -73,7 +85,8 @@ if __name__ == '__main__':
         num_frames=config.num_frames
     ).Data
     controlnet_images = [[depth, normal] for depth, normal in zip(depth_images, normal_images)]
-    # 3. Generate frames
+
+    # 4. Generate frames
     output_frame_list = pipe.__call__(
         prompt=config.prompt,
         negative_prompt=config.neg_prompt,
@@ -83,16 +96,16 @@ if __name__ == '__main__':
         control_images=controlnet_images,
         width=config.width,
         height=config.height,
-        num_inference_steps=3,
+        num_inference_steps=5,
         strength=config.strength,
         generator=generator,
         guidance_scale=7,
-        controlnet_conditioning_scale=0.95,
+        controlnet_conditioning_scale=0.5,
         add_predicted_noise=True, 
         correspondence_map=corr_map,
-        overlap_algorithm='vae_overlap',
+        overlap_algorithm=scheduled_overlap_algorithm,
         callback_kwargs={'save_dir': "./sample"},
-        overlap_kwargs={'start_corr': 600, 'end_corr': 1000}
+        same_init_latents=False
         # callback=utils.view_latents,
     ).images
 
