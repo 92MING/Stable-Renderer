@@ -1,6 +1,4 @@
 import numpy
-from .utils.sortableElement import SortableElement
-from .. import log_utils as logu, config
 from PIL import Image
 # from utils.path_utils import MAP_OUTPUT_DIR, CACHE_DIR
 import os
@@ -9,6 +7,8 @@ import pickle
 import numpy as np
 from tqdm import tqdm
 from typing import Callable, Tuple
+from .utils.sortableElement import SortableElement
+from .. import log_utils as logu, config
 
 CACHE_DIR = "./.cache"
 MAP_OUTPUT_DIR = config.test_dir / 'boat'

@@ -5,6 +5,7 @@ import numpy
 import torch
 import tqdm
 import json
+import pickle
 import shutil
 import torchvision.transforms as transforms
 from typing import List, Union
@@ -71,7 +72,7 @@ def listfiles(directory, exts=None, return_type: type = None, return_path: bool 
     return files
 
 
-def make_correspondence_map(from_dir, save_to_path, num_frames=8, force_recreate=False):
+def make_correspondence_map(from_dir, save_to_path, num_frames=None, force_recreate=False):
     """
     Make correspondence map from a directory of images.
     If the correspondence map already exists, then load it.
@@ -135,7 +136,7 @@ def save_latents(i, t, latents, save_dir, prefix='latents', postfix: str = '', d
     else:
         raise ValueError(f"Unknown decoder type: {decoder}. Must be 'vae' or 'vae-approx'")
 
-    logu.info(f"Saving latents: step {i} | timestep {t:0f} | decoder {decoder}")
+    # logu.info(f"Saving latents: step {i} | timestep {t:0f} | decoder {decoder}")
 
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -216,7 +217,7 @@ def make_gif(images, save_path: Path, fps: int = 10):
 
 def clear_dir(dirpath):
     r"""
-    Clear the given directory.
+    Clear and make the given directory.
     :param dirpath: The directory path.
     """
     dirpath = Path(dirpath)
@@ -239,6 +240,53 @@ def scale_corr_map(corr_map: CorrespondenceMap, scale_factor: float = 0.125):
     scaled_w = int(corr_map.width * scale_factor)
     scaled_h = int(corr_map.height * scale_factor)
     return CorrespondenceMap(scaled_map, scaled_w, scaled_h, corr_map.num_frames)
+
+
+def truncate_corr_map(correspondence_map: CorrespondenceMap, start: int = None, end: int = None):
+    r"""
+    Truncate the correspondence map of frame index between [start, end).
+    :param correspondence_map: The correspondence map.
+    :param start: The start frame.
+    :param end: The end frame.
+    :return: The truncated correspondence map.
+    """
+    start = max(start, 0) if start is not None else 0
+    end = min(end, correspondence_map.num_frames) if end is not None else correspondence_map.num_frames
+
+    truncated_map = dict()
+    for v_id, v_info in correspondence_map.Map.items():
+        v_info = [(t_pix_pos, t-start) for t_pix_pos, t in v_info if t >= start and t < end]
+        if len(v_info) > 0:
+            truncated_map[v_id] = v_info
+    return CorrespondenceMap(truncated_map, correspondence_map.width, correspondence_map.height, end-start)
+
+
+def make_rev_corr_map(corr_map: CorrespondenceMap, save_to_path: Path, force_recreate: bool = False):
+    save_to_path = Path(save_to_path)
+    if save_to_path.is_file() and not force_recreate:
+        # Load from file
+        if save_to_path.suffix == '.json':
+            with open(save_to_path, 'r') as f:
+                rev_map = json.load(f)
+        elif save_to_path.suffix == '.pkl':
+            with open(save_to_path, 'rb') as f:
+                rev_map = pickle.load(f)
+    else:
+        save_to_path.parent.mkdir(parents=True, exist_ok=True)
+        rev_map = [dict() for _ in range(corr_map.num_frames)]
+        for v_id, v_info in tqdm.tqdm(corr_map.Map.items(), desc='Making reverse correspondence map'):
+            for t_pix_pos, t in v_info:
+                h, w = t_pix_pos
+                pos_str = f"{h},{w}"
+                rev_map[t][pos_str] = ','.join([str(int(v)) for v in list(v_id)])
+        # Save to file
+        if save_to_path.suffix == '.json':
+            with open(save_to_path, 'w') as f:
+                json.dump(rev_map, f, indent=4)
+        elif save_to_path.suffix == '.pkl':
+            with open(save_to_path, 'wb') as f:
+                pickle.dump(rev_map, f)
+    return rev_map
 
 
 def make_base_map(base_image: Image.Image, corr_map: CorrespondenceMap, num_frames=None, save_to_dir=None, return_pil: bool = True):

@@ -12,7 +12,7 @@ from packaging import version
 from typing import List, Dict, Callable, Union, Optional, Any, Tuple
 from diffusers.image_processor import PipelineImageInput, VaeImageProcessor
 from diffusers.utils import PIL_INTERPOLATION
-from diffusers.utils.torch_utils import is_compiled_module
+from diffusers.utils.torch_utils import is_compiled_module, randn_tensor
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from diffusers.models.controlnet import ControlNetModel
 from diffusers import (
@@ -187,7 +187,6 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         controlnet_conditioning_scale=1.0,
         control_guidance_start=0.0,
         control_guidance_end=1.0,
-        correspondence_map=None,
     ):
         if height is not None and height % 8 != 0 or width is not None and width % 8 != 0:
             raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
@@ -388,13 +387,83 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
         return image
 
+    def prepare_latents(
+        self,
+        images,
+        timestep,
+        num_images_per_prompt,
+        batch_size,
+        num_channels_latents,
+        height,
+        width,
+        dtype,
+        device,
+        generator,
+        latents=None,
+        num_frames=None,
+        same_init_latents=False,
+        same_init_noise=False,
+    ):
+        num_frames = num_frames or len(images)
+        if images is None:
+            # TODO: This is a bit of a hack, but it works for now.
+            batch_size = batch_size * num_images_per_prompt
+            shape = (batch_size, num_channels_latents, height // self.vae_scale_factor, width // self.vae_scale_factor)
+            if isinstance(generator, list) and len(generator) != batch_size:
+                raise ValueError(
+                    f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
+                    f" size of {batch_size}. Make sure the batch size matches the length of the generators."
+                )
+
+            if latents is None:
+                if same_init_latents:
+                    shape = (batch_size, num_channels_latents, 1, height // self.vae_scale_factor, width // self.vae_scale_factor)
+                    latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+                    latents = latents.repeat(1, 1, num_frames, 1, 1)
+                else:
+                    latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+            else:
+                latents = latents.to(device)
+
+            # scale the initial noise by the standard deviation required by the scheduler
+            latents = latents * self.scheduler.init_noise_sigma
+            return [latents], [None], [None]
+        else:
+            if same_init_noise:
+                shape = (batch_size, num_channels_latents, height // self.vae_scale_factor, width // self.vae_scale_factor)
+                noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+
+            latents_seq = []
+            init_latents_orig_seq = []
+            noise_seq = []
+
+            for image in images:
+                image = image.to(device=self.device, dtype=dtype)
+                init_latent_dist = self.vae.encode(image).latent_dist
+                init_latents = init_latent_dist.sample(generator=generator)
+                init_latents = self.vae.config.scaling_factor * init_latents
+
+                # Expand init_latents for batch_size and num_images_per_prompt
+                init_latents = torch.cat([init_latents] * num_images_per_prompt, dim=0)
+                init_latents_orig = init_latents
+
+                # add noise to latents using the timesteps
+                if not same_init_noise:
+                    noise = randn_tensor(init_latents.shape, generator=generator, device=self.device, dtype=dtype)
+                init_latents = self.scheduler.add_noise(init_latents, noise, timestep)
+                latents = init_latents
+
+                latents_seq.append(latents)
+                init_latents_orig_seq.append(init_latents_orig)
+                noise_seq.append(noise)
+
+            return latents_seq, init_latents_orig_seq, noise_seq
+
     @torch.no_grad()
     def __call__(
         self,
         prompt: Union[str, List[str]],
         negative_prompt: Optional[Union[str, List[str]]] = None,
-        num_frames: int = 1,
-        base_image: PipelineImageInput = None,
         images: List[PipelineImageInput] = None,
         masks: List[PipelineImageInput] = None,
         control_images: Union[List[PipelineImageInput], List[List[PipelineImageInput]]] = None,
@@ -412,12 +481,6 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         prompt_embeds: Optional[torch.FloatTensor] = None,
         negative_prompt_embeds: Optional[torch.FloatTensor] = None,
         max_embeddings_multiples: Optional[int] = 3,
-        output_type: Optional[str] = "pil",
-        return_dict: bool = True,
-        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
-        is_cancelled_callback: Optional[Callable[[], bool]] = None,
-        callback_steps: int = 1,
-        callback_kwargs: Optional[Dict[str, Any]] = None,
         cross_attention_kwargs: Optional[Dict[str, Any]] = None,
         guidance_rescale: float = 0.0,
         controlnet_conditioning_scale: Union[float, List[float]] = 0.5,
@@ -425,10 +488,17 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         control_guidance_start: Union[float, List[float]] = 0.0,
         control_guidance_end: Union[float, List[float]] = 1.0,
         correspondence_map: Optional[CorrespondenceMap] = None,
-        overlap_algorithm: Union[str, OverlapAlgorithm] = 'resize_overlap',
-        overlap_max_workers: int = 1,
-        overlap_kwargs: dict = {},
+        overlap_algorithm: OverlapAlgorithm = None,
         same_init_latents: bool = False,
+        same_init_noise: bool = False,
+
+        output_type: Optional[str] = "pil",
+        return_dict: bool = True,
+
+        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
+        is_cancelled_callback: Optional[Callable[[], bool]] = None,
+        callback_steps: int = 1,
+        callback_kwargs: Optional[Dict[str, Any]] = None,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -544,33 +614,18 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         do_img2img = images is not None
         do_inpainting = masks is not None
         do_controlnet = control_images is not None
-        do_overlapping = correspondence_map is not None
+        do_overlapping = correspondence_map is not None and overlap_algorithm is not None
 
-        if num_frames:
-            if do_img2img:
-                images = images[:num_frames]
-            if do_inpainting:
-                masks = masks[:num_frames]
-            if do_controlnet:
-                control_images = control_images[:num_frames]
+        num_images = len(images) if do_img2img else 0
+        num_masks = len(masks) if do_inpainting else 0
+        num_control_images = len(control_images) if do_controlnet else 0
+        num_frames = max(num_images, num_masks, num_control_images)
 
         logu.debug(f"Do Image2Image: {do_img2img}")
         logu.debug(f"Do Inpainting: {do_inpainting}")
         logu.debug(f"Do ControlNet: {do_controlnet}")
         logu.debug(f"Do Overlapping: {do_overlapping}")
-
-        # Init overlap functions
-        if do_overlapping:
-            if isinstance(overlap_algorithm, OverlapAlgorithm):
-                overlap_function = overlap_algorithm
-            elif overlap_algorithm == 'overlap':
-                overlap_function = Overlap(alpha=0.5, max_workers=overlap_max_workers)
-            elif overlap_algorithm == 'resize_overlap':
-                overlap_function = ResizeOverlap(alpha=0.5, max_workers=overlap_max_workers, interpolate_mode='bilinear')
-            elif overlap_algorithm == 'vae_overlap':
-                overlap_function = VAEOverlap(alpha=0.5, max_workers=overlap_max_workers, vae=self.vae, generator=generator)
-            else:
-                raise NotImplementedError(f"Unknown overlapping algorithm {overlap_algorithm}")
+        logu.debug(f"Number of frames: {num_frames}")
 
         # 1. Align format for control guidance
         controlnet = self.controlnet._orig_mod if is_compiled_module(self.controlnet) else self.controlnet
@@ -604,7 +659,6 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
             controlnet_conditioning_scale=controlnet_conditioning_scale,
             control_guidance_start=control_guidance_start,
             control_guidance_end=control_guidance_end,
-            correspondence_map=correspondence_map,
         )
 
         # 4. Define call parameters
@@ -728,32 +782,25 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
             if do_controlnet:
                 num_frames = max(num_frames, len(control_images))
 
-            latents_seq = []
-            init_latents_orig_seq = []
-            noise_seq = []
-            for i in range(num_frames):
-                image = images[i] if do_img2img and i < len(images) else None
-                init_latents, init_latents_orig, noise = self.prepare_latents(
-                    image,
-                    latent_timestep,
-                    num_images_per_prompt,
-                    batch_size,
-                    self.unet.config.in_channels,
-                    height,
-                    width,
-                    dtype,
-                    device,
-                    generator,
-                    latents,
-                    num_frames=num_frames,
-                    same_init_latents=same_init_latents,
-                )
-                latents_seq.append(init_latents)
-                init_latents_orig_seq.append(init_latents_orig)
-                noise_seq.append(noise)
+            latents_seq, init_latents_orig_seq, noise_seq = self.prepare_latents(
+                images,
+                latent_timestep,
+                num_images_per_prompt,
+                batch_size,
+                self.unet.config.in_channels,
+                height,
+                width,
+                dtype,
+                device,
+                generator,
+                latents,
+                num_frames=num_frames,
+                same_init_latents=same_init_latents,
+                same_init_noise=same_init_noise,
+            )
         else:
             num_frames = 0
-            init_latents, init_latents_orig, noise = self.prepare_latents(
+            latents_seq, init_latents_orig_seq, noise_seq = self.prepare_latents(
                 None,
                 latent_timestep,
                 num_images_per_prompt,
@@ -768,9 +815,6 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 num_frames=num_frames,
                 same_init_latents=same_init_latents,
             )
-            latents_seq = [init_latents]
-            init_latents_orig_seq = [init_latents_orig]
-            noise_seq = [noise]
 
         # 10. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
@@ -786,6 +830,16 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
         # 11. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
+
+        # Init noise
+        save_latents(
+            i=0,
+            t=0,
+            latents=latents_seq,
+            prefix="init",
+            **callback_kwargs,
+        )
+
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for step, t in enumerate(timesteps):
                 # zero value
@@ -884,22 +938,22 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                             save_dir = os.path.join(save_dir, 'overlapped')
                         else:
                             save_dir = save_dir / 'overlapped'
-                        save_latents(step, t, latents_seq,
-                                     save_dir=save_dir,
-                                     prefix='latents',
-                                     postfix='before_overlap',
-                                     decoder=callback_kwargs.get('decoder', 'vae-approx'),
-                                     vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
-                                     )
+                        save_latents(
+                            step, t, latents_seq,
+                            save_dir=save_dir,
+                            prefix='latents',
+                            postfix='before_overlap',
+                            decoder=callback_kwargs.get('decoder', 'vae-approx'),
+                            vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
+                        )
                     except Exception as e:
                         logu.error(f"{e}, latent not saved")
 
-                    latents_seq = overlap_function(
+                    latents_seq = overlap_algorithm.__call__(
                         latents_seq,
                         corr_map=correspondence_map,
                         step=step,
                         timestep=t,
-                        **overlap_kwargs,
                     )
 
                     try:
@@ -932,7 +986,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
             # has_nsfw_concept = None
         elif output_type == "pil":
             # 12. Post-processing
-            images = [self.decode_latents(latents) for latents in latents_seq]
+            images = [self.decode_latents(latents) for latents in tqdm.tqdm(latents_seq, desc='Decoding latents')]
 
             # 13. Run safety checker
             # image, has_nsfw_concept = self.run_safety_checker(image, device, prompt_embeds.dtype)
@@ -941,7 +995,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
             images = [self.numpy_to_pil(image) for image in images]
         else:
             # 12. Post-processing
-            images = [self.decode_latents(latents) for latents in latents_seq]
+            images = [self.decode_latents(latents) for latents in tqdm.tqdm(latents_seq, desc='Decoding latents')]
 
             # 13. Run safety checker
             # image, has_nsfw_concept = self.run_safety_checker(image, device, prompt_embeds.dtype)
