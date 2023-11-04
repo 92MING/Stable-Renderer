@@ -23,19 +23,19 @@ class Config:
     # pipeline init configs
     model_path=GetEnv('SD_PATH', 'runwayml/stable-diffusion-v1-5')
     control_net_model_paths=[
-        GetEnv('CONTROLNET_DEPTH_PATH','lllyasviel/sd-controlnet-depth'),
-        GetEnv('CONTROLNET_NORMAL_PATH','lllyasviel/sd-controlnet-normal'),
+        GetEnv('CONTROLNET_DEPTH_MODEL','lllyasviel/sd-controlnet-depth'),
+        GetEnv('CONTROLNET_NORMAL_MODEL','lllyasviel/sd-controlnet-normal'),
     ]
-    device=GetEnv('DEVICE', ('mps' if platform == 'darwin' else 'cuda'))
+    device = GetEnv('DEVICE', ('mps' if platform == 'darwin' else 'cuda'))
     # pipeline generation configs
-    prompt="boat in van gogh style"
-    neg_prompt="low quality, bad anatomy"
-    width=512
-    height=512
-    seed=1234
-    strength=1
+    prompt = GetEnv('DEFAULT_SD_PROMPT', "boat in van gogh style")
+    neg_prompt = GetEnv('DEFAULT_SD_NEG_PROMPT', "low quality, bad anatomy")
+    width = GetEnv('DEFAULT_IMG_WIDTH', 512, int)
+    height = GetEnv('DEFAULT_IMG_HEIGHT', 512, int)
+    seed = GetEnv('DEFAULT_SEED', 1234, int)
+    strength = 1
     # data preparation configs
-    num_frames=None
+    num_frames = None
     frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-10-21_13")
     # Overlap algorithm configs
     alpha = 0.5

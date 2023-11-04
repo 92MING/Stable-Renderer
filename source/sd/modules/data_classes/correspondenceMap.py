@@ -158,7 +158,7 @@ class CorrespondenceMap:
             current_dirs = os.listdir(MAP_OUTPUT_DIR)
             if len(current_dirs) == 0:
                 raise FileNotFoundError(f"No output directory found in {MAP_OUTPUT_DIR}")
-            directory = os.path.join(MAP_OUTPUT_DIR, sorted(current_dirs)[-1], 'id')
+            directory = os.path.abspath(os.path.join(MAP_OUTPUT_DIR, sorted(current_dirs)[-1], 'id'))
 
         if use_cache:
             cache_corr_map = cls._load_correspodence_map_from_cache(directory)
