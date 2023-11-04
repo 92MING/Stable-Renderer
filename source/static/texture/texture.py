@@ -3,6 +3,7 @@ import os
 from PIL import Image
 from static.enums import *
 from utils.decorator import Overload
+import numpy as np
 
 class Texture(ResourcesObj):
     _BaseName = 'Texture'
@@ -140,7 +141,8 @@ class Texture(ResourcesObj):
         super().clear()
         if self._texID is not None:
             try:
-                gl.glDeleteTextures(1, [self._texID])
+                buffer = np.array([self._texID], dtype=np.uint32)
+                gl.glDeleteTextures(1, buffer)
             except Exception as glError:
                 print('Warning: failed to delete texture. Error: {}'.format(glError))
             self._texID = None

@@ -16,7 +16,14 @@ for module in sys.modules.keys():
 if _needInit:
     _globalValues = {}
     from dotenv import load_dotenv
-    load_dotenv(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env')))
+    path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env'))
+    if os.path.exists(path):
+        load_dotenv(path)
+    if os.path.dirname(path) in ('source', 'src', 'code', 'codes', 'project', 'projects', 'workspace', 'script', 'scripts', 'tool', 'tools', 'utils', 'util', 'utils', 'util', 'common', 'commons', 'commonly'):
+        # try to load .env from project root
+        path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
+        if os.path.exists(path):
+            load_dotenv(path)
 
 def GetEnv(key: str, default = None, type = str):
     '''

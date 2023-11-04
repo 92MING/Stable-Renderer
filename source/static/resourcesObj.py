@@ -69,25 +69,24 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
         if cls._Instances is None:
             cls._Instances = {}
         return cls._Instances.values()
-
     @classmethod
     def _GetPathAndName(cls, path, name=None):
-        '''Get proper path & name for cls.Load()'''
+        '''
+        Get proper path & name for cls.Load().
+        If name is not given, it will be the file name without extension.
+        In that case, if there is already a resource with the same name, a number will be added to the end of the name to avoid name conflict.
+        '''
         if name is None:
             name = os.path.basename(path).split('.')[0]
-        if cls.Find(name) is not None:
+            count = 0
+            newName = name
+            while cls.Find(newName) is not None:
+                count += 1
+                newName = f'{name}_{count}' # try to avoid name conflict
+            name = newName
+        elif cls.Find(name) is not None:
             raise ValueError(f'Resources type {cls.BaseClsName()} with name "{name}" already exists')
         return path, name
-    @classmethod
-    def Load(cls, path, name=None)->'ResourcesObj':
-        '''
-        Override this method to load the data from file.
-        e.g.:
-            def Load(cls, path, name=None):
-                path, name = cls._GetNameAndPath(path, name)
-                ... # your code here
-        '''
-        raise NotImplementedError
     # endregion
 
     def __new__(cls, name, *args, **kwargs):
@@ -104,6 +103,7 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
             return obj
     def __init__(self, name, *args, **kwargs):
         pass
+
     @property
     def name(self):
         return self._name
@@ -112,12 +112,25 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
         return GetGlobalValue('_ENGINE_SINGLETON')
 
     # region abstract methods
+    def load(self, path):
+        '''The real load method'''
+        raise NotImplementedError
     def sendToGPU(self):
         '''Override this to send the data to GPU'''
-        print(f'sending {self.BaseClsName()}: {self.name} to GPU...')
+        pass
     def clear(self):
         '''Override this to clear the data from GPU'''
-        print(f'clearing {self.BaseClsName()}: {self.name} from GPU...')
+        pass
+    @classmethod
+    def Load(cls, path, name=None) -> 'ResourcesObj':
+        '''
+        Override this method to load the data from file.
+        e.g.:
+            def Load(cls, path, name=None):
+                path, name = cls._GetNameAndPath(path, name)
+                ... # your code here
+        '''
+        raise NotImplementedError
     # endregion
 
 __all__ = ['ResourcesObj', 'ResourcesObjMeta']

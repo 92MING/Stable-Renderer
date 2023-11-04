@@ -141,12 +141,13 @@ class Engine:
     # endregion
 
     def run(self):
-        self.AcceptedPrint('Engine is Preparing...')
+        self.AcceptedPrint('Engine Preparing...')
         self.beforePrepare()
         Manager._RunPrepare()  # prepare work, mainly for sceneManager to build scene, load resources, etc.
         self.afterPrepare()
 
-        self.AcceptedPrint('Preparation done. Start running...')
+        self.AcceptedPrint('Engine Preparation Done.')
+        self.AcceptedPrint('Engine Start Running...')
         while not glfw.window_should_close(self.WindowManager.Window):
 
             self.beforeFrameBegin()
@@ -158,6 +159,8 @@ class Engine:
             self.beforeFrameEnd()
             Manager._RunFrameEnd() #  swap buffers / time count / etc.
 
+        self.AcceptedPrint('Engine is ending...')
+        self.AcceptedPrint('Releasing Resources...')
         self.beforeRelease()
         Manager._RunRelease()
         self.afterRelease()

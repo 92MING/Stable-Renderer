@@ -1,4 +1,5 @@
 from utils.global_utils import GetOrAddGlobalValue, GetGlobalValue
+import traceback
 
 _MANAGERS = GetOrAddGlobalValue('_ENGINE_MANAGERS', set())
 _MANAGER_FUNCS = GetOrAddGlobalValue('_ENGINE_MANAGER_FUNCS', dict())
@@ -67,7 +68,7 @@ class Manager:
             try:
                 manager._prepare()
             except Exception as e:
-                print(f'Warning: Error when running "_prepare" of {manager.__class__.__qualname__}. Err msg: {e}')
+                print(f'Warning: Error when running "_prepare" of {manager.__class__.__qualname__}. Err msg: {e}, traceback:{traceback.format_exc()}')
     @staticmethod
     def _RunFrameBegin():
         if 'begin' not in _MANAGER_FUNCS:
@@ -76,7 +77,7 @@ class Manager:
             try:
                 manager._onFrameBegin() if not manager.engine.IsDebugMode else manager._onFrameBegin_debug()
             except Exception as e:
-                print(f'Warning: Error when running "_onFrameBegin" of {manager.__class__.__qualname__}. Err msg: {e}')
+                print(f'Warning: Error when running "_onFrameBegin" of {manager.__class__.__qualname__}. Err msg: {e}, traceback:{traceback.format_exc()}')
     @staticmethod
     def _RunFrameRun():
         if 'run' not in _MANAGER_FUNCS:
@@ -85,7 +86,7 @@ class Manager:
             try:
                 manager._onFrameRun() if not manager.engine.IsDebugMode else manager._onFrameRun_debug()
             except Exception as e:
-                print(f'Warning: Error when running "_onFrameRun" of {manager.__class__.__qualname__}. Err msg: {e}')
+                print(f'Warning: Error when running "_onFrameRun" of {manager.__class__.__qualname__}. Err msg: {e}, traceback:{traceback.format_exc()}')
     @staticmethod
     def _RunFrameEnd():
         if 'end' not in _MANAGER_FUNCS:
@@ -94,7 +95,7 @@ class Manager:
             try:
                 manager._onFrameEnd() if not manager.engine.IsDebugMode else manager._onFrameEnd_debug()
             except Exception as e:
-                print(f'Warning: Error when running "_onFrameEnd" of {manager.__class__.__qualname__}.Err msg: {e}')
+                print(f'Warning: Error when running "_onFrameEnd" of {manager.__class__.__qualname__}.Err msg: {e}, traceback:{traceback.format_exc()}')
     @staticmethod
     def _RunRelease():
         if 'release' not in _MANAGER_FUNCS:
@@ -103,6 +104,6 @@ class Manager:
             try:
                 manager._release()
             except Exception as e:
-                print(f'Warning: Error when running "_release" of {manager.__class__.__qualname__}. Err msg: {e}')
+                print(f'Warning: Error when running "_release" of {manager.__class__.__qualname__}. Err msg: {e}, traceback:{traceback.format_exc()}')
 
 __all__ = ['Manager']

@@ -5,6 +5,12 @@ import glm, os
 from utils.path_utils import SHADER_DIR
 from runtime.engineObj import EngineObj
 import re
+from typing import Union
+from glm import vec1, vec2, vec3, vec4, mat2, mat3, mat4, mat2x3, mat2x4, mat3x2, mat3x4, mat4x2, mat4x3
+from utils.type_utils import valueTypeCheck
+from typing import get_args
+
+Supported_Shader_Value_Types = Union[int, float, bool, vec1, vec2, vec3, vec4, mat2, mat3, mat4, mat2x3, mat2x4, mat3x2, mat3x4, mat4x2, mat4x3]
 
 class Shader(NamedObj, EngineObj):
 
@@ -96,7 +102,9 @@ class Shader(NamedObj, EngineObj):
 
     def getUniformID(self, name:str):
         return gl.glGetUniformLocation(self._programID, name)
-    def setUniform(self, name, value):
+    def setUniform(self, name, value:Supported_Shader_Value_Types):
+        if not valueTypeCheck(value, Supported_Shader_Value_Types):
+            raise TypeError(f'Invalid uniform value type: {type(value)}. Supported types: {get_args(Supported_Shader_Value_Types)}')
         self.useProgram()
         val_id = self.getUniformID(name)
         if val_id == -1:
@@ -236,4 +244,4 @@ class Shader(NamedObj, EngineObj):
     # endregion
 
 
-__all__ = ['Shader']
+__all__ = ['Shader','Supported_Shader_Value_Types']

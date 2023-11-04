@@ -385,6 +385,12 @@ class RenderManager(Manager):
     # endregion
 
     # region run
+    def _onFrameRun_debug(self):
+        # direct output when debug mode
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+        gl.glEnable(gl.GL_DEPTH_TEST)
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+        self._excute_render_task()
     def _onFrameRun(self):
         # normal render
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._gBuffer)

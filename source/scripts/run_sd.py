@@ -32,10 +32,10 @@ class Config:
     width=512
     height=512
     seed=1234
-    strength=1
+    strength=0.5
     # data preparation configs
-    num_frames=8
-    frames_dir="../rendered_frames/2023-10-21_13"
+    num_frames=None
+    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-10-21_13")
 
 if __name__ == '__main__':
     config = Config()

@@ -18,7 +18,7 @@ class Mesh(ResourcesObj):
     def load(self, path:str):
         '''Load data from file. Override this function to implement loading data from file'''
         raise NotImplementedError
-    def draw(self):
+    def draw(self, slot:int=None):
         '''Draw the mesh'''
         raise NotImplementedError
 
