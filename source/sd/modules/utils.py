@@ -135,7 +135,7 @@ def save_latents(i, t, latents, save_dir, prefix='latents', postfix: str = '', d
     else:
         raise ValueError(f"Unknown decoder type: {decoder}. Must be 'vae' or 'vae-approx'")
 
-    # logu.debug(f"Saving latents: step {i} | timestep {t:0f} | decoder {decoder}")
+    logu.info(f"Saving latents: step {i} | timestep {t:0f} | decoder {decoder}")
 
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)

@@ -1,3 +1,6 @@
+import sys, os
+sys.path.append(os.getcwd())
+
 from sd.modules.data_classes import CorrespondenceMap, ImageFrames
 from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
 from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
@@ -35,7 +38,7 @@ class Config:
     seed = GetEnv('DEFAULT_SEED', 1234, int)
     strength = 1
     # data preparation configs
-    num_frames = None
+    num_frames = GetEnv('DEFAULT_NUM_FRAMES', 8, int)
     frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-10-21_13")
     # Overlap algorithm configs
     alpha = 0.5
