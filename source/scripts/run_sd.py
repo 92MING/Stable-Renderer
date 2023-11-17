@@ -65,8 +65,8 @@ if __name__ == '__main__':
     generator = torch.Generator(device=config.device).manual_seed(config.seed)
 
     # 2. Define overlap algorithm
-    overlap_algorithm = VAEOverlap(
-        vae=pipe.vae, generator=generator, alpha=config.alpha, max_workers=config.max_workers)
+    overlap_algorithm = ResizeOverlap(
+        alpha=config.alpha, max_workers=config.max_workers)
     scheduled_overlap_algorithm = AlphaScheduler(
         alpha_start=0.8, alpha_end=0.4, schedule_mode='linear', overlap=overlap_algorithm)
 

@@ -1,3 +1,6 @@
+import sys, os
+sys.path.append(os.getcwd())
+
 import os.path
 from runtime.components import Camera, MeshRenderer
 from runtime.gameObj import GameObject

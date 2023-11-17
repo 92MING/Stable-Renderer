@@ -1,3 +1,6 @@
+import sys, os
+sys.path.append(os.getcwd())
+
 import os.path
 from runtime.components import Camera, MeshRenderer
 from runtime.gameObj import GameObject
@@ -18,11 +21,11 @@ if __name__ == '__main__':
             mikuMesh = Mesh.Load(os.path.join(mikuPath, 'miku.obj'))
             mikuMaterials = Material_MTL.Load(os.path.join(mikuPath, 'miku.mtl')) # dict of materials
 
-            camera = GameObject('Camera', position=[3, 1.5, -2])
+            camera = GameObject('Camera', position=[60, 20, -25])
             camera.addComponent(Camera)
-            camera.transform.lookAt([0, 1, 0])
+            camera.transform.lookAt([-70, 25, 0])
 
-            miku = GameObject('miku', position=[0, 0, 0], scale=[0.1, 0.1, 0.1])
+            miku = GameObject('miku', position=[0, 0, 0], scale=[1, 1, 1])
             meshRenderer:MeshRenderer = miku.addComponent(MeshRenderer, mesh=mikuMesh)
             meshRenderer.load_MTL_Materials(mikuMaterials)
             miku.addComponent(AutoRotation)
