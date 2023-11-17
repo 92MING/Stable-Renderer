@@ -4,7 +4,8 @@ sys.path.append(os.getcwd())
 from sd.modules.data_classes import CorrespondenceMap, ImageFrames
 from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
 from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
-from sd.modules.diffuser_pipelines.overlap import StartEndScheduler, AlphaScheduler, Overlap, ResizeOverlap, VAEOverlap
+from sd.modules.diffuser_pipelines.overlap import Overlap, ResizeOverlap, VAEOverlap
+from sd.modules.diffuser_pipelines.overlap.overlap_scheduler import Scheduler
 import sd.modules.log_utils as logu
 from diffusers import EulerAncestralDiscreteScheduler
 from sys import platform
@@ -39,12 +40,9 @@ class Config:
     strength = 1
     # data preparation configs
     num_frames = GetEnv('DEFAULT_NUM_FRAMES', 8, int)
-    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-10-21_13")
+    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-11-17_boat")
     # Overlap algorithm configs
-    alpha = 0.5
     max_workers = 1
-    start_corr = 600
-    end_corr = 1000
 
 if __name__ == '__main__':
     config = Config()
@@ -65,10 +63,9 @@ if __name__ == '__main__':
     generator = torch.Generator(device=config.device).manual_seed(config.seed)
 
     # 2. Define overlap algorithm
-    overlap_algorithm = ResizeOverlap(
-        alpha=config.alpha, max_workers=config.max_workers)
-    scheduled_overlap_algorithm = AlphaScheduler(
-        alpha_start=0.8, alpha_end=0.4, schedule_mode='linear', overlap=overlap_algorithm)
+    scheduler = Scheduler(alpha_start=1, alpha_end=1, alpha_scheduler_type='constant')
+    scheduled_overlap_algorithm = ResizeOverlap(
+        scheduler=scheduler, max_workers=config.max_workers)
 
     # 3. Prepare data
     corr_map = CorrespondenceMap.from_existing_directory_numpy(
@@ -93,7 +90,6 @@ if __name__ == '__main__':
     output_frame_list = pipe.__call__(
         prompt=config.prompt,
         negative_prompt=config.neg_prompt,
-        num_frames=config.num_frames,
         images=images,
         # masks=masks,  # Optional: mask images
         control_images=controlnet_images,
@@ -105,7 +101,7 @@ if __name__ == '__main__':
         guidance_scale=7,
         controlnet_conditioning_scale=0.5,
         add_predicted_noise=True, 
-        correspondence_map=corr_map,
+        correspondence_map=None,
         overlap_algorithm=scheduled_overlap_algorithm,
         callback_kwargs={'save_dir': "./sample"},
         same_init_latents=False

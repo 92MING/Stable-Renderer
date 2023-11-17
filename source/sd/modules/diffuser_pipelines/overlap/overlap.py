@@ -227,7 +227,7 @@ class ResizeOverlap(Overlap):
         scheduler: Scheduler,
         max_workers: int = 1,
         verbose: bool = True,
-        interpolate_mode: str = 'bilinear'
+        interpolate_mode: str = 'nearest'
     ):
         super().__init__(
             scheduler=scheduler,
@@ -266,7 +266,7 @@ class ResizeOverlap(Overlap):
         num_frames = len(frame_seq)
         screen_w, screen_h = corr_map.size
         frame_h, frame_w = frame_seq[0].shape[-2:]
-        align_corners = False if self.interpolate_mode in ['linear', 'bilinear', 'bicubic', 'trilinear'] else ...
+        align_corners = False if self.interpolate_mode in ['linear', 'bilinear', 'bicubic', 'trilinear'] else None
 
         ovlp_seq = [F.interpolate(latents, size=(screen_h, screen_w), mode=self.interpolate_mode, align_corners=align_corners) for latents in frame_seq]
         ovlp_seq = super().__call__(

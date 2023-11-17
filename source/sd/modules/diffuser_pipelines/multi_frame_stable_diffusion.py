@@ -845,7 +845,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 # zero value
                 if do_controlnet:
                     if isinstance(controlnet_keep[step], list):
-                        cond_scale = [c * s for c, s in zip(controlnet_conditioning_scale, controlnet_keep[step])]
+                        cond_scale = [controlnet_conditioning_scale * s for s in controlnet_keep[step]]
                     else:
                         controlnet_cond_scale = controlnet_conditioning_scale
                         if isinstance(controlnet_cond_scale, list):
