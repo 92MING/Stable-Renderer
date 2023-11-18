@@ -37,7 +37,8 @@ class Config:
     width = GetEnv('DEFAULT_IMG_WIDTH', 512, int)
     height = GetEnv('DEFAULT_IMG_HEIGHT', 512, int)
     seed = GetEnv('DEFAULT_SEED', 1234, int)
-    strength = 1
+    no_half = GetEnv('DEFAULT_NO_HALF', False, bool)
+    strength = 1.0
     # data preparation configs
     num_frames = GetEnv('DEFAULT_NUM_FRAMES', 8, int)
     frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-11-17_boat")
@@ -54,7 +55,7 @@ if __name__ == '__main__':
         use_safetensors=True,
         torch_dtype=torch.float16,
         device=config.device,
-        no_half=(platform == 'darwin')  # Disable fp16 on MacOS
+        no_half=config.no_half  # Disable fp16 on MacOS
     )
     scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
     pipe.scheduler = scheduler
@@ -65,7 +66,7 @@ if __name__ == '__main__':
     # 2. Define overlap algorithm
     scheduler = Scheduler(alpha_start=1, alpha_end=1, alpha_scheduler_type='constant')
     scheduled_overlap_algorithm = ResizeOverlap(
-        scheduler=scheduler, max_workers=config.max_workers)
+        scheduler=scheduler, max_workers=config.max_workers, interpolate_mode='bilinear')
 
     # 3. Prepare data
     corr_map = CorrespondenceMap.from_existing_directory_numpy(
@@ -99,9 +100,9 @@ if __name__ == '__main__':
         strength=config.strength,
         generator=generator,
         guidance_scale=7,
-        controlnet_conditioning_scale=0.5,
-        add_predicted_noise=True, 
-        correspondence_map=None,
+        controlnet_conditioning_scale=1.0,
+        add_predicted_noise=False, 
+        correspondence_map=corr_map,
         overlap_algorithm=scheduled_overlap_algorithm,
         callback_kwargs={'save_dir': "./sample"},
         same_init_latents=False
