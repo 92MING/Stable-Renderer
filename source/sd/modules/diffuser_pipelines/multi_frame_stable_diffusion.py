@@ -30,6 +30,7 @@ from ..data_classes.correspondenceMap import CorrespondenceMap
 from .. import log_utils as logu
 from ..utils import save_latents
 from .overlap import OverlapAlgorithm, Overlap, ResizeOverlap, VAEOverlap
+from .overlap.johnny_overlap import overlap as temp_overlap
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -955,6 +956,15 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                         step=step,
                         timestep=t,
                     )
+                    # latents_seq = temp_overlap(
+                    #     latents_seq,
+                    #     corr_map=correspondence_map,
+                    #     pipe=self,
+                    #     step=step,
+                    #     timestep=t,
+                    #     init_latents_orig_seq=init_latents_orig_seq,
+                    #     noise_seq=noise_seq,
+                    # )
 
                     try:
                         save_dir = callback_kwargs.get('save_dir')

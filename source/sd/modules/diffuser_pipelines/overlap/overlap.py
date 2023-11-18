@@ -35,6 +35,7 @@ class Overlap(OverlapAlgorithm):
     def __init__(
         self,
         scheduler: Scheduler,
+        weight_option: Literal['average', 'adjacent', 'optical_flow'] = 'adjacent',
         max_workers: int = 1,
         verbose: bool = True
     ):
@@ -50,6 +51,7 @@ class Overlap(OverlapAlgorithm):
         assert max_workers > 0, "Number of max workers is at least 1"
         self._max_workers = max_workers
         self._verbose = verbose
+        self._weight_option = weight_option
 
         # Module for scheduling alpha, no need to be private
         self.scheduler = scheduler
@@ -72,6 +74,15 @@ class Overlap(OverlapAlgorithm):
     def verbose(self, value: bool):
         self._verbose = value
 
+    @property
+    def weight_option(self):
+        return self._weight_option
+    
+    @weight_option.setter
+    def weight_option(self, value: str):
+        self._weight_option = value
+
+
     @staticmethod
     def overlap_rate(ovlp_seq: List[torch.Tensor], threshold: float = 0.0):
         """
@@ -88,12 +99,30 @@ class Overlap(OverlapAlgorithm):
         timestep: int = None,
         **kwargs,
     ):
-        return self.adjacent_overlap(
-            frame_seq=frame_seq,
-            corr_map=corr_map,
-            step=step,
-            timestep=timestep,
-        )
+        if self._weight_option == "average":
+            return self.average_overlap(
+                frame_seq=frame_seq,
+                corr_map=corr_map,
+                step=step,
+                timestep=timestep,
+            )
+        elif self._weight_option == 'adjacent':
+            return self.adjacent_overlap(
+                frame_seq=frame_seq,
+                corr_map=corr_map,
+                step=step,
+                timestep=timestep,
+            )
+        elif self._weight_option == 'optical_flow':
+            logu.warn("Weight option optical flow is buggy")
+            return self.optical_flow_overlap(
+                frame_seq=frame_seq,
+                corr_map=corr_map,
+                step=step,
+                timestep=timestep,
+            )
+        else:
+            raise NotImplementedError
 
     def average_overlap(
         self,
@@ -180,57 +209,108 @@ class Overlap(OverlapAlgorithm):
         batch_size, channels, frame_h, frame_w = frame_seq[0].shape
         device = frame_seq[0].device
         frame_seq_dtype = frame_seq[0].dtype
-        ovlp_seq = torch.zeros((num_frames, channels, frame_h, frame_w), dtype=frame_seq_dtype, device=device)  # [C, H, W]
-        unbatched_frame_seq = [frame[0] for frame in frame_seq]
+
+        overlap_seq = torch.stack(frame_seq, dim=0)  # [T, B, C, H, W]
+        mask_seq = torch.zeros((num_frames, batch_size, channels, frame_h, frame_w), dtype=torch.uint8, device=device)  # [T, 1, H, W]
 
         logu.info(f"Scheduler: alpha: {alpha} | timestep: {timestep:.2f}")
 
         tic = time.time()
         if self.max_workers == 1:
             for v_info in corr_map.Map.values():
-                len_info = len(v_info)
-                if len_info == 1:
-                    pos, t = v_info[0]
-                    h, w = pos
-                    ovlp_seq[t, :, h, w] = unbatched_frame_seq[t][:, h, w]
+                pos, t = v_info[0]
+                h, w = pos
+                if len(v_info) == 1:
+                    mask_seq[t, :, :, h, w] = 1
                 else:
-                    for i in range(len_info):
-                        value = 0
-                        count = 0
-                        pos_self, t_self = v_info[i]
-                        h_self, w_self = pos_self
-                        for j in range(len_info):
-                            pos_other, t_other = v_info[j]
-                            h_other, w_other = pos_other
-                            distance = abs(t_self - t_other)
-                            # weight = numpy.exp(-distance)  # Exponential decay
-                            weight = 1 / (distance + 1)  # Linear decay
-                            # weight = 1 / (distance ** 2 + 1)  # Quadratic decay
-                            value += unbatched_frame_seq[t_other][:, h_other, w_other] * weight
-                            count += weight
-                        ovlp_seq[t_self, :, h_self, w_self] = alpha * (value / count) + one_minus_alpha * unbatched_frame_seq[t_self][:, h_self, w_self]
+                    pos_other, t_other = zip(*v_info)
+                    h_other, w_other = zip(*pos_other)
+                    distance = torch.abs(torch.tensor(t) - torch.tensor(t_other))
+                    # weights = torch.exp(-distance) # Exponential
+                    weights = 1 / (distance + 1) # Linear
+                    # weights = 1 / (distance ** 2 + 1) # Quadratic
+                    weights = weights.reshape(len(t_other), 1, 1).to(device) # [T, 1, 1]
+                    ovlp = overlap_seq[t, :, :, h, w]
+                    value = (overlap_seq[t_other, :, :, h_other, w_other] * weights).sum(dim=0)
+                    count = weights.sum()
 
-            ovlp_seq = ovlp_seq.unsqueeze(1)
-            ovlp_seq = [ovlp_seq[i] for i in range(num_frames)]
+                    if alpha > 0:  # Do overlap
+                        ovlp = alpha * (value / count) + one_minus_alpha * ovlp
+
+                    overlap_seq[t, :, :, h, w] = ovlp
+                    mask_seq[t, :, :, h, w] = 1
         else:
             raise NotImplementedError(f"Multiprocessing not implemented")
 
         toc = time.time()
-        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame") if self.verbose else ...
+        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc - tic) / num_frames:.2f}s per frame") if self.verbose else ...
 
-        return ovlp_seq
+        return list(overlap_seq.unbind(dim=0))
 
+    def optical_flow_overlap(
+        self,
+        frame_seq: List[torch.Tensor],
+        corr_map: CorrespondenceMap,
+        step: int = None,
+        timestep: int = None,
+    ):
+        assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
+
+        alpha = self.scheduler(step, timestep)
+        one_minus_alpha = 1 - alpha
+        num_frames = len(frame_seq)
+        batch_size, channels, frame_h, frame_w = frame_seq[0].shape
+        device = frame_seq[0].device
+        frame_seq_dtype = frame_seq[0].dtype
+
+        overlap_seq = torch.stack(frame_seq, dim=0)  # [T, B, C, H, W]
+        mask_seq = torch.zeros((num_frames, batch_size, channels, frame_h, frame_w), dtype=torch.uint8, device=device)  # [T, 1, H, W]
+
+        logu.info(f"Scheduler: alpha: {alpha} | timestep: {timestep:.2f}")
+
+        tic = time.time()
+        if self.max_workers == 1:
+            for v_info in corr_map.Map.values():
+                pos, t = v_info[0]
+                h, w = pos
+
+                if len(v_info) == 1:
+                    mask_seq[t, :, :, h, w] = 1
+                else:
+                    pos_other, t_other = zip(*v_info)
+                    h_other, w_other = zip(*pos_other)
+                    distances = torch.abs(torch.tensor(h) - torch.tensor(h_other)) + torch.abs(torch.tensor(w) - torch.tensor(w_other))
+                    weights = distances.reshape(len(t_other), 1, 1).to(device) # [T, 1, 1]
+
+                    ovlp = overlap_seq[t, :, :, h, w]
+                    value = (overlap_seq[t_other, :, :, h_other, w_other] * weights).sum(dim=0)
+                    count = weights.sum()
+
+                    if alpha > 0:  # Do overlap
+                        ovlp = alpha * (value / count) + one_minus_alpha * ovlp
+
+                    overlap_seq[t, :, :, h, w] = ovlp
+                    mask_seq[t, :, :, h, w] = 1
+        else:
+            raise NotImplementedError(f"Multiprocessing not implemented")
+
+        toc = time.time()
+        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc - tic) / num_frames:.2f}s per frame") if self.verbose else ...
+
+        return list(overlap_seq.unbind(dim=0))
 
 class ResizeOverlap(Overlap):
     def __init__(
         self,
         scheduler: Scheduler,
+        weight_option: str = 'adjacent',
         max_workers: int = 1,
         verbose: bool = True,
         interpolate_mode: str = 'nearest'
     ):
         super().__init__(
             scheduler=scheduler,
+            weight_option=weight_option,
             max_workers=max_workers,
             verbose=verbose,
         )

@@ -35,6 +35,9 @@ class CorrespondenceMap:
 
     def __str__(self):
         return self._correspondence_map.__str__()
+    
+    def __len__(self):
+        return self._correspondence_map.__len__()
 
     @property
     def Map(self) -> dict:

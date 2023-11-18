@@ -4,8 +4,7 @@ sys.path.append(os.getcwd())
 from sd.modules.data_classes import CorrespondenceMap, ImageFrames
 from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
 from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
-from sd.modules.diffuser_pipelines.overlap import Overlap, ResizeOverlap, VAEOverlap
-from sd.modules.diffuser_pipelines.overlap.overlap_scheduler import Scheduler
+from sd.modules.diffuser_pipelines.overlap import Overlap, ResizeOverlap, VAEOverlap, Scheduler
 import sd.modules.log_utils as logu
 from diffusers import EulerAncestralDiscreteScheduler
 from sys import platform
@@ -32,15 +31,15 @@ class Config:
     ]
     device = GetEnv('DEVICE', ('mps' if platform == 'darwin' else 'cuda'))
     # pipeline generation configs
-    prompt = GetEnv('DEFAULT_SD_PROMPT', "boat in van gogh style")
+    prompt = GetEnv('DEFAULT_SD_PROMPT', "wooden boat on a calm blue lake")
     neg_prompt = GetEnv('DEFAULT_SD_NEG_PROMPT', "low quality, bad anatomy")
     width = GetEnv('DEFAULT_IMG_WIDTH', 512, int)
     height = GetEnv('DEFAULT_IMG_HEIGHT', 512, int)
-    seed = GetEnv('DEFAULT_SEED', 1234, int)
+    seed = GetEnv('DEFAULT_SEED', 1235, int)
     no_half = GetEnv('DEFAULT_NO_HALF', False, bool)
     strength = 1.0
     # data preparation configs
-    num_frames = GetEnv('DEFAULT_NUM_FRAMES', 8, int)
+    num_frames = GetEnv('DEFAULT_NUM_FRAMES',8, int)
     frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-11-17_boat")
     # Overlap algorithm configs
     max_workers = 1
@@ -66,7 +65,7 @@ if __name__ == '__main__':
     # 2. Define overlap algorithm
     scheduler = Scheduler(alpha_start=1, alpha_end=1, alpha_scheduler_type='constant')
     scheduled_overlap_algorithm = ResizeOverlap(
-        scheduler=scheduler, max_workers=config.max_workers, interpolate_mode='bilinear')
+        scheduler=scheduler, weight_option='adjacent', max_workers=config.max_workers, interpolate_mode='nearest')
 
     # 3. Prepare data
     corr_map = CorrespondenceMap.from_existing_directory_numpy(
@@ -105,7 +104,8 @@ if __name__ == '__main__':
         correspondence_map=corr_map,
         overlap_algorithm=scheduled_overlap_algorithm,
         callback_kwargs={'save_dir': "./sample"},
-        same_init_latents=False
+        same_init_latents=True,
+        same_init_noise=True,
         # callback=utils.view_latents,
     ).images
 
