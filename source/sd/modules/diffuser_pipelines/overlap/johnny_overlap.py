@@ -12,7 +12,6 @@ from ...data_classes.correspondenceMap import CorrespondenceMap
 # from ..multi_frame_stable_diffusion import  StableDiffusionImg2VideoPipeline
 from ... import log_utils as logu
 
-
 def overlap(
     frame_seq: List[torch.Tensor],
     corr_map: CorrespondenceMap,
@@ -37,9 +36,10 @@ def overlap(
 
     # Schedule
     alpha = schedule(step, timestep, 'constant', 1)  # The higher, the more overlap
-    # beta = schedule(step, timestep, 'constant', 0.5)  # The higher, the closer to the base color
+    beta = schedule(step, timestep, 'constant')  # The higher, the closer to the base color
     # gamma = schedule(step, timestep, 'cosine', alpha_start=0.175, alpha_end=0.05)  # The strength of the extra noise
-    beta, gamma = 0, 0
+    gamma = 0
+    # beta, gamma = 0, 0
     logu.info(f"Alpha: {alpha} | Beta: {beta} | Gamma: {gamma} | Timestep: {timestep:.2f}")
     one_minus_alpha = 1 - alpha
     one_minus_beta = 1 - beta
@@ -79,6 +79,7 @@ def overlap(
             pos, t = v_info[0]
             h, w = pos
             mask_seq[t, :, :, h, w] = 1
+            len_1_rate += 1
         else:
             for i in range(len_info):
                 value = 0
@@ -89,22 +90,13 @@ def overlap(
                     pos_other, t_other = v_info[j]
                     h_other, w_other = pos_other
                     # print(f"pos_self={pos_self}, t_self={t_self}, pos_other={pos_other}, t_other={t_other}")
-
-                    if weight_option == 'frame_distance':
-                        distance = abs(t_self - t_other)
-                        # weight = 1  # Average overlapping
-                        # weight = numpy.exp(-distance)  # Exponential decay
-                        weight = 1 / (distance + 1)  # Linear decay
-                        # weight = 1 / (distance ** 2 + 1)  # Quadratic decay
-                        value += overlap_seq[t_other, :, :, h_other, w_other] * weight
-                        count += weight
-                    elif weight_option == 'optical_flow':
-                        distance = abs(h_self - h_other) + abs(w_self - w_other)
-                        weight = distance
-                        value += overlap_seq[t_other, :, :, h_other, w_other] * weight
-                        count += weight
-                    else:
-                        raise NotImplementedError
+                    distance = abs(t_self - t_other)
+                    # weight = 1  # Average overlapping
+                    # weight = numpy.exp(-distance)  # Exponential decay
+                    weight = 1 / (distance + 1)  # Linear decay
+                    # weight = 1 / (distance ** 2 + 1)  # Quadratic decay
+                    value += overlap_seq[t_other, :, :, h_other, w_other] * weight
+                    count += weight
 
                 ovlp = overlap_seq[t_self, :, :, h_self, w_self]
                 if alpha > 0:  # Do overlap
@@ -112,8 +104,6 @@ def overlap(
                 if beta > 0 and init_latents_orig_seq:  # Mix base color
                     pos, t = v_info[0]
                     h_bc, w_bc = pos
-                    # print(f"t={t}")
-                    # print(f"shape{up_proper_latents_seq.shape}")
                     base_color = up_proper_latents_seq[t][:, :, h_bc, w_bc]  # Select the first appearance as the base color
                     ovlp = beta * base_color + one_minus_beta * ovlp
 
@@ -124,7 +114,6 @@ def overlap(
 
     pbar.close()
 
-    print(len_1_rate / len(corr_map))
     overlap_seq = [ovlp for ovlp in overlap_seq]  # To list
 
     toc = time.time()
@@ -137,6 +126,7 @@ def overlap(
     mask_seq = [F.interpolate(mask, size=(frame_h, frame_w), mode='nearest') for mask in mask_seq]
 
     logu.info(f"Mask rate: {[mask.sum() / mask.numel() for mask in mask_seq]}")
+    logu.info(f"Vertex appeared once: {len_1_rate * 100 /len(corr_map):.2f}%")
 
     # Add extra noise
     if noise_seq and gamma > 0:

@@ -21,7 +21,7 @@ def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
         os.makedirs(GIF_OUTPUT_DIR)
     path = os.path.join(GIF_OUTPUT_DIR, datetime.now().strftime(f"%Y-%m-%d_%H-%M_{output_fname}"))
     images[0].save(path, format="GIF", save_all=True, append_images=images[1:], loop=0)
-    logu.success(f'[SUCESS] Saved image sequence at {path}')
+    logu.success(f'[SUCCESS] Saved image sequence at {path}')
 
 class Config:
     # pipeline init configs
@@ -38,15 +38,16 @@ class Config:
     height = GetEnv('DEFAULT_IMG_HEIGHT', 512, int)
     seed = GetEnv('DEFAULT_SEED', 1235, int)
     no_half = GetEnv('DEFAULT_NO_HALF', False, bool)
-    strength = 1.0
+    strength = 1
     # data preparation configs
-    num_frames = GetEnv('DEFAULT_NUM_FRAMES',8, int)
+    num_frames = GetEnv('DEFAULT_NUM_FRAMES',16, int)
     frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-11-17_boat")
     # Overlap algorithm configs
-    max_workers = 1
+    max_workers = 4
 
 if __name__ == '__main__':
     config = Config()
+    torch.backends.cudnn.enabled = False
 
     # 1. Load pipeline
     pipe: StableDiffusionImg2VideoPipeline = load_pipe(
@@ -73,7 +74,7 @@ if __name__ == '__main__':
         os.path.join(config.frames_dir, 'id'),
         enable_strict_checking=False,
         num_frames=config.num_frames,
-        use_cache=True)
+        use_cache=False)
     images = ImageFrames.from_existing_directory(
         os.path.join(config.frames_dir, 'color'),
         num_frames=config.num_frames).Data
