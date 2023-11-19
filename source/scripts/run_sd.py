@@ -66,7 +66,7 @@ if __name__ == '__main__':
     # 2. Define overlap algorithm
     scheduler = Scheduler(alpha_start=1, alpha_end=1, alpha_scheduler_type='constant')
     scheduled_overlap_algorithm = ResizeOverlap(
-        scheduler=scheduler, weight_option='adjacent', max_workers=config.max_workers, interpolate_mode='nearest')
+        scheduler=scheduler, weight_option='frame_distance', max_workers=config.max_workers, interpolate_mode='nearest')
 
     # 3. Prepare data
     corr_map = CorrespondenceMap.from_existing_directory_numpy(
