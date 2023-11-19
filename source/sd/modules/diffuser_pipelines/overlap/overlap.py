@@ -35,7 +35,7 @@ class Overlap(OverlapAlgorithm):
     def __init__(
         self,
         scheduler: Scheduler,
-        weight_option: Literal['average', 'adjacent', 'optical_flow'] = 'adjacent',
+        weight_option: Literal['average', 'adjacent', 'optical_flow', 'frame_distance'] = 'optical_flow',
         max_workers: int = 1,
         verbose: bool = True
     ):
@@ -116,6 +116,13 @@ class Overlap(OverlapAlgorithm):
         elif self._weight_option == 'optical_flow':
             logu.warn("Weight option optical flow is buggy")
             return self.optical_flow_overlap(
+                frame_seq=frame_seq,
+                corr_map=corr_map,
+                step=step,
+                timestep=timestep,
+            )
+        elif self._weight_option == 'frame_distance':
+            return self.frame_distance_overlap(
                 frame_seq=frame_seq,
                 corr_map=corr_map,
                 step=step,
@@ -249,6 +256,55 @@ class Overlap(OverlapAlgorithm):
 
         return ovlp_seq
 
+    def frame_distance_overlap(
+            self,
+            frame_seq: List[torch.Tensor],
+            corr_map: CorrespondenceMap,
+            step: int = None,
+            timestep: int = None,
+    ):
+        assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
+
+        alpha = self.scheduler(step, timestep)
+        one_minus_alpha = 1 - alpha
+        num_frames = len(frame_seq)
+        batch_size, channels, frame_h, frame_w = frame_seq[0].shape
+        device = frame_seq[0].device
+        frame_seq_dtype = frame_seq[0].dtype
+
+        overlap_seq = torch.stack(frame_seq, dim=0)  # [T, B, C, H, W]
+        mask_seq = torch.zeros((num_frames, batch_size, channels, frame_h, frame_w), dtype=torch.uint8, device=device)  # [T, 1, H, W]
+
+        logu.info(f"Scheduler: alpha: {alpha} | timestep: {timestep:.2f}")
+        
+        tic = time.time()
+        if self.max_workers == 1:
+            for v_info in corr_map.Map.values():
+                if len(v_info) == 1:
+                    # no value changes when vertex appear once only
+                    continue
+                pos_all, t_all = zip(*v_info)
+                h_all, w_all = zip(*pos_all)
+                # compute frame distance from the previous occurance of vertex
+                distances = torch.tensor(
+                    [abs(t_all[i-1] - t_all[i]) if i != 0 else -1 for i in range(len(t_all))],
+                    dtype=frame_seq_dtype).to(device)
+                distance_mean = torch.mean(distances[1:]) # replace first with mean
+                distances[0] = 1 if torch.isnan(distance_mean) else distance_mean # when len(v_info)=1, mean=nan
+                
+                weights = F.normalize(1/(distances+1), p=1, dim=0)
+
+                latent_seq = overlap_seq[t_all, :, :, h_all, w_all]
+                weighted_latent_seq = latent_seq * weights.reshape(-1, 1, 1) # scale latents along dim T
+                overlap_seq[t_all, :, :, h_all, w_all] = alpha * weighted_latent_seq + one_minus_alpha * latent_seq
+        else:
+            raise NotImplementedError(f"Multiprocessing not implemented")
+
+        toc = time.time()
+        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame") if self.verbose else ...
+
+        return overlap_seq
+ 
 
     def optical_flow_overlap(
         self,
@@ -274,26 +330,23 @@ class Overlap(OverlapAlgorithm):
         tic = time.time()
         if self.max_workers == 1:
             for v_info in corr_map.Map.values():
-                pos, t = v_info[0]
-                h, w = pos
-
                 if len(v_info) == 1:
-                    mask_seq[t, :, :, h, w] = 1
-                else:
-                    pos_other, t_other = zip(*v_info)
-                    h_other, w_other = zip(*pos_other)
-                    distances = torch.abs(torch.tensor(h) - torch.tensor(h_other)) + torch.abs(torch.tensor(w) - torch.tensor(w_other))
-                    weights = distances.reshape(len(t_other), 1, 1).to(device) # [T, 1, 1]
+                    # no value changes when vertex appear once only
+                    continue
+                pos_all, t_all = zip(*v_info)
+                h_all, w_all = zip(*pos_all)
+                # compute vertex displacement from the previous occurance of vertex
+                distances = torch.tensor(
+                    [abs(h_all[i-1] - h_all[i]) + abs(w_all[i-1] - w_all[i]) if i != 0 else -1 for i in range(len(h_all))],
+                    dtype=frame_seq_dtype).to(device)
+                distance_mean = torch.mean(distances[1:]) # replace first with mean
+                distances[0] = 1 if torch.isnan(distance_mean) else distance_mean # when len(v_info)=1, mean=nan
+                
+                weights = F.normalize(1/(distances+1), p=1, dim=0)
 
-                    ovlp = overlap_seq[t, :, :, h, w]
-                    value = (overlap_seq[t_other, :, :, h_other, w_other] * weights).sum(dim=0)
-                    count = weights.sum()
-
-                    if alpha > 0:  # Do overlap
-                        ovlp = alpha * (value / count) + one_minus_alpha * ovlp
-
-                    overlap_seq[t, :, :, h, w] = ovlp
-                    mask_seq[t, :, :, h, w] = 1
+                latent_seq = overlap_seq[t_all, :, :, h_all, w_all]
+                weighted_latent_seq = latent_seq * weights.reshape(-1, 1, 1) # scale latents along dim T
+                overlap_seq[t_all, :, :, h_all, w_all] = alpha * weighted_latent_seq + one_minus_alpha * latent_seq
         else:
             raise NotImplementedError(f"Multiprocessing not implemented")
 
