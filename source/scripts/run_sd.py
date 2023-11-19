@@ -5,6 +5,7 @@ from sd.modules.data_classes import CorrespondenceMap, ImageFrames
 from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
 from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
 from sd.modules.diffuser_pipelines.overlap import Overlap, ResizeOverlap, VAEOverlap, Scheduler
+from sd.modules.diffuser_pipelines.overlap.utils import build_view_normal_map
 import sd.modules.log_utils as logu
 from diffusers import EulerAncestralDiscreteScheduler
 from sys import platform
@@ -86,6 +87,8 @@ if __name__ == '__main__':
     ).Data
     controlnet_images = [[depth, normal] for depth, normal in zip(depth_images, normal_images)]
 
+    view_normal_map = build_view_normal_map(normal_images, torch.tensor([0,0,1]))
+
     # 4. Generate frames
     output_frame_list = pipe.__call__(
         prompt=config.prompt,
@@ -106,6 +109,7 @@ if __name__ == '__main__':
         callback_kwargs={'save_dir': "./sample"},
         same_init_latents=True,
         same_init_noise=True,
+        view_normal_map=view_normal_map,
         # callback=utils.view_latents,
     ).images
 

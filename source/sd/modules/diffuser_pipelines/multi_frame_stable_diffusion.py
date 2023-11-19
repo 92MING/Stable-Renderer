@@ -500,6 +500,8 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         is_cancelled_callback: Optional[Callable[[], bool]] = None,
         callback_steps: int = 1,
         callback_kwargs: Optional[Dict[str, Any]] = None,
+
+        view_normal_map: Optional[torch.FloatTensor] = None,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -955,6 +957,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                         corr_map=correspondence_map,
                         step=step,
                         timestep=t,
+                        view_normal_map=view_normal_map,
                     )
                     # latents_seq = temp_overlap(
                     #     latents_seq,
