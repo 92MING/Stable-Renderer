@@ -130,6 +130,7 @@ class Overlap(OverlapAlgorithm):
                 timestep=timestep,
             )
         elif self._weight_option == 'view_normal':
+            logu.warn("View normal overlap is buggy")
             return self.view_normal_overlap(
                 frame_seq=frame_seq,
                 corr_map=corr_map,
@@ -299,11 +300,12 @@ class Overlap(OverlapAlgorithm):
                 
                 # compute dense frame distance from all occurance of vertex
                 t_all_tensor = torch.tensor(t_all, dtype=frame_seq_dtype).to(device)
-                latent_seq = overlap_seq[t_all, :, :, h_all, w_all]
+                
                 # gives a covariance-like matrix but elements being abs(a_i - a_j)
                 distances_matrix = torch.abs(t_all_tensor.unsqueeze(1) - t_all_tensor)
 
                 # every row of weights * latent_seq is latent_seq weighted by 1/distance
+                latent_seq = overlap_seq[t_all, :, :, h_all, w_all]
                 weights = 1 / (distances_matrix + 1)
                 weighted_average_latent_seq = torch.matmul(weights, latent_seq.squeeze()) / weights.sum(dim=0).reshape(-1, 1)
                 weighted_average_latent_seq = weighted_average_latent_seq.reshape_as(latent_seq)
@@ -345,25 +347,25 @@ class Overlap(OverlapAlgorithm):
                     continue
                 pos_all, t_all = zip(*v_info)
                 h_all, w_all = zip(*pos_all)
+                h_all_tensor = torch.tensor(h_all, dtype=frame_seq_dtype).to(device)
+                w_all_tensor = torch.tensor(w_all, dtype=frame_seq_dtype).to(device)
                 # compute vertex displacement from the previous occurance of vertex
-                distances = torch.tensor(
-                    [abs(h_all[i-1] - h_all[i]) + abs(w_all[i-1] - w_all[i]) if i != 0 else -1 for i in range(len(h_all))],
-                    dtype=frame_seq_dtype).to(device)
-                distance_mean = torch.mean(distances[1:]) # replace first with mean
-                distances[0] = 1 if torch.isnan(distance_mean) else distance_mean # when len(v_info)=1, mean=nan
-                
-                weights = F.normalize(1/(distances+1), p=1, dim=0)
+                h_distances = torch.abs(h_all_tensor.unsqueeze(1) - h_all_tensor)
+                w_distances = torch.abs(w_all_tensor.unsqueeze(1) - w_all_tensor)
+                distances_matrix = h_distances + w_distances
 
-                latent_seq = overlap_seq[t_all, :, :, h_all, w_all]
-                weighted_latent_seq = latent_seq.sum(dim=0) * weights.reshape(-1, 1, 1) # scale latents along dim T
-                overlap_seq[t_all, :, :, h_all, w_all] = alpha * weighted_latent_seq + one_minus_alpha * latent_seq
+                latent_seq = overlap_seq[t_all, :, :, h_all, w_all] 
+                weights = 1 / (distances_matrix + 1)
+                weighted_average_latent_seq = torch.matmul(weights, latent_seq.squeeze()) / weights.sum(dim=0).reshape(-1, 1)
+                weighted_average_latent_seq = weighted_average_latent_seq.reshape_as(latent_seq)
+                overlap_seq[t_all, :, :, h_all, w_all] = alpha * weighted_average_latent_seq + one_minus_alpha * latent_seq
         else:
             raise NotImplementedError(f"Multiprocessing not implemented")
 
         toc = time.time()
         logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc - tic) / num_frames:.2f}s per frame") if self.verbose else ...
 
-        return list(overlap_seq.unbind(dim=0))
+        return overlap_seq
     
     def view_normal_overlap(
         self,
@@ -402,10 +404,10 @@ class Overlap(OverlapAlgorithm):
                 h_all, w_all = zip(*pos_all)
                 # extract vertex view normal from view normal map 
                 view_normal_seq = view_normal_map[t_all, h_all, w_all].to(device)
-                weights = F.normalize(view_normal_seq, p=1, dim=0)
 
                 latent_seq = overlap_seq[t_all, :, :, h_all, w_all]
-                weighted_latent_seq = latent_seq.sum(dim=0) * weights.reshape(-1, 1, 1) # scale latents along dim T
+                weighted_latent_seq = latent_seq.squeeze() * view_normal_seq / view_normal_seq.sum(dim=0)
+                weighted_latent_seq = weighted_latent_seq.reshape_as(latent_seq)
                 overlap_seq[t_all, :, :, h_all, w_all] = alpha * weighted_latent_seq + one_minus_alpha * latent_seq
                 
                 pbar.update(1) if v_i % progress_slice == 0 else ...

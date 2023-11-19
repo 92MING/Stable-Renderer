@@ -43,7 +43,7 @@ class Config:
     num_frames = GetEnv('DEFAULT_NUM_FRAMES',16, int)
     frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-11-17_boat")
     # Overlap algorithm configs
-    max_workers = 4
+    max_workers = 1
 
 if __name__ == '__main__':
     config = Config()
@@ -67,7 +67,7 @@ if __name__ == '__main__':
     # 2. Define overlap algorithm
     scheduler = Scheduler(alpha_start=1, alpha_end=1, alpha_scheduler_type='constant')
     scheduled_overlap_algorithm = ResizeOverlap(
-        scheduler=scheduler, weight_option='frame_distance', max_workers=config.max_workers, interpolate_mode='nearest')
+        scheduler=scheduler, weight_option='view_normal', max_workers=config.max_workers, interpolate_mode='nearest')
 
     # 3. Prepare data
     corr_map = CorrespondenceMap.from_existing_directory_numpy(
