@@ -2,19 +2,6 @@
 An engine connecting OpenGL & Stable Diffusion
 
 ----------------------------------
-## Project Structure
-```
-.
-├── resources          # 3d models, textures, shaders, etc.
-├── source             # source code
-│   ├── runtime        # Engine, GameObject, Component, etc.
-│   ├── static         # Shader, Texture, Material, etc.
-│   ├── sd             # Stable Diffusion stuff
-│   ├── utils          # utility functions
-│   ├── scripts        # scripts for different testing purposes
-│   └── .env           # environment variables. You should create this yourself
-```
-----------------------------------
 ## Engine
 
 #### Shader
