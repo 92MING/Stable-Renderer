@@ -11,9 +11,9 @@ class Transform(Component):
         if not enable:
             raise Exception('Transform can not be disabled.')
         super().__init__(gameObj)
-        self.localPos = glm.vec3(0, 0, 0)
+        self._localPos = glm.vec3(0, 0, 0)
         self._localRot = glm.quat() # rotation cannot be set directly since it is quaternion
-        self.localScale = glm.vec3(1, 1, 1)
+        self._localScale = glm.vec3(1, 1, 1)
 
     # region runtime stuff
     @property
@@ -148,11 +148,28 @@ class Transform(Component):
 
     # region position
     @property
+    def localPos(self)->glm.vec3:
+        '''return the position of this transform in local space'''
+        return self._localPos
+    @localPos.setter
+    def localPos(self, value):
+        if not isinstance(value, glm.vec3):
+            try:
+                value = glm.vec3(value)
+            except:
+                raise TypeError('localPos must be glm.vec3 or Sequence of 3 numbers')
+        self._localPos = value
+    @property
     def globalPos(self)->glm.vec3:
         '''return the position of this transform in global space'''
         return self.transformPoint(self.localPos)
     @globalPos.setter
     def globalPos(self, value):
+        if not isinstance(value, glm.vec3):
+            try:
+                value = glm.vec3(value)
+            except:
+                raise TypeError('globalPos must be glm.vec3 or Sequence of 3 numbers')
         self.setGlobalPos(value.x, value.y, value.z)
     def setGlobalPos(self, x,y,z):
         '''set the position of this transform in global space'''
@@ -169,6 +186,18 @@ class Transform(Component):
     # endregion
 
     # region scale
+    @property
+    def localScale(self)->glm.vec3:
+        '''return the scale of this transform in local space'''
+        return self._localScale
+    @localScale.setter
+    def localScale(self, value):
+        if not isinstance(value, glm.vec3):
+            try:
+                value = glm.vec3(value)
+            except:
+                raise TypeError('localScale must be glm.vec3 or Sequence of 3 numbers')
+        self._localScale = value
     @property
     def globalScale(self)->glm.vec3:
         '''return the scale of this transform in global space'''

@@ -107,9 +107,16 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
     @property
     def name(self):
         return self._name
+
+    _engine = None
     @property
     def engine(self)->'Engine':
-        return GetGlobalValue('_ENGINE_SINGLETON')
+        if self.__class__._engine is None:
+            engine = GetGlobalValue('_ENGINE_SINGLETON')
+            if engine is None:
+                raise ValueError('No engine instance found. Engine must be initialized before any resources.')
+            self.__class__._engine = engine
+        return self.__class__._engine
 
     # region abstract methods
     def load(self, path):

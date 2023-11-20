@@ -7,6 +7,7 @@ from typing import Union, get_args, Dict, Tuple
 from enum import Enum
 from dataclasses import dataclass
 from utils.type_utils import valueTypeCheck
+from utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
 import glm
 
 @dataclass
@@ -72,21 +73,20 @@ class Material(ResourcesObj):
             name = f'Default_Opaque_Material_{cls._Default_Opaque_Material_Count}'
         elif name in cls.AllInstances():
             raise ValueError(f'Material name {name} already exists.')
-        cls._Default_Opaque_Material_Count += 1
-        return Material(name, Shader.Default_GBuffer_Shader())
+        Material._Default_Opaque_Material_Count += 1
+        return cls(name, Shader.Default_GBuffer_Shader())
     @classmethod
-    def Debug_Material(cls, grayMode=False, pinkMode=False, name=None)->'Material':
+    def Debug_Material(cls, grayMode=False, pinkMode=False, whiteMode=False, name=None)->'Material':
         '''Create a new material with debug shader(which directly output color to screen space).'''
         if name is None:
             name = f'Debug_Material_{cls._Debug_Material_Count}'
         elif name in cls.AllInstances():
             raise ValueError(f'Material name {name} already exists.')
-        cls._Debug_Material_Count += 1
-        mat = Material(name, Shader.Debug_Shader())
-        if grayMode:
-            mat.setVariable('grayMode', True)
-        if pinkMode:
-            mat.setVariable('pinkMode', True)
+        Material._Debug_Material_Count += 1
+        mat = cls(name, Shader.Debug_Shader())
+        mat.setVariable('grayMode', grayMode)
+        mat.setVariable('pinkMode', pinkMode)
+        mat.setVariable('whiteMode', whiteMode)
         return mat
     # endregion
 
@@ -119,7 +119,13 @@ class Material(ResourcesObj):
         self._renderOrder = order.value if isinstance(order, RenderOrder) else order
         self._textures:Dict[str, Tuple['Texture', int]] = {} # name: (texture, slot)
         self._variables = {} # name: value
+        self._id = GetOrAddGlobalValue("_MaterialCount", 0)
+        SetGlobalValue("_MaterialCount", self._id+1)
 
+
+    @property
+    def id(self)->int:
+        return self._id
     @property
     def shader(self)->Shader:
         return self._shader
@@ -198,6 +204,7 @@ class Material(ResourcesObj):
             tex.bind(i, self._shader.getUniformID(name))
         for name, value in self._variables.items():
             self._shader.setUniform(name, value)
+        self._shader.setUniform('materialID', self.id) # for corresponding map
 
 
 __all__ = ['Material', 'DefaultTextureType']

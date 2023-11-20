@@ -1,3 +1,5 @@
+import OpenGL.error
+
 from static.resourcesObj import ResourcesObj
 import os
 from PIL import Image
@@ -143,8 +145,13 @@ class Texture(ResourcesObj):
             try:
                 buffer = np.array([self._texID], dtype=np.uint32)
                 gl.glDeleteTextures(1, buffer)
-            except Exception as glError:
-                print('Warning: failed to delete texture. Error: {}'.format(glError))
+            except OpenGL.error.GLError as glErr:
+                if glErr.err == 1282:
+                    pass
+                else:
+                    print('Warning: failed to delete texture. Error: {}'.format(glErr))
+            except Exception as err:
+                print('Warning: failed to delete texture. Error: {}'.format(err))
             self._texID = None
         self._buffer = None
         self._width = None

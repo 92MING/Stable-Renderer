@@ -8,24 +8,38 @@ An engine connecting OpenGL & Stable Diffusion
 ├── resources          # 3d models, textures, shaders, etc.
 ├── source             # source code
 │   ├── runtime        # Engine, GameObject, Component, etc.
-│   │   ├── managers   # singleton managers, e.g. WindowManager, RuntimeManager, etc.
 │   ├── static         # Shader, Texture, Material, etc.
 │   ├── sd             # Stable Diffusion stuff
 │   ├── utils          # utility functions
-│   ├── main.py        # main entry
-├── .gitignore
-├── README.md
-├── license
-└── requirements.txt
+│   ├── scripts        # scripts for different testing purposes
+│   └── .env           # environment variables. You should create this yourself
 ```
-
 ----------------------------------
-### TODO & DONE
-- [ ] Light rendering / Light components
-- [ ] SD manager
+## Engine
 
+#### Shader
+ ##### uniform blocks
+   ###### Matrices & common data
+   ```
+     layout (std140) uniform Matrices {
+        mat4 model;
+        mat4 view;
+        mat4 projection;
+        mat4 MVP;
+        mat4 MVP_IT; // inverse transpose of MVP
+        mat4 MV; // model-view matrix
+        mat4 MV_IT; // inverse transpose of MV
+        vec3 cameraPos;
+        vec3 cameraDir;
+     };
+   ```
+   ###### Engine info
+   ```
+     layout (std140) uniform Engine {
+        ivec2 windowSize;
+     };
+   ```
 
-- [x] move depth data to color data's alpha channel
 ----------------------------------
 
 

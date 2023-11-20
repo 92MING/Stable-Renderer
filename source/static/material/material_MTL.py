@@ -2,6 +2,7 @@ import os.path
 from .material import Material, DefaultTextureType
 from typing import Tuple, Dict
 from ..texture import Texture
+from utils.global_utils import GetGlobalValue
 
 class Material_MTL(Material):
     _Format = 'mtl'
@@ -81,6 +82,7 @@ class Material_MTL(Material):
             materials = {}
             currMatDataLines = []
             currMat:Material_MTL = None
+            engine: 'Engine' = GetGlobalValue('_ENGINE_SINGLETON')
             for line in lines:
                 if line.startswith('#') or line in ("\n", ""): continue
                 elif line.startswith('newmtl'):
@@ -97,7 +99,7 @@ class Material_MTL(Material):
                     while matName in Material.AllInstances():
                         count += 1
                         matName = f'{matName}_{count}'
-                    currMat = Material_MTL(name=f"{name}_{matName}", shader=shader)
+                    currMat = cls.Default_Opaque_Material(name=matName) if not engine.IsDebugMode else cls.Debug_Material(name=matName)
                     currMat._realName = realMatName
                     materials[realMatName] = currMat
 
