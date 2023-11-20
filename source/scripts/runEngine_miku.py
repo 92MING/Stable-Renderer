@@ -3,7 +3,7 @@ from runtime.components import Camera, MeshRenderer
 from runtime.gameObj import GameObject
 from runtime.component import Component
 from runtime.engine import Engine
-from static import Mesh, Material, Material_MTL, Key, MouseButton, Color
+from static import Mesh, Material, Material_MTL, Key, MouseButton
 from utils.path_utils import *
 
 if __name__ == '__main__':
