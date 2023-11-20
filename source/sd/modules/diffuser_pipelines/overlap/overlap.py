@@ -1,6 +1,7 @@
 import torch
 import time
 import numpy
+from tqdm import tqdm
 from typing import List, Literal
 import torch.nn.functional as F
 from abc import abstractmethod, ABC
@@ -32,9 +33,14 @@ class Overlap(OverlapAlgorithm):
     Parent class for all overlapping algorithms used in multi_frame_stable_diffusion.py
     """
 
+    alpha_scheduler: Scheduler
+    beta_scheduler: Scheduler
+
     def __init__(
         self,
-        scheduler: Scheduler,
+        pipe,
+        alpha_scheduler: Scheduler,
+        beta_scheduler: Scheduler,
         max_workers: int = 1,
         verbose: bool = True
     ):
@@ -52,7 +58,9 @@ class Overlap(OverlapAlgorithm):
         self._verbose = verbose
 
         # Module for scheduling alpha, no need to be private
-        self.scheduler = scheduler
+        self.pipe = pipe
+        self.alpha_scheduler = alpha_scheduler
+        self.beta_scheduler = beta_scheduler
 
     @property
     def max_workers(self):
@@ -93,6 +101,7 @@ class Overlap(OverlapAlgorithm):
             corr_map=corr_map,
             step=step,
             timestep=timestep,
+            **kwargs,
         )
 
     def average_overlap(
@@ -101,6 +110,7 @@ class Overlap(OverlapAlgorithm):
         corr_map: CorrespondenceMap,
         step: int = None,
         timestep: int = None,
+        **kwargs,
     ):
         """
         Do overlapping on a sequence of frames according to the corresponding map.
@@ -114,7 +124,8 @@ class Overlap(OverlapAlgorithm):
         """
         assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
 
-        alpha = self.scheduler(step, timestep)
+        alpha = self.alpha_scheduler(step, timestep)
+        beta = self.beta_scheduler(step, timestep)
         one_minus_alpha = 1 - alpha
         num_frames = len(frame_seq)
         batch_size, channels, frame_h, frame_w = frame_seq[0].shape
@@ -171,11 +182,14 @@ class Overlap(OverlapAlgorithm):
         corr_map: CorrespondenceMap,
         step: int = None,
         timestep: int = None,
+        **kwargs
     ):
         assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
 
-        alpha = self.scheduler(step, timestep)
+        alpha = self.alpha_scheduler(step, timestep)
+        beta = self.beta_scheduler(step, timestep)
         one_minus_alpha = 1 - alpha
+        one_minus_beta = 1 - beta
         num_frames = len(frame_seq)
         batch_size, channels, frame_h, frame_w = frame_seq[0].shape
         device = frame_seq[0].device
@@ -186,8 +200,11 @@ class Overlap(OverlapAlgorithm):
         logu.info(f"Scheduler: alpha: {alpha} | timestep: {timestep:.2f}")
 
         tic = time.time()
+        progress_total = len(corr_map.Map)
+        progress_slice = progress_total // 100
+        pbar = tqdm(total=100, desc='Overlap', unit='%', leave=False)
         if self.max_workers == 1:
-            for v_info in corr_map.Map.values():
+            for v_i, v_info in enumerate(corr_map.Map.values()):
                 len_info = len(v_info)
                 if len_info == 1:
                     pos, t = v_info[0]
@@ -209,6 +226,10 @@ class Overlap(OverlapAlgorithm):
                             value += unbatched_frame_seq[t_other][:, h_other, w_other] * weight
                             count += weight
                         ovlp_seq[t_self, :, h_self, w_self] = alpha * (value / count) + one_minus_alpha * unbatched_frame_seq[t_self][:, h_self, w_self]
+                        if beta < 1:
+                            h_bc, w_bc = v_info[0][0]
+                            ovlp_seq[t_self, :, h_self, w_self] = beta * ovlp_seq[t_self, :, h_self, w_self] + one_minus_beta * unbatched_frame_seq[0][:, h_bc, w_bc]
+                pbar.update(1) if v_i % progress_slice == 0 else ...
 
             ovlp_seq = ovlp_seq.unsqueeze(1)
             ovlp_seq = [ovlp_seq[i] for i in range(num_frames)]
@@ -224,25 +245,21 @@ class Overlap(OverlapAlgorithm):
 class ResizeOverlap(Overlap):
     def __init__(
         self,
-        scheduler: Scheduler,
+        pipe,
+        alpha_scheduler: Scheduler,
+        beta_scheduler: Scheduler,
         max_workers: int = 1,
         verbose: bool = True,
         interpolate_mode: str = 'bilinear'
     ):
         super().__init__(
-            scheduler=scheduler,
+            pipe=pipe,
+            alpha_scheduler=alpha_scheduler,
+            beta_scheduler=beta_scheduler,
             max_workers=max_workers,
             verbose=verbose,
         )
-        self._interpolate_mode = interpolate_mode
-
-    @property
-    def interpolate_mode(self):
-        return self._interpolate_mode
-
-    @interpolate_mode.setter
-    def interpolate_mode(self, value: str):
-        self._interpolate_mode = value
+        self.interpolate_mode = interpolate_mode
 
     def __call__(
         self,
@@ -260,7 +277,7 @@ class ResizeOverlap(Overlap):
         :param timestep: current inference timestep
         :return: A list of overlapped frame latents.
         """
-        alpha = self.scheduler(step, timestep)
+        alpha = self.alpha_scheduler(step, timestep)
         if alpha == 0:
             return frame_seq
         num_frames = len(frame_seq)
@@ -286,6 +303,7 @@ class ResizeOverlap(Overlap):
 
 
 class VAEOverlap(Overlap):
+    # ! Deprecated
     def __init__(
         self,
         vae: AutoencoderKL,
@@ -295,7 +313,7 @@ class VAEOverlap(Overlap):
         verbose: bool = True,
     ):
         super().__init__(
-            scheduler=scheduler,
+            alpha_scheduler=scheduler,
             max_workers=max_workers,
             verbose=verbose,
         )

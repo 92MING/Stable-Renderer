@@ -32,11 +32,11 @@ def main():
     neg_prompt = "low quality, bad anatomy"
 
     # Prepare torch generator
-    seed = 42  # Random seed
+    seed = 42  # Random seed. e.g. 42, 84, 126, 168, ...
     generator = torch.Generator(device=config.device).manual_seed(seed)
 
     # 2. Prepare images
-    n = 10  # Number of frames to use
+    n = 6  # Number of frames to use
     start = 2  # Start frame
     end = n  # End frame
 
@@ -65,19 +65,28 @@ def main():
     corr_map = utils.make_correspondence_map(TEST_DIR / "id", TEST_DIR / "corr_map.pkl", force_recreate=False, num_frames=n)
     corr_map = utils.truncate_corr_map(corr_map, start=start, end=end)
 
-    latents_dir = TEST_DIR / "latents"
+    output_dir = utils.smart_path(config.output_dir / '%date%_%increment%')
+    latents_dir = output_dir / "latents_preview"
     latents_dir.mkdir(parents=True, exist_ok=True)
-    utils.clear_dir(latents_dir)
+    logu.info(f"Output directory: `{output_dir}`")
 
     # Overlapping
-    overlap_scheduler = Scheduler(
-        alpha_start=1,
-        alpha_scheduler_type='constant',
-    )
+    # alpha_scheduler = Scheduler(
+    #     alpha_start=0.5,
+    #     alpha_end=1,
+    #     alpha_scheduler_type='cosine',
+    # )
 
-    overlap_algorithm = ResizeOverlap(
-        scheduler=overlap_scheduler,
-    )
+    # beta_scheduler = Scheduler(
+    #     alpha_start=0.5,
+    #     alpha_scheduler_type='constant'
+    # )
+
+    # overlap_algorithm = ResizeOverlap(
+    #     pipe=pipe,
+    #     alpha_scheduler=alpha_scheduler,
+    #     beta_scheduler=beta_scheduler,
+    # )
 
     num_inference_steps = 16
 
@@ -93,21 +102,19 @@ def main():
         width=width,
         height=height,
         num_inference_steps=num_inference_steps,
-        strength=0.75,
+        strength=1,
         generator=generator,
         guidance_scale=7,
-        controlnet_conditioning_scale=0.9,
+        controlnet_conditioning_scale=1,
         add_predicted_noise=True,
         callback=utils.save_latents,
         callback_kwargs=dict(save_dir=latents_dir),
-        overlap_algorithm=overlap_algorithm,
+        # overlap_algorithm=overlap_algorithm,
         same_init_noise=True,
     ).images
 
     # 6. Save outputs
     toc = time.time()
-    output_dir = TEST_DIR / "outputs"
-    utils.clear_dir(output_dir)
     for i, image in enumerate(output_frame_list):
         image[0].save(output_dir.joinpath(f"output_{i}.png"))
     utils.make_gif([image[0] for image in output_frame_list], output_dir.joinpath("output.gif"), fps=8)

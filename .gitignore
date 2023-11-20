@@ -12,3 +12,4 @@ source/tmp
 .cache/
 sample/
 .env
+draft*.py

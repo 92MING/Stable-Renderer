@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import tqdm
 import time
 import os
+import concurrent.futures as cf
 from torch.multiprocessing import Pool
 from PIL import Image
 from packaging import version
@@ -25,11 +26,11 @@ from diffusers.configuration_utils import FrozenDict
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.utils import deprecate, logging
 from transformers import CLIPTextModel, CLIPTokenizer
+from .overlap import OverlapAlgorithm, Overlap, ResizeOverlap, VAEOverlap
 from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, preprocess_image
 from ..data_classes.correspondenceMap import CorrespondenceMap
 from .. import log_utils as logu
 from ..utils import save_latents
-from .overlap import OverlapAlgorithm, Overlap, ResizeOverlap, VAEOverlap
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -614,18 +615,14 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         do_img2img = images is not None
         do_inpainting = masks is not None
         do_controlnet = control_images is not None
-        do_overlapping = correspondence_map is not None and overlap_algorithm is not None
+        do_overlapping = correspondence_map is not None
 
         num_images = len(images) if do_img2img else 0
         num_masks = len(masks) if do_inpainting else 0
         num_control_images = len(control_images) if do_controlnet else 0
-        num_frames = max(num_images, num_masks, num_control_images)
+        num_frames = max(num_images, num_masks, num_control_images, 1)
 
-        logu.debug(f"Do Image2Image: {do_img2img}")
-        logu.debug(f"Do Inpainting: {do_inpainting}")
-        logu.debug(f"Do ControlNet: {do_controlnet}")
-        logu.debug(f"Do Overlapping: {do_overlapping}")
-        logu.debug(f"Number of frames: {num_frames}")
+        logu.info(f"Number of frames: {num_frames} | Do Image2Image: {do_img2img} | Do Inpainting: {do_inpainting} | Do ControlNet: {do_controlnet} | Do Overlapping: {do_overlapping}")
 
         # 1. Align format for control guidance
         controlnet = self.controlnet._orig_mod if is_compiled_module(self.controlnet) else self.controlnet
@@ -778,10 +775,6 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
         # 9. Prepare latent variables
         if do_img2img or do_controlnet:
-            num_frames = len(images) if do_img2img else 0
-            if do_controlnet:
-                num_frames = max(num_frames, len(control_images))
-
             latents_seq, init_latents_orig_seq, noise_seq = self.prepare_latents(
                 images,
                 latent_timestep,
@@ -798,8 +791,9 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 same_init_latents=same_init_latents,
                 same_init_noise=same_init_noise,
             )
+
         else:
-            num_frames = 0
+            # Text2img
             latents_seq, init_latents_orig_seq, noise_seq = self.prepare_latents(
                 None,
                 latent_timestep,
@@ -814,6 +808,17 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 latents,
                 num_frames=num_frames,
                 same_init_latents=same_init_latents,
+                same_init_noise=same_init_noise,
+            )
+
+        # Generate init_latents_proper_seq if needed
+        if do_img2img:
+            init_latents_proper_seq = []
+            for i, t in enumerate(timesteps):
+                init_latents_proper_seq.append(self.scheduler.add_noise(init_latents_orig_seq[0], noise_seq[0], torch.tensor([t])))
+            save_latents(
+                i=-1, t=-1, latents=init_latents_proper_seq,
+                save_dir=os.path.join(callback_kwargs.get('save_dir', '.'), 'init_latents_proper_seq'),
             )
 
         # 10. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
@@ -833,18 +838,19 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
         # Init noise
         save_latents(
-            i=0,
-            t=0,
+            i=-1,
+            t=-1,
             latents=latents_seq,
+            save_dir=os.path.join(callback_kwargs.get('save_dir', '.'), 'init_latents_seq'),
             prefix="init",
-            **callback_kwargs,
+            decoder=callback_kwargs.get('decoder', 'vae-approx'),
+            vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
         )
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for step, t in enumerate(timesteps):
-                # zero value
                 if do_controlnet:
-                    if isinstance(controlnet_keep[step], list):
+                    if isinstance(controlnet_conditioning_scale, list):
                         cond_scale = [c * s for c, s in zip(controlnet_conditioning_scale, controlnet_keep[step])]
                     else:
                         controlnet_cond_scale = controlnet_conditioning_scale
@@ -852,7 +858,9 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                             controlnet_cond_scale = controlnet_cond_scale[0]
                         cond_scale = controlnet_cond_scale * controlnet_keep[step]
 
-                for frame_idx in tqdm.tqdm(range(num_frames), desc="Denoising", leave=False):
+                noise_pred_uncond_seq = []
+
+                for frame_idx in tqdm.tqdm(range(num_frames), desc="Denoising", leave=False) if num_frames > 1 else range(num_frames):
                     latents_frame = latents_seq[frame_idx]
 
                     # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
@@ -905,6 +913,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                         noise_pred_uncond, noise_pred_cond = noise_pred.chunk(2)
                         noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
                         noise_pred = rescale_noise_cfg(noise_pred, noise_pred_cond, guidance_rescale=guidance_rescale)
+                        noise_pred_uncond_seq.append(noise_pred_uncond)
 
                     # compute the previous noisy sample x_t -> x_t-1
                     latents_frame = self.scheduler.step(noise_pred, t, latents_frame, **extra_step_kwargs, return_dict=False)[0]
@@ -949,11 +958,14 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                     except Exception as e:
                         logu.error(f"{e}, latent not saved")
 
-                    latents_seq = overlap_algorithm.__call__(
+                    latents_seq = overlap(
                         latents_seq,
                         corr_map=correspondence_map,
+                        pipe=self,
                         step=step,
                         timestep=t,
+                        init_latents_orig_seq=init_latents_orig_seq,
+                        noise_seq=noise_pred_uncond_seq
                     )
 
                     try:
@@ -977,7 +989,11 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                     progress_bar.update()
                     if step % callback_steps == 0:
                         if callback is not None:
-                            callback(step, t, latents_seq, **callback_kwargs)
+                            callback(
+                                step, t, latents_seq,
+                                vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None,
+                                **callback_kwargs
+                            )
                         if is_cancelled_callback is not None and is_cancelled_callback():
                             return None
 
@@ -1009,6 +1025,18 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
 
         return StableDiffusionPipelineOutput(images=images, nsfw_content_detected=None)
 
+    def _encode(self, image, generator: torch.Generator = None):
+        generator = generator or torch.Generator().manual_seed(42)
+        latent_dist = self.vae.encode(image).latent_dist
+        latents = latent_dist.sample(generator=generator)
+        # latents = self.vae.config.scaling_factor * latents
+        return latents
+
+    def _decode(self, latents):
+        # latents = 1 / self.vae.config.scaling_factor * latents
+        image = self.vae.decode(latents).sample
+        return image
+
 
 def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
     """
@@ -1022,3 +1050,157 @@ def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
     # mix with the original results from guidance by factor guidance_rescale to avoid "plain looking" images
     noise_cfg = guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg
     return noise_cfg
+
+
+def overlap(
+    frame_seq: List[torch.Tensor],
+    corr_map: CorrespondenceMap,
+    pipe: StableDiffusionImg2VideoPipeline,
+    interpolate_mode: str = 'bilinear',
+    step: int = None,
+    timestep: int = None,
+    init_latents_orig_seq: List[torch.Tensor] = None,
+    noise_seq: List[torch.Tensor] = None,
+    **kwargs
+):
+    """
+    Do overlapping with resizing the latents list to the size of the correspondence map.
+    :param latents_seq: A list of frame latents. Each element is a tensor of shape [B, C, H, W].
+    :param corr_map: correspondence map
+    :param step: current inference step
+    :param timestep: current inference timestep
+    :return: A list of overlapped frame latents.
+    """
+
+    # Schedule
+    alpha = schedule(step, timestep, 'constant', 1)  # The higher, the more overlap
+    beta = schedule(step, timestep, 'constant', 0.5)  # The higher, the closer to the base color
+    gamma = schedule(step, timestep, 'cosine', alpha_start=0.175, alpha_end=0.05)  # The strength of the extra noise
+    logu.info(f"Alpha: {alpha} | Beta: {beta} | Gamma: {gamma} | Timestep: {timestep:.2f}")
+    one_minus_alpha = 1 - alpha
+    one_minus_beta = 1 - beta
+    if alpha == 0:
+        return frame_seq
+
+    num_frames = len(frame_seq)
+    device = frame_seq[0].device
+    dtype = frame_seq[0].dtype
+    map_w, map_h = corr_map.size
+    batch_size, channels, frame_h, frame_w = frame_seq[0].shape
+    align_corners = False if interpolate_mode in ['linear', 'bilinear', 'bicubic', 'trilinear'] else None  # Do not change
+
+    # Upscale: (frame_w, frame_h) -> (map_w, map_h)
+    up_frame_seq = [F.interpolate(frm_lat, size=(map_h, map_w), mode=interpolate_mode, align_corners=align_corners) for frm_lat in frame_seq]
+    # up_frame_seq = [pipe._decode(frm_lat) for frm_lat in tqdm.tqdm(frame_seq, desc='VAE Upscale', leave=True)]
+    assert up_frame_seq[0].shape[2:] == (map_h, map_w), f"frame shape {up_frame_seq[0].shape[2:]} does not match corr_map shape {(map_h, map_w)}"
+    if beta > 0 and init_latents_orig_seq:
+        up_proper_latents_seq = [pipe.scheduler.add_noise(pp_lat, noise, torch.tensor([t])) for pp_lat, noise in zip(init_latents_orig_seq, noise_seq)]
+        up_proper_latents_seq = [F.interpolate(pp_lat, size=(map_h, map_w), mode=interpolate_mode, align_corners=align_corners).to(device) for pp_lat in up_proper_latents_seq]
+
+    overlap_seq = torch.stack(up_frame_seq, dim=0)  # [T, B, C, H, W]
+    mask_seq = torch.zeros((num_frames, batch_size, channels, map_h, map_w), dtype=torch.uint8, device=device)  # [T, 1, H, W]
+
+    logu.info(f"Frame: {frame_seq[0].device} | Overlap: {overlap_seq.device} | Mask: {mask_seq.device}")
+
+    # Progress bar
+    tic = time.time()
+    progress_total = len(corr_map.Map)
+    progress_slice = progress_total // 100
+    pbar = tqdm.tqdm(total=100, desc='Overlap', unit='%', leave=False)
+
+    for v_i, v_info in enumerate(corr_map.Map.values()):
+        len_info = len(v_info)
+        if len_info == 1:
+            pos, t = v_info[0]
+            h, w = pos
+            mask_seq[t, :, :, h, w] = 1
+        else:
+            for i in range(len_info):
+                value = 0
+                count = 0
+                pos_self, t_self = v_info[i]
+                h_self, w_self = pos_self
+                for j in range(len_info):
+                    pos_other, t_other = v_info[j]
+                    h_other, w_other = pos_other
+                    distance = abs(t_self - t_other)
+                    weight = 1  # Average overlapping
+                    # weight = numpy.exp(-distance)  # Exponential decay
+                    # weight = 1 / (distance + 1)  # Linear decay
+                    # weight = 1 / (distance ** 2 + 1)  # Quadratic decay
+                    value += overlap_seq[t_other, :, :, h_other, w_other] * weight
+                    count += weight
+
+                ovlp = overlap_seq[t_self, :, :, h_self, w_self]
+                if alpha > 0:  # Do overlap
+                    ovlp = alpha * (value / count) + one_minus_alpha * ovlp
+                if beta > 0 and init_latents_orig_seq:  # Mix base color
+                    pos, t = v_info[0]
+                    h_bc, w_bc = pos
+                    base_color = up_proper_latents_seq[t][:, :, h_bc, w_bc]  # Select the first appearance as the base color
+                    ovlp = beta * base_color + one_minus_beta * ovlp
+
+                overlap_seq[t_self, :, :, h_self, w_self] = ovlp
+                mask_seq[t_self, :, :, h_self, w_self] = 1
+
+        pbar.update(1) if v_i % progress_slice == 0 else ...
+
+    pbar.close()
+
+    overlap_seq = [ovlp for ovlp in overlap_seq]  # To list
+
+    toc = time.time()
+    logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame")
+
+    # Downscale: (map_w, map_h) -> (frame_w, frame_h)
+    overlap_seq = [F.interpolate(ovlp, size=(frame_h, frame_w), mode=interpolate_mode, align_corners=align_corners) for ovlp in overlap_seq]
+    # for i in tqdm.tqdm(range(num_frames), desc='VAE Downscale', leave=False):
+    #     overlap_seq[i] = pipe._encode(overlap_seq[i])
+    mask_seq = [F.interpolate(mask, size=(frame_h, frame_w), mode='nearest') for mask in mask_seq]
+
+    logu.info(f"Mask rate: {[mask.sum() / mask.numel() for mask in mask_seq]}")
+
+    # Add extra noise
+    if noise_seq and gamma > 0:
+        logu.info(f"Add extra noise with gamma={gamma}")
+        latent_timestep = torch.Tensor([timestep])
+        overlap_seq = [mask * (gamma * pipe.scheduler.add_noise(ovlp, noise, latent_timestep) + (1 - gamma) * ovlp) + (1 - mask) * ovlp
+                       for ovlp, mask, noise in zip(overlap_seq, mask_seq, noise_seq)]
+
+    # Mix with original frame latents (e.g. background, ...)
+    overlap_seq = [torch.where(mask != 0, ovlp, frame) for frame, ovlp, mask in zip(frame_seq, overlap_seq, mask_seq)]
+
+    return overlap_seq
+
+
+def schedule(
+    step: int,
+    timestep: int,
+    schedule_type: str,
+    alpha_start: float,
+    alpha_end: float = None,
+    start_step: int = 0,
+    end_step: int = 1000,
+    every_step: int = 1,
+    start_timestep: int = 1000,
+    end_timestep: int = 0,
+    **kwargs,
+):
+    r"""
+    Return parameters (e.g. alpha etc.) for overlap algorithm.
+    """
+    if step < start_step or step > end_step or step % every_step != 0 or timestep > start_timestep or timestep < end_timestep:
+        return 0  # 0 means no overlap
+    t = 1 - (timestep / 1000)  # Increase from 0 to 1
+    if schedule_type == "constant":
+        alpha = alpha_start
+    elif schedule_type == "linear":
+        alpha = alpha_start + (alpha_end - alpha_start) * t
+    elif schedule_type == "cosine":
+        alpha = alpha_start + (alpha_end - alpha_start) * (1 - torch.cos(t * torch.pi)) / 2
+    elif schedule_type == "exponential":
+        alpha = alpha_start * (alpha_end / alpha_start) ** t
+    else:
+        raise TypeError(f"Alpha schedule type `{schedule_type}` is not supported")
+
+    return alpha

@@ -2,6 +2,7 @@ import re
 import cv2
 import os
 import numpy
+import time
 import torch
 import tqdm
 import json
@@ -35,6 +36,29 @@ def list_frames(frame_dir, return_type: type = Path):
     elif return_type == Image.Image:
         frame_list = [Image.open(frame).convert('RGB') for frame in frame_list]
     return frame_list
+
+
+def smart_path(filepath_pattern: str):
+    r"""
+    Replace the following placeholders in the filename:
+        - %date%: current time in the format of %Y-%m-%d
+        - %time%: current time in the format of %H-%M-%S
+    :param filename: The filename to replace.
+    """
+    return_type = type(filepath_pattern)
+    filepath_pattern = str(filepath_pattern)
+    filepath_pattern = filepath_pattern.replace('%date%', time.strftime("%Y-%m-%d", time.localtime()))
+    filepath_pattern = filepath_pattern.replace('%time%', time.strftime("%H-%M-%S", time.localtime()))
+    filepath_pattern = filepath_pattern.replace('%datetime%', time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime()))
+    if '%increment%' in filepath_pattern:
+        i = 1
+        fp = filepath_pattern.replace('%increment%', str(i))
+        while os.path.exists(fp):
+            i += 1
+            fp = filepath_pattern.replace('%increment%', str(i))
+        filepath_pattern = fp
+    assert not os.path.exists(filepath_pattern), f"File already exists: {filepath_pattern}"
+    return return_type(filepath_pattern)
 
 
 def open_images(img_path_lst):
@@ -147,15 +171,15 @@ def save_latents(i, t, latents, save_dir, prefix='latents', postfix: str = '', d
     if isinstance(latents, list):
         image = [decode_func(lat, **decode_kwargs) for lat in latents]
         if save_timestep:
-            [image.save(save_dir / f'{prefix}s{i:02d}_t{int(t):03d}_f{j:02d}{postfix}.png') for j, image in enumerate(image)]
+            [img.save(save_dir / f'{prefix}s{i:02d}_t{int(t):03d}_f{j:02d}{postfix}.png') for j, img in enumerate(image)]
         else:
-            [image.save(save_dir / f'{prefix}s{i:02d}_f{j:02d}{postfix}.png') for j, image in enumerate(image)]
+            [img.save(save_dir / f'{prefix}s{i:02d}_f{j:02d}{postfix}.png') for j, img in enumerate(image)]
     else:
         image = decode_func(latents, **decode_kwargs)
         image.save(save_dir / f'{prefix}_s{i:02d}.png')
 
 
-def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, n: int = 8, division: int = 1, stem: str = 'corr_map'):
+def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, frames=None, num_frames: int = 8, division: int = 1, stem: str = 'corr_map', trace_vertex: bool = False, **kwargs):
     r"""
     Visualize the correspondence map and save it to the given directory.
     :param corr_map: The correspondence map.
@@ -167,11 +191,13 @@ def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, n: 
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     clear_dir(save_dir)
-    n = min(n, corr_map.num_frames)
+    num_frames = min(num_frames, corr_map.num_frames) if not frames else len(frames)
     frame_w = corr_map.width // division
     frame_h = corr_map.height // division
-    image_seq = [numpy.zeros((frame_h, frame_w, 3), dtype=numpy.uint8) for _ in range(n)]
-    ovlp_count = [numpy.zeros((frame_h, frame_w), dtype=numpy.uint8) for _ in range(n)]
+    channels = 3 if not frames else frames[0].shape[-1]
+    image_seq = [numpy.zeros((frame_h, frame_w, channels), dtype=numpy.uint8) for _ in range(num_frames)]
+    info_count = {}
+    ovlp_seq = [numpy.zeros((frame_h, frame_w), dtype=numpy.uint8) for _ in range(num_frames)]
 
     color_red = numpy.array([255, 0, 0], dtype=numpy.uint8)
     color_green = numpy.array([0, 255, 0], dtype=numpy.uint8)
@@ -179,32 +205,39 @@ def save_corr_map_visualization(corr_map: CorrespondenceMap, save_dir: Path, n: 
     color_white = numpy.array([255, 255, 255], dtype=numpy.uint8)
     color_cyan = numpy.array([0, 255, 255], dtype=numpy.uint8)
 
-    trace_id = list(corr_map.Map.keys())[0]
-    for v_id, v_info in corr_map.Map.items():
-        info_len = len([t for t_pix_pos, t in v_info if t < n])
-        for i in range(info_len):
-            t_pix_pos, t = v_info[i]
-            h, w = t_pix_pos
-            if t < n and h >= 0 and h < frame_h and w >= 0 and w < frame_w:
-                ovlp_count[t][h, w] += 1
+    progress_total = len(corr_map.Map.values())
+    progress_slice = progress_total // 100
+    pbar = tqdm.tqdm(total=100, desc='Overlap', unit='%', leave=False)
+
+    trace_id = max(list(corr_map.Map.keys()), key=lambda x: len(corr_map.Map[x]))
+    for v_i, v_info in enumerate(corr_map.Map.values()):
+        info_len = len(v_info)
+        info_count[v_i] = info_len
+        for pos, t in v_info:
+            h, w = pos
+            ovlp_seq[t][h, w] = info_len
+            if frames:
+                image_seq[t][h, w, :] = frames[t][h, w, :]
+            else:
+                ovlp_ratio = ovlp_seq[t][h, w] / num_frames
+                image_seq[t][h, w, :] = color_green * ovlp_ratio + color_white * (1 - ovlp_ratio)
+
+        pbar.update(1) if v_i % progress_slice == 0 else ...
 
     # Trace vertex
-    for i in range(n):
-        for h in range(frame_h):
-            for w in range(frame_w):
-                if ovlp_count[i][h, w] > 0:
-                    ovlp_ratio = ovlp_count[i][h, w] / n
-                    image_seq[i][h, w, :] = color_red * ovlp_ratio + color_white * (1 - ovlp_ratio)
-
-    for t_pix_pos, t in corr_map.Map[trace_id]:
-        h, w = t_pix_pos
-        if t < n and h >= 0 and h < frame_h and w >= 0 and w < frame_w:
-            image_seq[t][h-3:h+3, w-3:w+3, :] = color_green
+    if trace_vertex:
+        for pos, t in corr_map.Map[trace_id]:
+            h, w = pos
+            if t < num_frames and h >= 0 and h < frame_h and w >= 0 and w < frame_w:
+                image_seq[t][h-10:h+10, w-10:w+10, :] = color_red
 
     images = [Image.fromarray(image) for image in image_seq]
     [image.save(save_dir / f"{stem}_{i:02d}.png") for i, image in enumerate(images)]
     make_gif(images, save_dir / f'{stem}.gif', fps=10)
 
+    logu.info(f"Average overlapping rate: {sum(info_count.values()) / len(info_count) / num_frames * 100:.2f}%")
+
+    pbar.close()
     logu.success(f"CM visualization saved to {save_dir}")
 
 

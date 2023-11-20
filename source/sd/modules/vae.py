@@ -65,4 +65,4 @@ def decode(latents, vae: AutoencoderKL, return_pil: bool = False) -> list:
     image = image.cpu().permute(0, 2, 3, 1).float().numpy()
     if return_pil:
         image = numpy_to_pil(image)
-    return image
+    return image[0]

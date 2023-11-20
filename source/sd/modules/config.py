@@ -14,6 +14,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else
                       "cpu")
 dtype = torch.float16
 
+output_dir = Path(PROJECT_DIR) / 'output' / 'sd'
 test_dir = sd_root / 'test'
 model_dir = sd_root / 'models'
 sd_model_path = model_dir / "Stable-Diffusion/dreamshaper_8.safetensors"
