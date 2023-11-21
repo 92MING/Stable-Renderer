@@ -18,23 +18,30 @@ def value_interpolation(
         x: float,
         start: float,
         end: float, 
+        power: float = 1.0,
         interpolate_function: Literal["constant", "linear", "cosine", "exponential"] = "constant"):
     r"""
     Interpolate value from `start` to `end` with `interpolate_function`, controled by `x`
     :param x: float between 0 to 1 to control interpolation
     :param start: start value
     :param end: end value
+    :param power: control the curveness of interpolation, 
+        A `power` greater than 1 will make the interpolation slower at the start and faster at the end;
+        while a `power` less than 1 will make the interpolation faster at the start and slower at the end.
+        the value should be non-negative
     :param interpolate_function: function used for interpolation
     """ 
+    assert x >= 0 and x <= 1
+    assert power >= 0
 
     if interpolate_function == "constant":
         return start
     elif interpolate_function == "linear":
-        return start + (end - start) * x
+        return start + (end - start) * x ** power
     elif interpolate_function == "cosine":
-        return start + (end - start) * (1 + torch.cos(x * torch.pi)) / 2
+        return start + (end - start) * (1 + torch.cos(x ** power * torch.pi)) / 2
     elif interpolate_function == "exponential":
-        return start * (end / start) ** x
+        return start * (end / start) ** (x ** power)
     else:
         raise NotImplementedError
 

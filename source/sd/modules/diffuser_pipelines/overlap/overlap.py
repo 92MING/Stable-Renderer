@@ -36,7 +36,7 @@ class Overlap(OverlapAlgorithm):
 
     def __init__(
         self,
-        scheduler: Scheduler,
+        scheduler: 'Scheduler',
         weight_option: Literal['average', 'adjacent', 'optical_flow', 'frame_distance', 'view_normal'] = 'adjacent',
         max_workers: int = 1,
         verbose: bool = True
@@ -289,8 +289,14 @@ class Overlap(OverlapAlgorithm):
         
         len_1_vertex_count = 0
         tic = time.time()
+        progress_total = len(corr_map)
+        progress_slice = progress_total // 100
+        pbar = tqdm.tqdm(total=100, desc='Overlap', unit='%', leave=False)
+        
         if self.max_workers == 1:
-            for v_info in corr_map.Map.values():
+            for v_i, v_info in enumerate(corr_map.Map.values()):
+                pbar.update(1) if v_i % progress_slice == 0 else ...
+
                 if len(v_info) == 1:
                     # no value changes when vertex appear once only
                     len_1_vertex_count += 1
@@ -340,10 +346,18 @@ class Overlap(OverlapAlgorithm):
         logu.info(f"Scheduler: alpha: {alpha} | timestep: {timestep:.2f}")
 
         tic = time.time()
+        progress_total = len(corr_map)
+        progress_slice = progress_total // 100
+        pbar = tqdm.tqdm(total=100, desc='Overlap', unit='%', leave=False)
+        len_1_vertex_count = 0
+
         if self.max_workers == 1:
-            for v_info in corr_map.Map.values():
+            for v_i, v_info in enumerate(corr_map.Map.values()):
+                pbar.update(1) if v_i % progress_slice == 0 else ...
+
                 if len(v_info) == 1:
                     # no value changes when vertex appear once only
+                    len_1_vertex_count += 1
                     continue
                 pos_all, t_all = zip(*v_info)
                 h_all, w_all = zip(*pos_all)
@@ -363,7 +377,7 @@ class Overlap(OverlapAlgorithm):
             raise NotImplementedError(f"Multiprocessing not implemented")
 
         toc = time.time()
-        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc - tic) / num_frames:.2f}s per frame") if self.verbose else ...
+        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc - tic) / num_frames:.2f}s per frame | Vertex appeared once: {len_1_vertex_count / len(corr_map) * 100:.2f}%") if self.verbose else ...
 
         return overlap_seq
     
@@ -392,13 +406,18 @@ class Overlap(OverlapAlgorithm):
         logu.info(f"Scheduler: alpha: {alpha} | timestep: {timestep:.2f}")
 
         tic = time.time()
-        progress_total = len(corr_map.Map)
+        progress_total = len(corr_map)
         progress_slice = progress_total // 100
         pbar = tqdm.tqdm(total=100, desc='Overlap', unit='%', leave=False)
+        len_1_vertex_count = 0
+
         if self.max_workers == 1:
             for v_i, v_info in enumerate(corr_map.Map.values()):
+                pbar.update(1) if v_i % progress_slice == 0 else ...
+
                 if len(v_info) == 1:
                     # no value changes when vertex appear once only
+                    len_1_vertex_count += 1
                     continue
                 pos_all, t_all = zip(*v_info)
                 h_all, w_all = zip(*pos_all)
@@ -410,12 +429,11 @@ class Overlap(OverlapAlgorithm):
                 weighted_latent_seq = weighted_latent_seq.reshape_as(latent_seq)
                 overlap_seq[t_all, :, :, h_all, w_all] = alpha * weighted_latent_seq + one_minus_alpha * latent_seq
                 
-                pbar.update(1) if v_i % progress_slice == 0 else ...
         else:
             raise NotImplementedError(f"Multiprocessing not implemented")
 
         toc = time.time()
-        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc - tic) / num_frames:.2f}s per frame") if self.verbose else ...
+        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc - tic) / num_frames:.2f}s per frame | Vertex appeared once: {len_1_vertex_count / len(corr_map) * 100:.2f}%") if self.verbose else ...
 
         return list(overlap_seq.unbind(dim=0))
 
