@@ -13,21 +13,23 @@ class RuntimeManager(Manager):
     def __init__(self,
                  fixedUpdateMaxFPS=60,
                  ambientLightCol:Color=Color.CLEAR,
-                 ambientLightIntensity:float=0.1,
-                 maxLightNum:int=256,):
+                 ambientLightIntensity:float=0.2,
+                 ):
         super().__init__()
-        self._maxLightNum = maxLightNum
+
         self._fixedUpdateMaxFPS = fixedUpdateMaxFPS
         self._minFixedUpdateDeltaTime = 1.0 / fixedUpdateMaxFPS
         self._frame_count = 0
         self._deltaTime = 0.0
         self._startTime = 0.0
         self._firstFrame = True
+
         self._ambientLightCol = ambientLightCol
         self._ambientLightIntensity = ambientLightIntensity
-        self._init_matrix_UBO()
-        self._init_light_UBO()
 
+        self._init_matrix_UBO()
+
+    # region UBO:Matrix
     def _init_matrix_UBO(self):
         self._UBO_modelMatrix = glm.mat4(1.0)
         self._UBO_viewMatrix = glm.mat4(1.0)
@@ -53,19 +55,12 @@ class RuntimeManager(Manager):
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 6 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV_IT))  # MV_IT
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_pos))  # camera world position
         gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + glm.sizeof(glm.vec3), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_dir))  # camera world forward direction
-    def _init_light_UBO(self):
-        self._lightUBO = gl.glGenBuffers(1)
-        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self._lightUBO)
-        gl.glBufferData(gl.GL_UNIFORM_BUFFER, 2 * glm.sizeof(glm.vec4), None, gl.GL_DYNAMIC_DRAW)
-        gl.glBindBufferBase(gl.GL_UNIFORM_BUFFER, self.LightUBO_BindingPoint, self._lightUBO)
-
-    # region UBO:Matrix
     @property
     def MatrixUBO(self):
         return self._matrixUBO
     @property
     def MatrixUBO_BindingPoint(self):
-        return 0
+        return self.engine.CreateOrGet_UBO_BindingPoint("MatrixUBO")
     @property
     def UBO_ModelMatrix(self):
         return self._UBO_modelMatrix
@@ -137,16 +132,42 @@ class RuntimeManager(Manager):
                            glm.value_ptr(self._UBO_MVP_IT))
     # endregion
 
+    # region UBO: Engine
+    def _init_engine_UBO(self):
+        self._engineUBO = gl.glGenBuffers(1)
+        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self._engineUBO)
+        gl.glBufferData(gl.GL_UNIFORM_BUFFER, glm.sizeof(glm.ivec2), None, gl.GL_DYNAMIC_DRAW)
+        gl.glBindBufferBase(gl.GL_UNIFORM_BUFFER, self.EngineUBO_BindingPoint, self._engineUBO)
+    def Update_UBO_ScreenSize(self):
+        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self._engineUBO)
+        self._screenSize = glm.ivec2(*self.engine.WindowSize())  # for saving pointer
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 0, glm.sizeof(glm.ivec2), glm.value_ptr(self._screenSize))
+    @property
+    def EngineUBO(self):
+        return self._engineUBO
+    @property
+    def EngineUBO_BindingPoint(self):
+        return self.engine.CreateOrGet_UBO_BindingPoint('EngineUBO')
+    # endregion
+
     # region UBO: Light
+    def _init_light_UBO(self):
+        self._lightUBO = gl.glGenBuffers(1)
+        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self._lightUBO)
+        from runtime.components.light import Light
+        for subLightType in Light.AllLightSubTypes():
+            pass
+        gl.glBufferData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + 2 * glm.sizeof(glm.vec3), None, gl.GL_DYNAMIC_DRAW)
+        gl.glBindBufferBase(gl.GL_UNIFORM_BUFFER, self.MatrixUBO_BindingPoint, self._lightUBO)
+    @property
+    def LightUBO(self):
+        return self._lightUBO
     @property
     def LightUBO_BindingPoint(self):
-        return 1
+        return self.engine.CreateOrGet_UBO_BindingPoint('LightUBO')
     # endregion
 
     # region Properties
-    @property
-    def MaxLightNum(self):
-        return self._maxLightNum
     @property
     def AmbientLightCol(self):
         '''The color of ambient light.'''

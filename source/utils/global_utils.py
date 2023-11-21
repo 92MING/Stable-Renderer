@@ -43,11 +43,12 @@ def GetEnv(key: str, default = None, type = str):
 
 def SetGlobalValue(key: str, value: object):
     _globalValues[key] = value
-def GetGlobalValue(key: str):
+def GetGlobalValue(key: str, default=None):
+    '''return default if key not found.'''
     try:
         return _globalValues[key]
     except KeyError:
-        return None
+        return default
 def RemoveGlobalValue(key: str):
     try:
         _globalValues.pop(key)

@@ -48,10 +48,11 @@ class Config:
     start_timestep = 0
     end_timestep = 1000
     max_workers = 1
+    start_corr = 600
+    end_corr = 1000
 
 if __name__ == '__main__':
     config = Config()
-    torch.backends.cudnn.enabled = False
 
     # 1. Load pipeline
     pipe: StableDiffusionImg2VideoPipeline = load_pipe(
@@ -110,7 +111,7 @@ if __name__ == '__main__':
         generator=generator,
         guidance_scale=7,
         controlnet_conditioning_scale=1.0,
-        add_predicted_noise=False, 
+        add_predicted_noise=False,
         correspondence_map=corr_map,
         overlap_algorithm=scheduled_overlap_algorithm,
         callback_kwargs={'save_dir': "./sample"},

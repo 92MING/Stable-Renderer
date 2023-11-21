@@ -46,6 +46,7 @@ class Engine:
                  threadPoolSize=6,):
 
         self.AcceptedPrint('Engine is initializing...')
+        self._UBO_Binding_Points = {}
         self._debug = debug
         self._scene = scene
         if winTitle is not None:
@@ -129,6 +130,11 @@ class Engine:
     def SDManager(self)->SDManager:
         return self._sdManager
     # endregion
+
+    def CreateOrGet_UBO_BindingPoint(self, name):
+        if name not in self._UBO_Binding_Points:
+            self._UBO_Binding_Points[name] = len(self._UBO_Binding_Points)
+        return self._UBO_Binding_Points[name]
 
     # region overridable methods
     def beforePrepare(self):...

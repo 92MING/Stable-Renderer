@@ -1,4 +1,4 @@
-import os.path
+import glm
 from .manager import Manager
 from .runtimeManager import RuntimeManager
 from utils.data_struct.event import AutoSortTask
@@ -26,7 +26,7 @@ class RenderManager(Manager):
                  brightness=1.0,
                  contrast=1.0,):
         super().__init__()
-        self.engine._renderManager = self
+        self.engine._renderManager = self # special case, because renderManager is created before engine's assignment
         self._renderTasks = AutoSortTask()
         self._deferRenderTasks = AutoSortTask()
         self._postProcessTasks = AutoSortTask()
@@ -35,6 +35,7 @@ class RenderManager(Manager):
         self._init_post_process(enableHDR=enableHDR, enableGammaCorrection=enableGammaCorrection, gamma=gamma, exposure=exposure,
                                 saturation=saturation, brightness=brightness, contrast=contrast)
         self._init_quad()  # quad for post-processing
+        self._init_light()
 
     # region private
     def _init_opengl(self):
@@ -52,54 +53,66 @@ class RenderManager(Manager):
         winWidth, winHeight = self.engine.WindowManager.WindowSize
 
         # color data (rgb)
-        self._gBuffer_color_and_depth = gl.glGenTextures(1)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_color_and_depth)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA16F, winWidth, winHeight, 0, gl.GL_RGBA, gl.GL_FLOAT, None)  # color is rgb8f
+        self._gBuffer_color_and_depth_texture = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_color_and_depth_texture)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA16F, winWidth, winHeight, 0, gl.GL_RGBA, gl.GL_FLOAT, None)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
 
-        # position data (x, y, z)
-        self._gBuffer_pos = gl.glGenTextures(1)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_pos)
+        # position data (x, y, z) (world space)
+        self._gBuffer_pos_texture = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_pos_texture)
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB16F, winWidth, winHeight, 0, gl.GL_RGB, gl.GL_FLOAT, None)  # position is rgb16f
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
 
-        # normal data (x, y, z)
-        self._gBuffer_normal = gl.glGenTextures(1)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_normal)
+        # normal data (x, y, z). (in view space)
+        self._gBuffer_normal_texture = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_normal_texture)
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, winWidth, winHeight, 0, gl.GL_RGB, gl.GL_FLOAT, None)  # normal is rgb8f
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
 
+        # normal data (x, y, z). (in world space)
+        self._gBuffer_normal_world_texture = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_normal_world_texture)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, winWidth, winHeight, 0, gl.GL_RGB, gl.GL_FLOAT, None)  # world normal is rgb8f
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+
         # identifier
-        self._gBuffer_id = gl.glGenTextures(1)  # ivec3 id = (objID, uv_Xcoord, uv_Ycoord)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_id)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB16I, winWidth, winHeight, 0, gl.GL_RGB_INTEGER, gl.GL_INT, None)  # id is rgb16i
+        self._gBuffer_id_texture = gl.glGenTextures(1)  # ivec4 id = (objID, material ID, uv x coord, uv y coord)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_id_texture)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA16I, winWidth, winHeight, 0, gl.GL_RGBA_INTEGER, gl.GL_INT, None)  # id is rgb16i
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
 
         # depth data
-        self._gBuffer_depth = gl.glGenTextures(1)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_depth)
+        self._gBuffer_depth_texture = gl.glGenTextures(1)
+        '''this depth texture is only for storing depth data, not for sampling. Thus it will not be output or used in shader'''
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_depth_texture)
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_DEPTH_COMPONENT, winWidth, winHeight, 0, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT, None)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
 
         self._gBuffer = gl.glGenFramebuffers(1)
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._gBuffer)
-        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self._gBuffer_color_and_depth, 0)
-        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT1, gl.GL_TEXTURE_2D, self._gBuffer_pos, 0)
-        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT2, gl.GL_TEXTURE_2D, self._gBuffer_normal, 0)
-        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT3, gl.GL_TEXTURE_2D, self._gBuffer_id, 0)
-        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_DEPTH_ATTACHMENT, gl.GL_TEXTURE_2D, self._gBuffer_depth, 0)
-        gl.glDrawBuffers(4, [gl.GL_COLOR_ATTACHMENT0, gl.GL_COLOR_ATTACHMENT1, gl.GL_COLOR_ATTACHMENT2, gl.GL_COLOR_ATTACHMENT3])
+        self.BindFrameBuffer(self._gBuffer)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self._gBuffer_color_and_depth_texture, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT1, gl.GL_TEXTURE_2D, self._gBuffer_pos_texture, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT2, gl.GL_TEXTURE_2D, self._gBuffer_normal_texture, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT3, gl.GL_TEXTURE_2D, self._gBuffer_normal_world_texture, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT4, gl.GL_TEXTURE_2D, self._gBuffer_id_texture, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_DEPTH_ATTACHMENT, gl.GL_TEXTURE_2D, self._gBuffer_depth_texture, 0)
+        gl.glDrawBuffers(5, [gl.GL_COLOR_ATTACHMENT0, gl.GL_COLOR_ATTACHMENT1, gl.GL_COLOR_ATTACHMENT2, gl.GL_COLOR_ATTACHMENT3, gl.GL_COLOR_ATTACHMENT4])
         if (gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER) != gl.GL_FRAMEBUFFER_COMPLETE):
             raise Exception("G-Framebuffer is not complete! Some error occured.")
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+        self.BindFrameBuffer(0)
         self._default_defer_render_task = self._wrapDeferRenderTask()
 
     def _init_post_process(self, enableHDR=True, enableGammaCorrection=True, gamma=2.2, exposure=1.0, saturation=1.0, brightness=1.0, contrast=1.0):
+        '''
+        initialize post process stuff, e.g. shader, framebuffer, etc.
+        '''
         self._enableHDR = enableHDR
         self._enableGammaCorrection = enableGammaCorrection
         self._gamma = gamma
@@ -118,7 +131,7 @@ class RenderManager(Manager):
             self._default_post_process_shader.setUniform("saturation", self._saturation)
             self._default_post_process_shader.setUniform("brightness", self._brightness)
             self._default_post_process_shader.setUniform("contrast", self._contrast)
-            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)  # output to screen
+            self.BindFrameBuffer(0) # output to screen
             gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
             self.DrawScreen()
         self._final_draw = self._wrapPostProcessTask(self._default_post_process_shader, final_draw)
@@ -144,11 +157,22 @@ class RenderManager(Manager):
         self._currentScreenTexture = self._screenTexture_1
 
         self._postProcessFBO = gl.glGenFramebuffers(1)
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._postProcessFBO)
+        self.BindFrameBuffer(self._postProcessFBO)
         gl.glDrawBuffer(gl.GL_COLOR_ATTACHMENT0)
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+        self.BindFrameBuffer(0)
+
+    def _init_light(self):
+        self._lightShadowFBO = gl.glGenFramebuffers(1)
+        self.BindFrameBuffer(self._lightShadowFBO)
+        gl.glDrawBuffer(gl.GL_NONE)
+        gl.glReadBuffer(gl.GL_NONE)
+        self.BindFrameBuffer(0)
+        self._lightShadowMaps = {} # (size, dimension) -> texture id
 
     def _init_quad(self):
+        '''
+        initialize stuff about drawing the screen quad
+        '''
         self._quadVertices = np.array([
             -1.0, 1.0, 0.0, 0.0, 1.0,  # Left Top
             -1.0, -1.0, 0.0, 0.0, 0.0,  # Left Bottom
@@ -174,7 +198,6 @@ class RenderManager(Manager):
         gl.glEnableVertexAttribArray(1)
         gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, 5 * 4, ctypes.c_void_p(3 * 4))
         gl.glBindVertexArray(0)
-
     def _draw_quad(self):
         '''draw the screen quad with the current screen texture'''
         gl.glBindVertexArray(self._quadVAO)
@@ -196,7 +219,6 @@ class RenderManager(Manager):
                 shader.setUniform("objID", mesh.meshID)
             task() if task is not None else mesh.draw()
         return wrap
-
     def _wrapDeferRenderTask(self, shader=None, task=None):
         '''
         This wrapper help to bind the gBuffer textures to the shader(color, pos, normal, etc.).
@@ -215,13 +237,12 @@ class RenderManager(Manager):
 
         def wrap():
             shader.useProgram()
-            _bindGtexture(0, self._gBuffer_color_and_depth, "gColor_and_depth")
-            _bindGtexture(1, self._gBuffer_pos, "gPos")
-            _bindGtexture(2, self._gBuffer_normal, "gNormal")
-            _bindGtexture(3, self._gBuffer_id, "g_UV_and_ID")
+            _bindGtexture(0, self._gBuffer_color_and_depth_texture, "gColor_and_depth")
+            _bindGtexture(1, self._gBuffer_pos_texture, "gPos")
+            _bindGtexture(2, self._gBuffer_normal_texture, "gNormal")
+            _bindGtexture(3, self._gBuffer_id_texture, "g_UV_and_ID")
             task() if task is not None else self._draw_quad()
         return wrap
-
     def _wrapPostProcessTask(self, shader: Shader, task: callable = None):
         '''
         This wrapper helps to bind the last screen texture to the shader and draw a quad(if task is not given).
@@ -264,79 +285,72 @@ class RenderManager(Manager):
         return data
     # endregion
 
+    # region opengl
+    @property
+    def CurrentFrameBuffer(self):
+        return gl.glGetIntegerv(gl.GL_FRAMEBUFFER_BINDING)
+
+    def BindFrameBuffer(self, frameBuffer: int):
+        if frameBuffer == self.CurrentFrameBuffer:
+            return
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, frameBuffer)
+    # endregion
+
     # region post process
     @property
     def EnableGammaCorrection(self):
         return self._enableGammaCorrection
-
     @EnableGammaCorrection.setter
     def EnableGammaCorrection(self, value: bool):
         self._enableGammaCorrection = value
-
     @property
     def EnableHDR(self):
         return self._enableHDR
-
     @EnableHDR.setter
     def EnableHDR(self, value: bool):
         self._enableHDR = value
-
     @property
     def Gamma(self):
         return self._gamma
-
     @Gamma.setter
     def Gamma(self, value: float):
         self._gamma = value
-
     @property
     def Exposure(self):
         return self._exposure
-
     @Exposure.setter
     def Exposure(self, value: float):
         self._exposure = value
-
     @property
     def Saturation(self):
         return self._saturation
-
     @Saturation.setter
     def Saturation(self, value: float):
         self._saturation = value
-
     @property
     def Contrast(self):
         return self._contrast
-
     @Contrast.setter
     def Contrast(self, value: float):
         self._contrast = value
-
     @property
     def Brightness(self):
         return self._brightness
-
     @Brightness.setter
     def Brightness(self, value: float):
         self._brightness = value
-
     @property
     def CurrentScreenTexture(self):
         return self._currentScreenTexture
-
     @property
     def LastScreenTexture(self):
         return self._screenTexture_1 if self._currentScreenTexture == self._screenTexture_2 else self._screenTexture_2
-
     @property
     def NextScreenTexture(self):
         '''equal to LastScreenTexture'''
         return self.LastScreenTexture
-
     def SwapScreenTexture(self):
         self._currentScreenTexture = self._screenTexture_1 if self._currentScreenTexture == self._screenTexture_2 else self._screenTexture_2
-
     def DrawScreen(self):
         self._draw_quad()
     # endregion
@@ -384,41 +398,87 @@ class RenderManager(Manager):
             self._postProcessTasks.addTask(wrap, order)
     # endregion
 
+    # region lights
+    @property
+    def LightShadowFBO(self):
+        return self._lightShadowFBO
+    def _createLightShadowMap(self, size, dimension):
+        assert dimension in (2, 3)
+        if dimension is not None:
+            return  # already created
+        shadowMapID = gl.glGenTextures(1)
+        if dimension == 2:
+            gl.glBindTexture(gl.GL_TEXTURE_2D, shadowMapID)
+            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_DEPTH_COMPONENT, size, size, 0,
+                            gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT, None)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_BORDER)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_BORDER)
+            gl.glTexParameterfv(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_BORDER_COLOR, glm.vec4(1.0))
+            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        else:
+            gl.glBindTexture(gl.GL_TEXTURE_CUBE_MAP, shadowMapID)
+            for i in range(6):
+                gl.glTexImage2D(gl.GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, gl.GL_DEPTH_COMPONENT, size, size, 0, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT, None)
+            gl.glTexParameteri(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+            gl.glTexParameteri(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+            gl.glTexParameteri(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+            gl.glTexParameteri(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+            gl.glTexParameteri(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_WRAP_R, gl.GL_CLAMP_TO_EDGE)
+            gl.glBindTexture(gl.GL_TEXTURE_CUBE_MAP, 0)
+        return shadowMapID
+    def GetLightShadowMap(self, size:int, dimension:int = 2):
+        '''return a shadow map texture id. If map with the same size and dimension doesn't exist, create one.'''
+        assert dimension in (2, 3) and size > 0
+        if (size, dimension) not in self._lightShadowMaps:
+            self._lightShadowMaps[(size, dimension)] = self._createLightShadowMap(size, dimension)
+        return self._lightShadowMaps[(size, dimension)]
+    def DeleteLightShadowMap(self, mapID):
+        for key, id in self._lightShadowMaps.items():
+            if id == mapID:
+                self._lightShadowMaps.pop(key)
+                gl.glDeleteTextures(1, [id])
+                break
+    # endregion
+
     # region run
     def _onFrameRun_debug(self):
         # direct output when debug mode
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+        self.BindFrameBuffer(0)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         self._excute_render_task()
     def _onFrameRun(self):
         # normal render
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._gBuffer)
+        self.BindFrameBuffer(self._gBuffer)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         self._excute_render_task()  # depth test will be enabled in this function
 
         # region SD
         # output data to SD
-        colorAndDepthData = self._getTextureImg(self._gBuffer_color_and_depth, gl.GL_RGBA, gl.GL_FLOAT, np.float32, 4, flipY=True)
+        colorAndDepthData = self._getTextureImg(self._gBuffer_color_and_depth_texture, gl.GL_RGBA, gl.GL_FLOAT, np.float32, 4, flipY=True)
         colorData = colorAndDepthData[:, :, :3]
         depthData = colorAndDepthData[:, :, 3]
-        posData = self._getTextureImg(self._gBuffer_pos, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3, flipY=True)
-        normalData = self._getTextureImg(self._gBuffer_normal, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3, flipY=True)
-        idData = self._getTextureImg(self._gBuffer_id, gl.GL_RGB_INTEGER, gl.GL_INT, np.int32, 3, flipY=True)
+        posData = self._getTextureImg(self._gBuffer_pos_texture, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3, flipY=True)
+        normalData = self._getTextureImg(self._gBuffer_normal_texture, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3, flipY=True)
+        worldNormalData = self._getTextureImg(self._gBuffer_normal_world_texture, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3, flipY=True)
+        idData = self._getTextureImg(self._gBuffer_id_texture, gl.GL_RGBA_INTEGER, gl.GL_INT, np.int32, 4, flipY=True)
 
         if self.engine.SDManager.ShouldOutputFrame:
             sdManager = self.engine.SDManager
             sdManager.OutputMap('color', colorData)
-            sdManager.OutputMap('pos', posData)
             sdManager.OutputMap('normal', normalData)
-            sdManager.OuputIdMap(idData)
+            sdManager.OutputData('id', idData)
+            sdManager.OutputData('pos', posData)
+            sdManager.OutputData('worldNormal', worldNormalData)
             sdManager.OutputDepthMap(depthData)
 
         # Code run normally until here, pending fixes for idData
         # get data back from SD
-        # TODO: load the color data back to self._gBuffer_color_and_depth texture, i.e. colorData = ...
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_color_and_depth)
+        # TODO: load the color data back to self._gBuffer_color_and_depth_texture texture, i.e. colorData = ...
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._gBuffer_color_and_depth_texture)
         gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, self.engine.WindowManager.WindowWidth, self.engine.WindowManager.WindowHeight, gl.GL_RGB, gl.GL_FLOAT, colorData.tobytes())
         # TODO: update color pixel datas, i.e. pixelDict[id] = (oldColor *a + newColor *b), newColor = inverse light intensity of the pixel color
         # TODO: replace corresponding color pixel datas with color data from color dict
@@ -426,7 +486,7 @@ class RenderManager(Manager):
 
         # defer render: normal light effect apply
         gl.glDisable(gl.GL_DEPTH_TEST)
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._postProcessFBO)  # output to post process FBO
+        self.BindFrameBuffer(self._postProcessFBO)  # output to post process FBO
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self.CurrentScreenTexture, 0)
         if len(self._deferRenderTasks) > 0:
             self._deferRenderTasks.execute(ignoreErr=True)  # apply light effect here

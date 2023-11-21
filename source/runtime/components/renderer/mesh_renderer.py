@@ -28,13 +28,13 @@ class MeshRenderer(Renderer):
             if mtl_mat_data.materialName in matDict:
                 self.addMaterial(matDict[mtl_mat_data.materialName], duplicateCheck=False)
             else:
-                self.addMaterial(Material.Debug_Material(pinkMode=True), duplicateCheck=False) # the part without material will be pink
+                self.addMaterial(Material.Debug_Material(), duplicateCheck=False) # the part without material will be pink
 
     def _renderTask(self, modelM, material, mesh, slot=None):
         '''For submitting to RenderManager'''
         self.engine.RuntimeManager.UpdateUBO_ModelMatrix(modelM)
         material.use()
-        mesh.draw(slot=slot)
+        mesh.draw(group=slot)
     def _draw(self):
         '''Drawing task will be deferred to RenderManager'''
         for i, mat in enumerate(self.materials):

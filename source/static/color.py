@@ -1,9 +1,8 @@
 import glm
-from typing import cast
 
 def _getVal(val):
     if isinstance(val, int):
-        val = val / 255.0
+        val = val / 255
     if isinstance(val, float):
         val = max(0.0, min(1.0, val))
     else:
@@ -19,11 +18,16 @@ class _classproperty:
 class Color(glm.vec4):
 
     def __new__(cls, r, g, b, a=1.0):
-        r = _getVal(r)
-        g = _getVal(g)
-        b = _getVal(b)
-        a = _getVal(a)
-        return cast(Color, glm.vec4(r, g, b, a))
+        return super().__new__(cls, r, g, b, a)
+    def __init__(self, r, g, b, a=1.0):
+        super().__init__(r, g, b, a)
+        self._tidy_rgba()
+
+    def _tidy_rgba(self):
+        self.r = _getVal(self.r)
+        self.g = _getVal(self.g)
+        self.b = _getVal(self.b)
+        self.a = _getVal(self.a)
 
     # region constants
     @_classproperty
@@ -88,39 +92,37 @@ class Color(glm.vec4):
         return cls._CLEAR
     # endregion
 
-    def _tidy_rgba(self):
-        self.r = _getVal(self.r)
-        self.g = _getVal(self.g)
-        self.b = _getVal(self.b)
-        self.a = _getVal(self.a)
-
+    # region properties
     @property
-    def r(self):
+    def r(self)->float:
         return self[0]
     @r.setter
     def r(self, val):
         self[0] = _getVal(val)
     @property
-    def g(self):
+    def g(self)->float:
         return self[1]
     @g.setter
     def g(self, val):
         self[1] = _getVal(val)
     @property
-    def b(self):
+    def b(self)->float:
         return self[2]
     @b.setter
     def b(self, val):
         self[2] = _getVal(val)
     @property
-    def a(self):
+    def a(self)->float:
         return self[3]
     @a.setter
     def a(self, val):
         self[3] = _getVal(val)
     @property
-    def rgb(self):
+    def rgb(self)->glm.vec3:
         return self.xyz
+    # endregion
+
+    # region hsv
     def hsv(self):
         '''return hsv color in glm.vec4(h, s, v, a)'''
         h, s, v = 0.0, 0.0, 0.0
@@ -165,5 +167,17 @@ class Color(glm.vec4):
                 self.r, self.g, self.b = v, p, q
         self.a = alpha
         self._tidy_rgba()
+    # endregion
+
+    def darken(self, amount: float=0.2):
+        self.r = max(0, self.r - amount)
+        self.g = max(0, self.g - amount)
+        self.b = max(0, self.b - amount)
+        return self
+    def lighten(self, amount: float=0.2):
+        self.r = min(1, self.r + amount)
+        self.g = min(1, self.g + amount)
+        self.b = min(1, self.b + amount)
+        return self
 
 __all__ = ['Color']

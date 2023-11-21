@@ -1,5 +1,4 @@
 import os.path
-
 from static.enums import PrimitiveType
 import OpenGL.GL as gl
 import numpy as np
@@ -33,6 +32,8 @@ class Mesh_OBJ(Mesh):
         '''The material here is not the same as the material in the engine, but MTL_Data'''
 
     def clear(self):
+        if self.vao is not None:
+            return
         super().clear()
         if self.vbo is not None:
             buffer = np.array([self.vbo], dtype=np.uint32)
@@ -117,9 +118,9 @@ class Mesh_OBJ(Mesh):
         self.totalFaceCount = faceCount
 
     def sendToGPU(self):
-        super().sendToGPU()
         if self.vao is not None:
             return # already sent to GPU
+        super().sendToGPU()
         if len(self.vertices) == 0:
             raise Exception('No data to send to GPU')
         self.vao = gl.glGenVertexArrays(1)
@@ -143,7 +144,7 @@ class Mesh_OBJ(Mesh):
         gl.glEnableVertexAttribArray(0)
         gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, stride, None)
 
-        # normal6
+        # normal
         if self.has_normals: # if there is no normal data, then no need to send
             gl.glEnableVertexAttribArray(1)
             gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(3 * 4))
@@ -152,7 +153,7 @@ class Mesh_OBJ(Mesh):
             gl.glEnableVertexAttribArray(2)
             gl.glVertexAttribPointer(2, 2, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p((3 + self.has_normals * 3) * 4))
 
-    def draw(self, slot:int=None):
+    def draw(self, group:int=None):
         '''Material.use() must be called before calling this function'''
         if len(self.vertices) == 0:
             raise Exception('No data to draw')
@@ -160,12 +161,12 @@ class Mesh_OBJ(Mesh):
             raise Exception('Data is not sent to GPU')
         gl.glBindVertexArray(self.vao)
 
-        if len(self.materials) == 0 or slot is None: # no material
+        if len(self.materials) == 0 or group is None: # no material
             gl.glDrawArrays(self.drawMode.value, 0, self.totalFaceCount * self.vertexCountPerFace)
         else:
-            if slot >= len(self.materials):
+            if group >= len(self.materials):
                 return # incorrect material slot
-            mat = self.materials[slot]
+            mat = self.materials[group]
             gl.glDrawArrays(self.drawMode.value, mat.fromFaceIndex * self.vertexCountPerFace, mat.faceConut * self.vertexCountPerFace)
 
 

@@ -86,6 +86,7 @@ class WindowManager(Manager):
     def SetWindowSize(self, width, height):
         self._size = (width, height)
         glfw.set_window_size(self._window, *self._size)
+        self.engine.RuntimeManager.Update_UBO_ScreenSize() # update UBO data
     @property
     def WindowWidth(self):
         return self._size[0]

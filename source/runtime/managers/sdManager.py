@@ -86,6 +86,22 @@ class SDManager(Manager):
     # endregion
 
     # region ouput maps
+    def _outputData(self, name:str, data:np.ndarray):
+        '''output data in .npy format directly'''
+        outputPath = os.path.join(self._outputPath, name)
+        if not os.path.exists(outputPath):
+            os.makedirs(outputPath)
+        data.dump(os.path.join(outputPath, f'{name}_{self.engine.RuntimeManager.FrameCount}.npy'))
+    def OutputData(self, name:str, data:np.ndarray):
+        '''
+        output data in .npy format directly
+        :param name: name of the map and folder. will be created if not exist. will be changed to lower case
+        :param data: data to output
+        :return:
+        '''
+        if self._needOutputMaps:
+            self._threadPool.submit(self._outputData, name, data)
+
     def _outputMap(self, name:str, mapData:np.ndarray, multi255=True, outputFormat='RGB', dataType=np.uint8):
         '''this method will be pass to thread pool for saving maps asynchronously'''
         if multi255:
@@ -108,15 +124,6 @@ class SDManager(Manager):
         '''
         if self._needOutputMaps:
             self._threadPool.submit(self._outputMap, name, mapData, multi255, outputFormat, dataType)
-    def _ouputIdMap(self, mapData:np.ndarray):
-        outputPath = os.path.join(self._outputPath, 'id')
-        if not os.path.exists(outputPath):
-            os.makedirs(outputPath)
-        mapData.dump(os.path.join(outputPath, f'id_{self.engine.RuntimeManager.FrameCount}.npy'))
-    def OuputIdMap(self, mapData:np.ndarray):
-        '''output method especially for id map'''
-        if self._needOutputMaps:
-            self._threadPool.submit(self._ouputIdMap, mapData)
     def _outputDepthMap(self, mapData:np.ndarray):
         depth_data_max, depth_data_min = np.max(mapData), np.min(mapData)
         depth_data_normalized = (mapData - depth_data_min) / (depth_data_max - depth_data_min)
