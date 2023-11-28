@@ -1,7 +1,11 @@
+import os
 from typing import List, Literal
+
+import cv2
+from PIL import Image
+
 from torchvision.transforms import ToTensor
 import torch.nn.functional as F
-from PIL import Image
 import torch
 
 
@@ -92,3 +96,23 @@ def build_view_normal_map(normal_images: List[Image.Image], view_vector: torch.T
     # Compute dot product between normal_map and view_vector
     view_normal_map = torch.abs(torch.einsum("thwdc, thwdc -> thwd", normal_map, view_vector)) # [T, H, W, 1]
     return view_normal_map
+
+
+def generate_canny_images(
+    images_path: str,
+    output_path: str,
+    canny_lower_threshold: int = 100,
+    canny_upper_threshold: int = 200
+):
+    assert os.path.exists(images_path)
+    image_file_extensions = (".jpg", '.jpeg', '.png')
+    
+    os.makedirs(output_path, exist_ok=True)
+    files = os.listdir(images_path)
+
+    for file in files:
+        if file.endswith(image_file_extensions):
+            image = cv2.imread(os.path.join(images_path, file))
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            edges = cv2.Canny(gray, canny_lower_threshold, canny_upper_threshold)
+            cv2.imwrite(os.path.join(output_path, file), edges)
