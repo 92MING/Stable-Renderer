@@ -1,7 +1,11 @@
+import os
 from typing import List, Literal
+
+import cv2
+from PIL import Image
+
 from torchvision.transforms import ToTensor
 import torch.nn.functional as F
-from PIL import Image
 import torch
 
 
@@ -18,23 +22,30 @@ def value_interpolation(
         x: float,
         start: float,
         end: float, 
+        power: float = 1.0,
         interpolate_function: Literal["constant", "linear", "cosine", "exponential"] = "constant"):
     r"""
     Interpolate value from `start` to `end` with `interpolate_function`, controled by `x`
     :param x: float between 0 to 1 to control interpolation
     :param start: start value
     :param end: end value
+    :param power: control the curveness of interpolation, 
+        A `power` greater than 1 will make the interpolation slower at the start and faster at the end;
+        while a `power` less than 1 will make the interpolation faster at the start and slower at the end.
+        the value should be non-negative
     :param interpolate_function: function used for interpolation
     """ 
+    assert x >= 0 and x <= 1
+    assert power >= 0
 
     if interpolate_function == "constant":
         return start
     elif interpolate_function == "linear":
-        return start + (end - start) * x
+        return start + (end - start) * x ** power
     elif interpolate_function == "cosine":
-        return start + (end - start) * (1 + torch.cos(x * torch.pi)) / 2
+        return start + (end - start) * (1 + torch.cos(x ** power * torch.pi)) / 2
     elif interpolate_function == "exponential":
-        return start * (end / start) ** x
+        return start * (end / start) ** (x ** power)
     else:
         raise NotImplementedError
 
@@ -85,3 +96,23 @@ def build_view_normal_map(normal_images: List[Image.Image], view_vector: torch.T
     # Compute dot product between normal_map and view_vector
     view_normal_map = torch.abs(torch.einsum("thwdc, thwdc -> thwd", normal_map, view_vector)) # [T, H, W, 1]
     return view_normal_map
+
+
+def generate_canny_images(
+    images_path: str,
+    output_path: str,
+    canny_lower_threshold: int = 100,
+    canny_upper_threshold: int = 200
+):
+    assert os.path.exists(images_path)
+    image_file_extensions = (".jpg", '.jpeg', '.png')
+    
+    os.makedirs(output_path, exist_ok=True)
+    files = os.listdir(images_path)
+
+    for file in files:
+        if file.endswith(image_file_extensions):
+            image = cv2.imread(os.path.join(images_path, file))
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            edges = cv2.Canny(gray, canny_lower_threshold, canny_upper_threshold)
+            cv2.imwrite(os.path.join(output_path, file), edges)

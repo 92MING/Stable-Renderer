@@ -5,6 +5,7 @@ from sd.modules.data_classes import CorrespondenceMap, ImageFrames
 from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
 from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
 from sd.modules.diffuser_pipelines.overlap import Overlap, ResizeOverlap, VAEOverlap, Scheduler
+from sd.modules.diffuser_pipelines.overlap.scheduler import StartEndScheduler
 from sd.modules.diffuser_pipelines.overlap.utils import build_view_normal_map
 import sd.modules.log_utils as logu
 from diffusers import EulerAncestralDiscreteScheduler
@@ -38,12 +39,14 @@ class Config:
     height = GetEnv('DEFAULT_IMG_HEIGHT', 512, int)
     seed = GetEnv('DEFAULT_SEED', 1235, int)
     no_half = GetEnv('DEFAULT_NO_HALF', False, bool)
-    strength = 1
+    strength = 1.0
     # data preparation configs
-    num_frames = None
-    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-10-21_13")
+    num_frames = GetEnv('DEFAULT_NUM_FRAMES',16, int)
+    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-11-20_boat_512")
     # Overlap algorithm configs
-    alpha = 0.5
+    weight_option = 'frame_distance'
+    start_timestep = 0
+    end_timestep = 1000
     max_workers = 1
     start_corr = 600
     end_corr = 1000
@@ -67,16 +70,18 @@ if __name__ == '__main__':
     generator = torch.Generator(device=config.device).manual_seed(config.seed)
 
     # 2. Define overlap algorithm
-    scheduler = Scheduler(alpha_start=1, alpha_end=1, alpha_scheduler_type='constant')
-    scheduled_overlap_algorithm = ResizeOverlap(
-        scheduler=scheduler, weight_option='view_normal', max_workers=config.max_workers, interpolate_mode='nearest')
+    scheduler = Scheduler(alpha_start=1, alpha_end=0.2, power=1/2, alpha_scheduler_type='linear')
+    overlap_algorithm = ResizeOverlap(
+        scheduler=scheduler, weight_option=config.weight_option, max_workers=config.max_workers, interpolate_mode='nearest')
+    scheduled_overlap_algorithm = StartEndScheduler(
+        start_timestep=config.start_timestep, end_timestep=config.end_timestep, overlap=overlap_algorithm)
 
     # 3. Prepare data
     corr_map = CorrespondenceMap.from_existing_directory_numpy(
         os.path.join(config.frames_dir, 'id'),
         enable_strict_checking=False,
         num_frames=config.num_frames,
-        use_cache=False)
+        use_cache=True)
     images = ImageFrames.from_existing_directory(
         os.path.join(config.frames_dir, 'color'),
         num_frames=config.num_frames).Data
