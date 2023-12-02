@@ -34,4 +34,4 @@ if __name__ == '__main__':
     Sample.Run(enableGammaCorrection=True,
                debug=False,
                winSize=(512, 512),
-               needOutputMaps=False,)
+               needOutputMaps=True,)

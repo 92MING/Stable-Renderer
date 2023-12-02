@@ -2,49 +2,126 @@ import os
 from static.resourcesObj import ResourcesObj
 from utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
 import OpenGL.GL as gl
+from static.enums import PrimitiveType
 import numpy as np
+from typing import List
 import ctypes
 import math
 
 class Mesh(ResourcesObj):
     _BaseName = 'Mesh'
 
-    def __init__(self, name):
+    def __init__(self, name, keep_vertices:bool=False):
         super().__init__(name)
         currentID = GetOrAddGlobalValue('_MeshCount', 1) # 0 is reserved
         self._meshID = currentID # for corresponding map
         SetGlobalValue('_MeshCount', currentID+1)
+        self._keep_vertices = keep_vertices
+        self._has_normals = None # means unknown (cuz not yet loaded)
+        self._has_uvs = None # means unknown (cuz not yet loaded)
+        self._vertices = []
+        self._drawMode: PrimitiveType = None
+        self._vao = None
+        self._vbo = None
+        self._vertexCountPerFace = 0  # number of vertices per face
+        self._totalFaceCount = 0
 
+    # region properties
     @property
     def meshID(self):
+        '''MeshID is a unique ID for each mesh. It is used to identify the mesh. It is automatically generated when the mesh is created.'''
         return self._meshID
+    @property
+    def vertexCountPerFace(self):
+        '''number of vertices per face'''
+        return self._vertexCountPerFace
+    @property
+    def totalFaceCount(self):
+        return self._totalFaceCount
+    @property
+    def vao(self):
+        return self._vao
+    @property
+    def vbo(self):
+        return self._vbo
+    @property
+    def keep_vertices(self):
+        '''If keep vertices, the vertices data will be kept in memory(after send to GPU). Otherwise, they will be cleared.'''
+        return self._keep_vertices
+    @property
+    def has_normals(self):
+        if self._has_normals is None:
+            raise Exception('has_normals is unknown. Please load the mesh first.')
+        return self._has_normals
+    @property
+    def has_uvs(self):
+        if self._has_uvs is None:
+            raise Exception('has_uvs is unknown. Please load the mesh first.')
+        return self._has_uvs
+    @property
+    def vertices(self):
+        return self._vertices
+    @property
+    def drawMode(self):
+        return self._drawMode
+    # endregion
 
+    # region methods
     def load(self, path:str):
         '''Load data from file. Override this function to implement loading data from file'''
         raise NotImplementedError
     def draw(self, group:int=None):
         '''
         Draw the mesh. Override this function to implement drawing the mesh.
+        Make sure you have called Material.use() before calling this function. (So that textures & shaders are ready)
         :param group: the group of the mesh. Groups can have different materials.
         '''
-        raise NotImplementedError
+        # default implementation
+        if self.vao is None:
+            raise Exception('Data is not sent to GPU')
+        gl.glBindVertexArray(self.vao)
+        gl.glDrawArrays(self.drawMode.value, 0, self.totalFaceCount * self.vertexCountPerFace)
+    def _calculate_tangent(self, center_point_xyz, left_point_xyz, right_point_xyz, center_point_uv, left_point_uv, right_point_uv)->list[float]:
+        '''
+        calculate tangent.
+        :param center_point_xyz: center point of the triangle in 3D space
+        :param left_point_xyz: left point of the triangle in 3D space
+        :param right_point_xyz: right point of the triangle in 3D space
+        :param center_point_uv: center point of the triangle in UV space
+        :param left_point_uv: left point of the triangle in UV space
+        :param right_point_uv: right point of the triangle in UV space
+        :return: tangent, bitangent
+        '''
+        edge1 = np.array(left_point_xyz) - np.array(center_point_xyz)
+        edge2 = np.array(right_point_xyz) - np.array(center_point_xyz)
+        deltaUV1 = np.array(left_point_uv) - np.array(center_point_uv)
+        deltaUV2 = np.array(right_point_uv) - np.array(center_point_uv)
+
+        f = 1.0 / (deltaUV1[0] * deltaUV2[1] - deltaUV2[0] * deltaUV1[1])
+        tangent = [0, 0, 0]
+        tangent[0] = f * (deltaUV2[1] * edge1[0] - deltaUV1[1] * edge2[0])
+        tangent[1] = f * (deltaUV2[1] * edge1[1] - deltaUV1[1] * edge2[1])
+        tangent[2] = f * (deltaUV2[1] * edge1[2] - deltaUV1[1] * edge2[2])
+        return tangent
+    # endregion
 
     @classmethod
-    def Load(cls, path: str, name=None)->'Mesh':
+    def Load(cls, path: str, name=None, keep_vertices:bool=False)->'Mesh':
         '''
         load a mesh from file
         :param path: path of the mesh file
         :param name: name is used to identify the mesh. If not specified, the name will be the path of the mesh file
+        :param keep_vertices: if True, the vertices data will be kept in memory(after send to GPU). Otherwise, they will be cleared.
         :return: Mesh object
         '''
         path, name = cls._GetPathAndName(path, name)
         if '.' not in os.path.basename(path):
             raise ValueError('path must contain file extension')
         ext = path.split('.')[-1]
-        formatCls = cls.FindFormat(ext)
+        formatCls:'Mesh' = cls.FindFormat(ext)
         if formatCls is None:
             raise ValueError(f'unsupported mesh format: {ext}')
-        mesh = formatCls(name)
+        mesh = formatCls(name, keep_vertices)
         mesh.load(path)
         return mesh
 
@@ -82,26 +159,41 @@ class Mesh(ResourcesObj):
 
 # region basic shapes
 class _Mesh_Plane(Mesh):
+    _plane_vertices = None
+    '''For plane mesh, the vertices data is the same. So we can use the same data for all plane meshes.'''
+    @classmethod
+    def _GetPlaneVertices(cls):
+        if cls._plane_vertices is None:
+            cls._plane_vertices = [
+                -1, 0, -1, 0, 1, 0, 0, 0,
+                -1, 0, 1, 0, 1, 0, 0, 1,
+                1, 0, 1, 0, 1, 0, 1, 1,
+                1, 0, -1, 0, 1, 0, 1, 0
+            ]
+        return cls._plane_vertices
+
     def __new__(cls):
         return super().__new__(cls, '_Default_Plane_Mesh')
     def __init__(self):
-        super().__init__(self.name)
-        self.vao = None
-        self.vbo = None
-        self.vertices = [ # x, y, z, normal_x, normal_y, normal_z, u, v
-            -1, 0, -1, 0, 1, 0, 0, 0,
-            -1, 0, 1, 0, 1, 0, 0, 1,
-            1, 0, 1, 0, 1, 0, 1, 1,
-            1, 0, -1, 0, 1, 0, 1, 0
-        ]
+        super().__init__(self.name, keep_vertices=True)
+        self._vao = None
+        self._vbo = None
+        self._drawMode = PrimitiveType.TRIANGLE_FAN
+        self._vertexCountPerFace = 4
+        self._totalFaceCount = 1
+        self._has_normals = True
+        self._has_uvs = True
+    @property
+    def vertices(self):
+        return self._GetPlaneVertices()
     def sendToGPU(self):
         if self.vao is not None:
             return  # already sent to GPU
         super().sendToGPU()
-        self.vao = gl.glGenVertexArrays(1)
+        self._vao = gl.glGenVertexArrays(1)
         gl.glBindVertexArray(self.vao)
 
-        self.vbo = gl.glGenBuffers(1)
+        self._vbo = gl.glGenBuffers(1)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
         vertices_data = np.array(self.vertices, dtype=np.float32)
         gl.glBufferData(gl.GL_ARRAY_BUFFER, vertices_data.nbytes, vertices_data.data, gl.GL_STATIC_DRAW)
@@ -125,19 +217,23 @@ class _Mesh_Plane(Mesh):
         if self.vao is not None:
             gl.glDeleteVertexArrays(1, [self.vao])
             gl.glDeleteBuffers(1, [self.vbo])
-            self.vao = None
-            self.vbo = None
+            self._vao = None
+            self._vbo = None
 class _Mesh_Sphere(Mesh):
     def __new__(cls, segment:int):
         return super().__new__(cls, f'_Default_Sphere_Mesh_{segment}')
     def __init__(self, segment:int):
         super().__init__(self.name)
         self.segment = segment
-        self.vao = None
-        self.vbo = None
-        self.ebo = None
-        self.vertices = []
+        self._ebo = None
+        self._vertexCountPerFace = 3
+        self._drawMode = PrimitiveType.TRIANGLE_STRIP
         self._init_vertices(self.segment)
+        self._has_normals = True
+        self._has_uvs = True
+    @property
+    def ebo(self):
+        return self._ebo
     def _init_vertices(self, segment):
         for i in range(segment+1):
             for j in range(segment+1):
@@ -153,24 +249,20 @@ class _Mesh_Sphere(Mesh):
                 ])
 
         self.indices = []
-        oddRow = False
         for i in range(segment):
-            if not oddRow:
-                for j in range(segment):
-                    self.indices.append((i + 1) * (segment + 1) + j)
-                    self.indices.append(i * (segment + 1) + j)
-            else:
-                for j in range(segment, -1, -1):
-                    self.indices.append(i * (segment + 1) + j)
-                    self.indices.append((i + 1) * (segment + 1) + j)
+            for j in range(segment):
+                self.indices.append((i + 1) * (segment + 1) + j)
+                self.indices.append(i * (segment + 1) + j)
+        self._totalFaceCount = len(self.indices) - 2
+
     def sendToGPU(self):
         if self.vao is not None:
             return
         super().sendToGPU()
-        self.vao = gl.glGenVertexArrays(1)
+        self._vao = gl.glGenVertexArrays(1)
         gl.glBindVertexArray(self.vao)
 
-        self.vbo = gl.glGenBuffers(1)
+        self._vbo = gl.glGenBuffers(1)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
 
         vertices_data = np.array(self.vertices, dtype=np.float32)
@@ -187,7 +279,7 @@ class _Mesh_Sphere(Mesh):
         gl.glEnableVertexAttribArray(2)
         gl.glVertexAttribPointer(2, 2, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(6 * 4))
 
-        self.ebo = gl.glGenBuffers(1)
+        self._ebo = gl.glGenBuffers(1)
         gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.ebo)
         indices_data = np.array(self.indices, dtype=np.uint32)
         gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indices_data.nbytes, indices_data.data, gl.GL_STATIC_DRAW)
@@ -202,46 +294,68 @@ class _Mesh_Sphere(Mesh):
             gl.glDeleteVertexArrays(1, [self.vao])
             gl.glDeleteBuffers(1, [self.vbo])
             gl.glDeleteBuffers(1, [self.ebo])
-            self.vao = None
-            self.vbo = None
-            self.ebo = None
+            self._vao = None
+            self._vbo = None
+            self._ebo = None
 class _Mesh_Cube(Mesh):
+    _cube_vertices:List[float] = None
+    _cube_indices:List[int] = None
+    @classmethod
+    def _GetCubeVertices(cls)->List[float]:
+        if cls._cube_vertices is None:
+            cls._cube_vertices = [
+                # x, y, z, nx, ny, nz, u, v
+                -0.5, -0.5, -0.5, 0, 0, -1, 0, 0,
+                0.5, -0.5, -0.5, 0, 0, -1, 1, 0,
+                0.5, 0.5, -0.5, 0, 0, -1, 1, 1,
+                -0.5, 0.5, -0.5, 0, 0, -1, 0, 1,
+
+                -0.5, -0.5, 0.5, 0, 0, 1, 1, 0,
+                0.5, -0.5, 0.5, 0, 0, 1, 0, 0,
+                0.5, 0.5, 0.5, 0, 0, 1, 0, 1,
+                -0.5, 0.5, 0.5, 0, 0, 1, 1, 1,
+            ]
+        return cls._cube_vertices
+    @classmethod
+    def _GetCubeIndices(cls)->List[int]:
+        if cls._cube_indices is None:
+            cls._cube_indices = [
+                0, 2, 1, 2, 0, 3,
+                1, 6, 5, 6, 1, 2,
+                7, 5, 6, 5, 7, 4,
+                4, 3, 0, 3, 4, 7,
+                4, 1, 5, 1, 4, 0,
+                3, 6, 2, 6, 3, 7,
+            ]
+        return cls._cube_indices
+
     def __new__(cls):
         return super().__new__(cls, '_Default_Cube_Mesh')
     def __init__(self):
-        super().__init__(self.name)
-        self.vao = None
-        self.vbo = None
-        self.ebo = None
-        self.vertices = [
-            # x, y, z, nx, ny, nz, u, v
-            -0.5, -0.5, -0.5, 0, 0, -1, 0, 0,
-            0.5, -0.5, -0.5, 0, 0, -1, 1, 0,
-            0.5, 0.5, -0.5, 0, 0, -1, 1, 1,
-            -0.5, 0.5, -0.5, 0, 0, -1, 0, 1,
-
-            -0.5, -0.5, 0.5, 0, 0, 1, 1, 0,
-            0.5, -0.5, 0.5, 0, 0, 1, 0, 0,
-            0.5, 0.5, 0.5, 0, 0, 1, 0, 1,
-            -0.5, 0.5, 0.5, 0, 0, 1, 1, 1,
-        ]
-        self.indices = [
-            0, 2, 1, 2, 0, 3,
-            1, 6, 5, 6, 1, 2,
-            7, 5, 6, 5, 7, 4,
-            4, 3, 0, 3, 4, 7,
-            4, 1, 5, 1, 4, 0,
-            3, 6, 2, 6, 3, 7,
-        ] # 逆時針
-
+        super().__init__(self.name, keep_vertices=True)
+        self._drawMode = PrimitiveType.TRIANGLES
+        self._totalFaceCount = 12
+        self._vertexCountPerFace = 3
+        self._ebo = None
+        self._has_normals = True
+        self._has_uvs = True
+    @property
+    def vertices(self)->List[float]:
+        return self._GetCubeVertices()
+    @property
+    def indices(self)->List[int]:
+        return self._GetCubeIndices()
+    @property
+    def ebo(self):
+        return self._ebo
     def sendToGPU(self):
         if self.vao is not None:
             return
         super().sendToGPU()
-        self.vao = gl.glGenVertexArrays(1)
+        self._vao = gl.glGenVertexArrays(1)
         gl.glBindVertexArray(self.vao)
 
-        self.vbo = gl.glGenBuffers(1)
+        self._vbo = gl.glGenBuffers(1)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
 
         vertices_data = np.array(self.vertices, dtype=np.float32)
@@ -258,8 +372,8 @@ class _Mesh_Cube(Mesh):
         gl.glEnableVertexAttribArray(2)
         gl.glVertexAttribPointer(2, 2, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(6 * 4))
 
-        self.ebo = gl.glGenBuffers(1)
-        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.ebo)
+        self._ebo = gl.glGenBuffers(1)
+        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self._ebo)
         indices_data = np.array(self.indices, dtype=np.uint32)
         gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indices_data.nbytes, indices_data.data, gl.GL_STATIC_DRAW)
 
@@ -273,9 +387,9 @@ class _Mesh_Cube(Mesh):
             gl.glDeleteVertexArrays(1, [self.vao])
             gl.glDeleteBuffers(1, [self.vbo])
             gl.glDeleteBuffers(1, [self.ebo])
-            self.vao = None
-            self.vbo = None
-            self.ebo = None
+            self._vao = None
+            self._vbo = None
+            self._ebo = None
 # endregion
 
 __all__ = ['Mesh']

@@ -8,7 +8,7 @@ from sd.modules.diffuser_pipelines.overlap import Overlap, ResizeOverlap, VAEOve
 from sd.modules.diffuser_pipelines.overlap.scheduler import StartEndScheduler
 from sd.modules.diffuser_pipelines.overlap.utils import build_view_normal_map
 import sd.modules.log_utils as logu
-from diffusers import EulerAncestralDiscreteScheduler
+from diffusers import EulerAncestralDiscreteScheduler, LCMScheduler
 from sys import platform
 import torch
 import os
@@ -120,6 +120,6 @@ if __name__ == '__main__':
         # callback=utils.view_latents,
     ).images
 
-    # 4. Output 
+    # 4. Output
     output_flattened = [img_list[0] for img_list in output_frame_list]
     save_images_as_gif(images=output_flattened)
