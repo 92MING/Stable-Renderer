@@ -115,4 +115,12 @@ def generate_canny_images(
             image = cv2.imread(os.path.join(images_path, file))
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             edges = cv2.Canny(gray, canny_lower_threshold, canny_upper_threshold)
-            cv2.imwrite(os.path.join(output_path, file), edges)
+            cv2.imwrite(os.path.join(output_path, "canny_" + file), edges)
+
+
+if __name__ == "__main__":
+    root = "/research/d1/spc/ckwong1/document/Stable-Renderer/rendered_frames/2023-12-02_basketball_512"
+    generate_canny_images(
+        images_path=os.path.join(root, 'color'),
+        output_path=os.path.join(root, 'canny'),
+    )
