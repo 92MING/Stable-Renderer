@@ -14,8 +14,8 @@ layout (std140) uniform Matrices {
 };
 
 layout (location = 0) out vec4 outColorAndDepth; // (r, g, b, depth)
-layout (location = 1) out vec3 outPos; // global pos
-layout (location = 2) out vec3 outNormal; // normal (in view space)
+layout (location = 1) out vec3 outWorldPos; // global pos
+layout (location = 2) out vec3 outViewNormal; // normal (in view space)
 layout (location = 3) out vec3 outWorldNormal; // normal (in world space)
 layout (location = 4) out ivec4 outID;  // outID = (objID, material id, uv_Xcoord, uv_Ycoord)
 
@@ -27,10 +27,13 @@ uniform int hasNormalTex;
 uniform int objID;
 uniform int materialID;
 
+in vec3 modelPos;
 in vec3 worldPos;
-in vec3 worldNormal; // normal in world space
-in vec3 viewNormal; // normal in view space
-in vec2 vertexUV;
+in vec3 modelNormal;	// not normal from normal map!
+in vec3 worldNormal;	// not normal from normal map!
+in vec3 viewNormal;		// not normal from normal map!
+in vec2 uv;
+in vec3 modelTangent;
 
 void main() {
 
@@ -38,24 +41,28 @@ void main() {
 	if (hasDiffuseTex == 0)
 		outColorAndDepth = vec4(1.0, 0.0, 1.0, 1.0 - gl_FragCoord.z); // pink color means no texture
 	else{
-		vec3 outColor = texture(diffuseTex, vertexUV).rgb;
+		vec3 outColor = texture(diffuseTex, uv).rgb;
 		outColorAndDepth = vec4(outColor, 1.0 - gl_FragCoord.z);
 	}
 
 	// get position
-    outPos = worldPos;
+    outWorldPos = worldPos;
 
 	// get normal
-	if (hasNormalTex == 0){
-		outNormal = viewNormal;
+	if (hasNormalTex == 0){  // if no normal texture, use normal from mesh data
+		outViewNormal = viewNormal;
 		outWorldNormal = worldNormal;
 	}
 	else{
-		outNormal = normalize(MV_IT * vec4(texture(normalTex, vertexUV).rgb, 0.0)).xyz;
-		outWorldNormal = normalize(inverse(transpose(model)) * vec4(texture(normalTex, vertexUV).rgb, 0.0)).xyz;
+		vec3 bitangent = cross(modelNormal, modelTangent);
+		mat3 TBN = mat3(modelTangent, bitangent, modelNormal);
+		vec3 real_model_normal = normalize(texture(normalTex, uv).rgb * 2.0 - 1.0);
+		real_model_normal = normalize(TBN * real_model_normal);
+		outViewNormal = normalize((MV_IT * vec4(real_model_normal, 0.0)).xyz);
+		outWorldNormal = normalize((inverse(transpose(mat3(model))) * real_model_normal));
 	}
 
 	// get id
-	ivec2 uv = ivec2(vertexUV * ivec2(textureSize(diffuseTex, 0)));
+	ivec2 uv = ivec2(uv * ivec2(textureSize(diffuseTex, 0)));
 	outID = ivec4(objID, materialID, uv.x, uv.y);
 }
