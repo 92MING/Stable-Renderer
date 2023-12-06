@@ -53,9 +53,9 @@ if __name__ == '__main__':
             meshRenderer.load_MTL_Materials(mikuMaterials)
             miku.addComponent(AutoRotation)
 
-            plane = GameObject('plane', position=[0, 0, 0], scale=[1.5, 1.5, 1.5])
-            meshRenderer:MeshRenderer = plane.addComponent(MeshRenderer, mesh=Mesh.Plane())
-            meshRenderer.addMaterial(Material.Debug_Material(whiteMode=True))
+            #plane = GameObject('plane', position=[0, 0, 0], scale=[1.5, 1.5, 1.5])
+            #meshRenderer:MeshRenderer = plane.addComponent(MeshRenderer, mesh=Mesh.Plane())
+            #meshRenderer.addMaterial(Material.Debug_Material(whiteMode=True))
 
     Sample.Run(enableGammaCorrection=False,
                enableHDR=False,

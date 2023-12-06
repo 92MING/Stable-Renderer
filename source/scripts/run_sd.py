@@ -13,7 +13,7 @@ from sys import platform
 import torch
 import os
 from utils.global_utils import GetEnv
-from utils.path_utils import GIF_OUTPUT_DIR
+from utils.path_utils import GIF_OUTPUT_DIR, MAP_OUTPUT_DIR
 from datetime import datetime
 
 def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
@@ -22,6 +22,10 @@ def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
     path = os.path.join(GIF_OUTPUT_DIR, datetime.now().strftime(f"%Y-%m-%d_%H-%M_{output_fname}"))
     images[0].save(path, format="GIF", save_all=True, append_images=images[1:], loop=0)
     logu.success(f'[SUCCESS] Saved image sequence at {path}')
+if map_dir:=list(os.listdir(MAP_OUTPUT_DIR)):
+    Last_Map_Dir = os.path.abspath(os.path.join(MAP_OUTPUT_DIR, sorted(map_dir)[-1]))
+else:
+    Last_Map_Dir = None
 
 class Config:
     # pipeline init configs
@@ -41,7 +45,7 @@ class Config:
     strength = 1.0
     # data preparation configs
     num_frames = GetEnv('DEFAULT_NUM_FRAMES',16, int)
-    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-11-20_boat_512")
+    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', Last_Map_Dir)
     # Overlap algorithm configs
     weight_option = 'frame_distance'
     start_timestep = 0
