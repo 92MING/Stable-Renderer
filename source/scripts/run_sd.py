@@ -33,6 +33,7 @@ class Config:
     control_net_model_paths=[
         GetEnv('CONTROLNET_DEPTH_MODEL','lllyasviel/sd-controlnet-depth'),
         GetEnv('CONTROLNET_NORMAL_MODEL','lllyasviel/sd-controlnet-normal'),
+        GetEnv('CONTROLNET_CANNY_MODEL','lllyasviel/sd-controlnet-canny'),
     ]
     device = GetEnv('DEVICE', ('mps' if platform == 'darwin' else 'cuda'))
     # pipeline generation configs
@@ -48,11 +49,9 @@ class Config:
     frames_dir = GetEnv('DEFAULT_FRAME_INPUT', Last_Map_Dir)
     # Overlap algorithm configs
     weight_option = 'frame_distance'
-    start_timestep = 0
+    start_timestep = 500
     end_timestep = 1000
     max_workers = 1
-    start_corr = 600
-    end_corr = 1000
 
 if __name__ == '__main__':
     config = Config()
@@ -73,11 +72,12 @@ if __name__ == '__main__':
     generator = torch.Generator(device=config.device).manual_seed(config.seed)
 
     # 2. Define overlap algorithm
-    scheduler = Scheduler(alpha_start=1, alpha_end=0.2, power=1/2, alpha_scheduler_type='linear')
-    overlap_algorithm = ResizeOverlap(
+    scheduler = Scheduler(
+        start_timestep=config.start_timestep, end_timestep=config.end_timestep,
+        alpha_start=1, alpha_end=1, power=1, alpha_scheduler_type='linear')
+    scheduled_overlap_algorithm = ResizeOverlap(
         scheduler=scheduler, weight_option=config.weight_option, max_workers=config.max_workers, interpolate_mode='nearest')
-    scheduled_overlap_algorithm = StartEndScheduler(
-        start_timestep=config.start_timestep, end_timestep=config.end_timestep, overlap=overlap_algorithm)
+    
 
     # 3. Prepare data
     corr_map = CorrespondenceMap.from_existing_directory_numpy(
@@ -96,7 +96,11 @@ if __name__ == '__main__':
         os.path.join(config.frames_dir, 'normal'),
         num_frames=config.num_frames
     ).Data
-    controlnet_images = [[depth, normal] for depth, normal in zip(depth_images, normal_images)]
+    canny_images = ImageFrames.from_existing_directory(
+        os.path.join(config.frames_dir, 'canny'),
+        num_frames=config.num_frames
+    ).Data
+    controlnet_images = [[depth, normal, canny] for depth, normal, canny in zip(depth_images, normal_images, canny_images)]
 
     view_normal_map = build_view_normal_map(normal_images, torch.tensor([0,0,1]))
 
@@ -109,11 +113,11 @@ if __name__ == '__main__':
         control_images=controlnet_images,
         width=config.width,
         height=config.height,
-        num_inference_steps=5,
+        num_inference_steps=6,
         strength=config.strength,
         generator=generator,
         guidance_scale=7,
-        controlnet_conditioning_scale=1.0,
+        controlnet_conditioning_scale=0.8,
         add_predicted_noise=False,
         correspondence_map=corr_map,
         overlap_algorithm=scheduled_overlap_algorithm,
