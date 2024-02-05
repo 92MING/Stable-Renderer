@@ -45,7 +45,7 @@ class Config:
     num_frames = GetEnv('DEFAULT_NUM_FRAMES',16, int)
     frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-11-20_boat_512")
     # Overlap algorithm configs
-    weight_option = 'frame_distance'
+    weight_option = 'view_normal'
     start_timestep = 500
     end_timestep = 1000
     max_workers = 1
@@ -83,7 +83,7 @@ if __name__ == '__main__':
         num_frames=config.num_frames,
         use_cache=True)
     # corr_map.dropout_index(probability=0.3, seed=config.seed)
-    corr_map.dropout_in_rectangle(Rectangle((170, 168), (351, 297)), at_frame=0)
+    # corr_map.dropout_in_rectangle(Rectangle((170, 168), (351, 297)), at_frame=0)
 
     images = ImageFrames.from_existing_directory(
         os.path.join(config.frames_dir, 'color'),
