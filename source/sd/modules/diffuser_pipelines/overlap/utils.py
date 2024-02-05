@@ -1,7 +1,8 @@
 import os
-from typing import List, Literal
+from typing import List, Literal, Tuple
 
 import cv2
+import numpy as np
 from PIL import Image
 
 from torchvision.transforms import ToTensor
@@ -17,6 +18,7 @@ def overlap_rate(ovlp_seq: List[torch.Tensor], threshold: float = 0.0):
     num_zeros = torch.sum(torch.stack([torch.sum(abs(latents - threshold) <= 0) for latents in ovlp_seq]))
     num_nonzeros = torch.sum(torch.stack([torch.sum(abs(latents - threshold) > 0) for latents in ovlp_seq]))
     return num_nonzeros / (num_nonzeros + num_zeros)
+
 
 def value_interpolation(
         x: float,
@@ -48,6 +50,7 @@ def value_interpolation(
         return start * (end / start) ** (x ** power)
     else:
         raise NotImplementedError
+
 
 def build_view_normal_map(normal_images: List[Image.Image], view_vector: torch.Tensor, dtype=torch.float32) -> torch.Tensor:
     r"""
@@ -118,9 +121,30 @@ def generate_canny_images(
             cv2.imwrite(os.path.join(output_path, "canny_" + file), edges)
 
 
+def draw_rectangle(image: np.ndarray,
+                   top_left: Tuple[int, int],
+                   bottom_right: Tuple[int, int],
+                   color: Tuple[int, int, int], 
+                   thickness: int) -> np.ndarray:
+    """Wrapper for the cv2 draw tectangle function"""
+    return cv2.rectangle(image, top_left, bottom_right, color=color, thickness=thickness)
+
+
 if __name__ == "__main__":
-    root = "/research/d1/spc/ckwong1/document/Stable-Renderer/rendered_frames/2023-12-02_basketball_512"
-    generate_canny_images(
-        images_path=os.path.join(root, 'color'),
-        output_path=os.path.join(root, 'canny'),
-    )
+    def gen_canny_helper():
+        root = "/research/d1/spc/ckwong1/document/Stable-Renderer/rendered_frames/2023-12-02_basketball_512"
+        generate_canny_images(
+            images_path=os.path.join(root, 'color'),
+            output_path=os.path.join(root, 'canny'),
+        )
+    def draw_and_show_rectangle():
+        image_path = "/research/d1/spc/ckwong1/document/Stable-Renderer/output/gif/2024-02-04_02-47_output_0.gif"
+        images = Image.open(image_path)
+
+        static_image = np.asarray(images.convert('RGB'))
+
+        drawn_array = draw_rectangle(static_image, (170, 168), (351, 297), (0, 0, 255), 2)
+
+        drawn_image = Image.fromarray(drawn_array)
+        drawn_image.save(os.path.join(os.path.dirname(image_path), os.path.basename(image_path).replace(".gif", ".png")))
+    draw_and_show_rectangle()

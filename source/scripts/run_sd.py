@@ -1,13 +1,14 @@
 import sys, os
 sys.path.append(os.getcwd())
 
-from sd.modules.data_classes import CorrespondenceMap, ImageFrames
+from sd.modules.data_classes import CorrespondenceMap, ImageFrames, Rectangle
 from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
 from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
 from sd.modules.diffuser_pipelines.overlap import Overlap, ResizeOverlap, VAEOverlap, Scheduler
 from sd.modules.diffuser_pipelines.overlap.scheduler import StartEndScheduler
 from sd.modules.diffuser_pipelines.overlap.utils import build_view_normal_map
 import sd.modules.log_utils as logu
+
 from diffusers import EulerAncestralDiscreteScheduler
 from sys import platform
 import torch
@@ -33,7 +34,7 @@ class Config:
     ]
     device = GetEnv('DEVICE', ('mps' if platform == 'darwin' else 'cuda'))
     # pipeline generation configs
-    prompt = GetEnv('DEFAULT_SD_PROMPT', "wooden boat on a calm blue lake")
+    prompt = GetEnv('DEFAULT_SD_PROMPT', "wooden boat with a girl on a calm blue lake")
     neg_prompt = GetEnv('DEFAULT_SD_NEG_PROMPT', "low quality, bad anatomy")
     width = GetEnv('DEFAULT_IMG_WIDTH', 512, int)
     height = GetEnv('DEFAULT_IMG_HEIGHT', 512, int)
@@ -81,6 +82,9 @@ if __name__ == '__main__':
         enable_strict_checking=False,
         num_frames=config.num_frames,
         use_cache=True)
+    # corr_map.dropout_index(probability=0.3, seed=config.seed)
+    corr_map.dropout_in_rectangle(Rectangle((170, 168), (351, 297)), at_frame=0)
+
     images = ImageFrames.from_existing_directory(
         os.path.join(config.frames_dir, 'color'),
         num_frames=config.num_frames).Data

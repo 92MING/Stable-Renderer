@@ -4,15 +4,21 @@ from PIL import Image
 import os
 import re
 import pickle
+import random
+
 import numpy as np
 from tqdm import tqdm
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Union, List
 from .utils.sortableElement import SortableElement
+from .common import Rectangle
 from .. import log_utils as logu, config
 
 CACHE_DIR = "./.cache"
 MAP_OUTPUT_DIR = config.test_dir / 'boat'
 
+# TODO: Same number of dropout over the time steps
+# TODO: Use the same noise map?
+# TODO: Varying noise map
 
 class CorrespondenceMap:
     r"""
@@ -245,6 +251,77 @@ class CorrespondenceMap:
             with open(cache_fname, 'wb') as f:
                 pickle.dump(corr_map, f)
             logu.success(f"[SUCCESS] Correspondence map created and cached to {cache_fname}")
+    
+    def dropout_index(self, probability: float, seed: int):
+        """Randomly drop indices in correspondence map with `probability`.
+        Note that this proess is irreversible.
+
+        Args:
+            probability (float): Probability of dropout. The value should be in [0, 1]
+            seed (int): Seed for reproducing the event
+        """
+        assert 0 <= probability <= 1
+        random.seed(seed)
+        logu.info(f"Enabled correspondence map dropout of p={probability}, seed={seed}")
+        # Convert the dictionary to a list of key-value pairs
+        corr_map_copy = self._correspondence_map.copy()
+        for key in list(corr_map_copy.keys()):
+            if random.random() < probability:
+                del corr_map_copy[key]
+        self._correspondence_map = corr_map_copy
+
+    def dropout_in_rectangle(self, 
+                             rectangle: Union[Rectangle, Tuple[Tuple[int, int], Tuple[int, int]]],
+                             at_frame: int):
+        """Dropout indices within the `rectangle` at frame index = `at_frame`
+
+        Args:
+            rectangle (Rectangle | Tuple[Tuple[int, int], Tuple[int, int]]): Bounding rectangle for the 
+                points to be dropped, the coordinates of rectangle should not exceed frame size
+            at_frame: frame to apply rectangle
+        """
+        assert 0 <= at_frame <= self.num_frames
+        if isinstance(rectangle, Rectangle):
+            assert self.width >= max(rectangle.top_left[0], rectangle.bottom_right[0])
+            assert self.height >= max(rectangle.top_left[1], rectangle.bottom_right[1])
+        elif isinstance(rectangle, tuple):
+            top_left, bottom_right = rectangle
+            assert self.width >= max(top_left[0], bottom_right[0])
+            assert self.height >= max(top_left[1], bottom_right[1])
+        else:
+            raise ValueError(f"Data type of {type(rectangle)} is not supported for rectangle")
+
+        def is_in_rectangle(track: Tuple[List[int], int]):
+            """Helper function to check if certain coordinates are in a rectangle
+            
+            Args:
+                track (Tuple[List[int], int]): Track should be in a structure of ([pixel_pos_x, pixel_pos_y], frame_number)
+            Raises:
+                ValueError: If the data type of rectangle is neither `Rectangle` nor `Tuple` 
+            """
+            position, frame_number = track
+            if frame_number != at_frame:
+                return False
+            # Assumes top left of an image is the origin [0, 0]
+            if isinstance(rectangle, Rectangle):
+                return (position[0] < rectangle.bottom_right[0] and position[0] > rectangle.top_left[0]) and \
+                    (position[1] < rectangle.bottom_right[1] and position[1] > rectangle.top_left[1])
+            elif isinstance(rectangle, tuple):
+                top_left, bottom_right = rectangle
+                return (position[0] < bottom_right[0] and position[0] > top_left[0]) and  \
+                    (position[1] < bottom_right[1] and position[1] > top_left[1])
+            else:
+                raise ValueError
+        
+        corr_map_copy = self._correspondence_map.copy()
+        for key in self._correspondence_map.keys():
+            pixel_tracks = corr_map_copy[key]
+            for t in pixel_tracks:
+                if is_in_rectangle(t):
+                    del corr_map_copy[key]
+                    break
+        self._correspondence_map = corr_map_copy
+
 
 
 __all__ = ['CorrespondenceMap']
