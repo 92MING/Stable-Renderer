@@ -24,7 +24,8 @@ class Overlap:
 
     def __init__(
         self,
-        scheduler: 'Scheduler',
+        alpha_scheduler: 'Scheduler',
+        corr_map_decay_scheduler: 'Scheduler',
         algorithm: OverlapAlgorithm,
         max_workers: int = 1,
         verbose: bool = True
@@ -44,7 +45,8 @@ class Overlap:
         self.algorithm = algorithm
 
         # Module for scheduling alpha, no need to be private
-        self.scheduler = scheduler
+        self.alpha_scheduler = alpha_scheduler
+        self.corr_map_decay_scheduler = corr_map_decay_scheduler
 
     @property
     def max_workers(self):
@@ -88,16 +90,17 @@ class Overlap:
         frame_seq_stack = torch.stack(frame_seq, dim=0)  # [T, B, C, H, W] # Usually [16, 1, 4, 512, 512]
         mask_seq = torch.zeros((num_frames, batch_size, channels, frame_h, frame_w), dtype=torch.uint8, device=frame_seq[0].device)  # [T, 1, H, W]
 
-        alpha = self.scheduler(step, timestep)
-        corr_map_recovery_rate = 0
+        alpha = self.alpha_scheduler(step, timestep)
+        corr_map_decay = self.corr_map_decay_scheduler(step, timestep)
         apply_corr_map = False
 
         rectangle = Rectangle((170, 168), (351, 297))
         at_frame = 0
 
-        logu.info(f"Scheduler: alpha: {alpha} | timestep: {timestep:.2f}")
+        logu.info(f"Scheduler: alpha: {alpha} | corr_map_decay: {corr_map_decay:.2f} | timestep: {timestep:.2f}")
         
-        len_1_vertex_count = 0
+        len_1_vertex_count = index_decay_count = 0
+
         tic = time.time()
         progress_slice = len(corr_map) // 100
         pbar = tqdm.tqdm(total=100, desc='Overlap', unit='%', leave=False)
@@ -122,14 +125,16 @@ class Overlap:
                     for f, y, x in zip(frame_index_trace, y_position_trace, x_position_trace)
                 ])
                 if apply_corr_map:
-                    frame_seq_stack[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * corr_map_recovery_rate * overlapped_seq + (1 - alpha * corr_map_recovery_rate) * latent_seq
+                    frame_seq_stack[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * corr_map_decay * overlapped_seq + (1 - alpha * corr_map_decay) * latent_seq
+                    index_decay_count += 1
                 else:
                     frame_seq_stack[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * overlapped_seq + (1 - alpha) * latent_seq
                 del overlapped_seq, latent_seq
         else:
             raise NotImplementedError("Multiprocessing not implemented")
         toc = time.time()
-        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame | Vertex appeared once: {len_1_vertex_count * 100 / max(len(corr_map), 1) :.2f}%") if self.verbose else ...
+        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame") if self.verbose else ...
+        logu.debug(f"Vertex appeared once: {len_1_vertex_count * 100 / max(len(corr_map), 1) :.2f}% | Index decayed: {index_decay_count}")
 
         return frame_seq_stack
 
@@ -137,14 +142,16 @@ class Overlap:
 class ResizeOverlap(Overlap):
     def __init__(
         self,
-        scheduler: Scheduler,
+        alpha_scheduler: Scheduler,
+        corr_map_decay_scheduler: Scheduler,
         algorithm: OverlapAlgorithm,
         max_workers: int = 1,
         verbose: bool = True,
         interpolate_mode: str = 'nearest'
     ):
         super().__init__(
-            scheduler=scheduler,
+            alpha_scheduler=alpha_scheduler,
+            corr_map_decay_scheduler=corr_map_decay_scheduler,
             algorithm=algorithm,
             max_workers=max_workers,
             verbose=verbose,
@@ -175,7 +182,7 @@ class ResizeOverlap(Overlap):
         :param timestep: current inference timestep
         :return: A list of overlapped frame latents.
         """
-        alpha = self.scheduler(step, timestep)
+        alpha = self.alpha_scheduler(step, timestep)
         if alpha == 0:
             return frame_seq
         num_frames = len(frame_seq)
@@ -206,12 +213,14 @@ class VAEOverlap(Overlap):
         vae: AutoencoderKL,
         generator: torch.Generator,
         algorithm: OverlapAlgorithm,
-        scheduler: Scheduler,
+        alpha_scheduler: Scheduler,
+        corr_map_decay_scheduler: Scheduler,
         max_workers: int = 1,
         verbose: bool = True,
     ):
         super().__init__(
-            scheduler=scheduler,
+            alpha_scheduler=alpha_scheduler,
+            corr_map_decay_scheduler=corr_map_decay_scheduler,
             algorithm=algorithm,
             max_workers=max_workers,
             verbose=verbose,

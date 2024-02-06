@@ -27,10 +27,12 @@ class Scheduler:
         start_timestep: int = 0,
         end_timestep: int = 1000,
 
-        alpha_start: float = 0.0,
-        alpha_end: float = 1.0,
+        interpolate_begin: float = 0.0,
+        interpolate_end: float = 1.0,
         power: float = 1.0,
-        alpha_scheduler_type: Literal["constant", "linear", "cosine", "exponential", ""] = 'constant',
+        interpolate_type: Literal["constant", "linear", "cosine", "exponential", ""] = 'constant',
+
+        no_interpolate_return: float = 0.0,
     ):
         self._every_step = every_step
 
@@ -39,10 +41,12 @@ class Scheduler:
         self._start_timestep = start_timestep
         self._end_timestep = end_timestep
 
-        self._alpha_start = alpha_start
-        self._alpha_end = alpha_end
+        self._interpolate_start = interpolate_begin
+        self._interpolate_end = interpolate_end
         self._power = power
-        self._alpha_schedule_type = alpha_scheduler_type
+        self._interpolate_type = interpolate_type
+
+        self._no_interpolate_return = no_interpolate_return
 
     def __call__(
         self,
@@ -54,12 +58,12 @@ class Scheduler:
         Return parameters (e.g. alpha etc.) for overlap algorithm.
         """
         if step < self._start_step or step > self._end_step or step % self._every_step != 0 or timestep < self._start_timestep or timestep > self._end_timestep:
-            return 0  # 0 means no overlap
+            return self._no_interpolate_return  # 0 means no overlap
         t = 1 - (timestep / 1000)  # Increase from 0 to 1
         
         return value_interpolation(
             t, 
-            start=self._alpha_start, 
-            end=self._alpha_end, 
+            start=self._interpolate_start, 
+            end=self._interpolate_end, 
             power=self._power,
-            interpolate_function=self._alpha_schedule_type)
+            interpolate_function=self._interpolate_type)

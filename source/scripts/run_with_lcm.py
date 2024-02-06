@@ -69,7 +69,7 @@ if __name__ == '__main__':
     generator = torch.Generator(device=config.device).manual_seed(config.seed)
 
     # 2. Define overlap algorithm
-    scheduler = Scheduler(alpha_start=1, alpha_end=0.2, power=1/2, alpha_scheduler_type='linear')
+    scheduler = Scheduler(interpolate_begin=1, interpolate_end=0.2, power=1/2, interpolate_type='linear')
     overlap_algorithm = ResizeOverlap(
         scheduler=scheduler, weight_option=config.weight_option, max_workers=config.max_workers, interpolate_mode='nearest')
     scheduled_overlap_algorithm = StartEndScheduler(

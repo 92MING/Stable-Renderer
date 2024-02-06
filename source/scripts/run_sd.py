@@ -70,10 +70,14 @@ if __name__ == '__main__':
     generator = torch.Generator(device=config.device).manual_seed(config.seed)
 
     # 2. Define overlap algorithm
-    scheduler = Scheduler(
+    alpha_scheduler = Scheduler(
         start_timestep=config.start_timestep, end_timestep=config.end_timestep,
-        alpha_start=1, alpha_end=1, power=1, alpha_scheduler_type='linear')
-    scheduled_overlap_algorithm = ResizeOverlap(scheduler=scheduler, 
+        interpolate_begin=1, interpolate_end=1, power=1, interpolate_type='linear', no_interpolate_return=0)
+    corr_map_decay_scheduler = Scheduler(
+        start_timestep=750, end_timestep=1000,
+        interpolate_begin=0, interpolate_end=1, power=1, interpolate_type='linear', no_interpolate_return=1)
+    scheduled_overlap_algorithm = ResizeOverlap(alpha_scheduler=alpha_scheduler, 
+                                                corr_map_decay_scheduler=corr_map_decay_scheduler,
                                                 algorithm=overlap_algorithm_factory(config.overlap_algorithm), 
                                                 max_workers=config.max_workers, 
                                                 interpolate_mode='nearest')
@@ -115,7 +119,7 @@ if __name__ == '__main__':
         control_images=controlnet_images,
         width=config.width,
         height=config.height,
-        num_inference_steps=6,
+        num_inference_steps=10,
         strength=config.strength,
         generator=generator,
         guidance_scale=7,
