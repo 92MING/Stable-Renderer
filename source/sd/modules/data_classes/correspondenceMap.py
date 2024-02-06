@@ -304,8 +304,7 @@ class CorrespondenceMap:
                 return False
             # Assumes top left of an image is the origin [0, 0]
             if isinstance(rectangle, Rectangle):
-                return (position[0] < rectangle.bottom_right[0] and position[0] > rectangle.top_left[0]) and \
-                    (position[1] < rectangle.bottom_right[1] and position[1] > rectangle.top_left[1])
+                return rectangle.is_in_rectangle(position)
             elif isinstance(rectangle, tuple):
                 top_left, bottom_right = rectangle
                 return (position[0] < bottom_right[0] and position[0] > top_left[0]) and  \

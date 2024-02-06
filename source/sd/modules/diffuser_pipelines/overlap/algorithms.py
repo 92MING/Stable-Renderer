@@ -1,5 +1,5 @@
-from typing import Protocol
 import torch
+from typing import Protocol, Literal
 
 
 class OverlapAlgorithm(Protocol):
@@ -69,6 +69,7 @@ class FrameDistance:
         weighted_average_latent_seq = weights @ latent_seq.squeeze() / weights.sum(dim=0).reshape(-1, 1)
         return weighted_average_latent_seq.reshape_as(latent_seq)
 
+
 class PixelDistance:
     """
     Implements the `OverlapAlgorithm` protocol with frame-wise pixel distance sequence mixing 
@@ -98,15 +99,33 @@ class PerpendicularViewNormal:
     """
     def overlap(self,
                 latent_seq: torch.Tensor,
-                t_all: list,
-                h_all: list,
-                w_all: list,
-                view_normal_seq: torch.Tensor,
+                frame_index_trace: list,
+                x_position_trace: list,
+                y_position_trace: list,
+                view_normal_map: torch.Tensor,
                 **kwargs):
         # When the view normal is closer to one, aka directly facing the camera, it should be more trustable
-        view_normal_seq = view_normal_seq.to(latent_seq.device)
+        view_normal_seq = view_normal_map[
+            frame_index_trace, y_position_trace, x_position_trace
+        ].squeeze().to(latent_seq.device)
         distance_matrix = torch.abs(torch.ones_like(view_normal_seq).unsqueeze(1) - view_normal_seq)
         weights = 1 / (distance_matrix + 1)
         del distance_matrix
         weighted_latent_seq = weights @ latent_seq.squeeze() / weights.sum(dim=0).reshape(-1, 1)
         return weighted_latent_seq.reshape_as(latent_seq)
+
+
+def overlap_algorithm_factory(
+        algorithm: Literal['average', 'frame_distance', 'pixel_distance', 'perpendicular_view_normal'],
+        ) -> OverlapAlgorithm:
+    if algorithm == "average":
+        return AverageDistance()
+    elif algorithm == 'frame_distance':
+        return FrameDistance()
+    elif algorithm == 'pixel_distance':
+        return PixelDistance()
+    elif algorithm == 'perpendicular_view_normal':
+        return PerpendicularViewNormal()
+    else:
+        raise ValueError(f"Unknown algorithm {algorithm}")
+    

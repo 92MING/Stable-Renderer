@@ -29,7 +29,7 @@ from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, pr
 from ..data_classes.correspondenceMap import CorrespondenceMap
 from .. import log_utils as logu
 from ..utils import save_latents
-from .overlap import OverlapAlgorithm, Overlap, ResizeOverlap, VAEOverlap
+from .overlap import Overlap
 from .overlap.johnny_overlap import overlap as temp_overlap
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
@@ -489,7 +489,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         control_guidance_start: Union[float, List[float]] = 0.0,
         control_guidance_end: Union[float, List[float]] = 1.0,
         correspondence_map: Optional[CorrespondenceMap] = None,
-        overlap_algorithm: OverlapAlgorithm = None,
+        overlap_algorithm: Overlap = None,
         same_init_latents: bool = False,
         same_init_noise: bool = False,
 
