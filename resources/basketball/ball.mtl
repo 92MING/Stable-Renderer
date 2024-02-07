@@ -1,0 +1,16 @@
+# Blender MTL File: 'Basketball ball.blend'
+# Material Count: 1
+
+newmtl Kore_inst
+Ns 179.999996
+Ka 1.000000 1.000000 1.000000
+Kd 0.215861 0.215861 0.215861
+Ks 1.000000 1.000000 1.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 3
+map_Bump Basketball ball_Normal.png
+map_Kd Basketball ball_BaseColor.png
+map_Ns Basketball ball_Roughness.png
+refl Basketball ball_Metalness.png
