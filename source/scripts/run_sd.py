@@ -1,13 +1,15 @@
 import sys, os
 sys.path.append(os.getcwd())
 
-from sd.modules.data_classes import CorrespondenceMap, ImageFrames
+from sd.modules.data_classes import CorrespondenceMap, ImageFrames, Rectangle
 from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
 from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
-from sd.modules.diffuser_pipelines.overlap import Overlap, ResizeOverlap, VAEOverlap, Scheduler
+from sd.modules.diffuser_pipelines.overlap import Overlap, ResizeOverlap, Scheduler
+from sd.modules.diffuser_pipelines.overlap.algorithms import overlap_algorithm_factory
 from sd.modules.diffuser_pipelines.overlap.scheduler import StartEndScheduler
 from sd.modules.diffuser_pipelines.overlap.utils import build_view_normal_map
 import sd.modules.log_utils as logu
+
 from diffusers import EulerAncestralDiscreteScheduler
 from sys import platform
 import torch
@@ -37,7 +39,7 @@ class Config:
     ]
     device = GetEnv('DEVICE', ('mps' if platform == 'darwin' else 'cuda'))
     # pipeline generation configs
-    prompt = GetEnv('DEFAULT_SD_PROMPT', "wooden boat on a calm blue lake")
+    prompt = GetEnv('DEFAULT_SD_PROMPT', "wooden boat with a girl on a calm blue lake")
     neg_prompt = GetEnv('DEFAULT_SD_NEG_PROMPT', "low quality, bad anatomy")
     width = GetEnv('DEFAULT_IMG_WIDTH', 512, int)
     height = GetEnv('DEFAULT_IMG_HEIGHT', 512, int)
@@ -48,7 +50,7 @@ class Config:
     num_frames = GetEnv('DEFAULT_NUM_FRAMES',16, int)
     frames_dir = GetEnv('DEFAULT_FRAME_INPUT', Last_Map_Dir)
     # Overlap algorithm configs
-    weight_option = 'frame_distance'
+    overlap_algorithm = 'frame_distance'
     start_timestep = 500
     end_timestep = 1000
     max_workers = 1
@@ -72,19 +74,27 @@ if __name__ == '__main__':
     generator = torch.Generator(device=config.device).manual_seed(config.seed)
 
     # 2. Define overlap algorithm
-    scheduler = Scheduler(
+    alpha_scheduler = Scheduler(
         start_timestep=config.start_timestep, end_timestep=config.end_timestep,
-        alpha_start=1, alpha_end=1, power=1, alpha_scheduler_type='linear')
-    scheduled_overlap_algorithm = ResizeOverlap(
-        scheduler=scheduler, weight_option=config.weight_option, max_workers=config.max_workers, interpolate_mode='nearest')
+        interpolate_begin=1, interpolate_end=1, power=1, interpolate_type='linear', no_interpolate_return=0)
+    corr_map_decay_scheduler = Scheduler(
+        start_timestep=750, end_timestep=1000,
+        interpolate_begin=0, interpolate_end=1, power=1, interpolate_type='linear', no_interpolate_return=1)
+    scheduled_overlap_algorithm = ResizeOverlap(alpha_scheduler=alpha_scheduler, 
+                                                corr_map_decay_scheduler=corr_map_decay_scheduler,
+                                                algorithm=overlap_algorithm_factory(config.overlap_algorithm), 
+                                                max_workers=config.max_workers, 
+                                                interpolate_mode='nearest')
     
-
     # 3. Prepare data
     corr_map = CorrespondenceMap.from_existing_directory_numpy(
         os.path.join(config.frames_dir, 'id'),
         enable_strict_checking=False,
         num_frames=config.num_frames,
         use_cache=True)
+    # corr_map.dropout_index(probability=0.3, seed=config.seed)
+    # corr_map.dropout_in_rectangle(Rectangle((170, 168), (351, 297)), at_frame=0)
+
     images = ImageFrames.from_existing_directory(
         os.path.join(config.frames_dir, 'color'),
         num_frames=config.num_frames).Data
@@ -113,7 +123,7 @@ if __name__ == '__main__':
         control_images=controlnet_images,
         width=config.width,
         height=config.height,
-        num_inference_steps=6,
+        num_inference_steps=10,
         strength=config.strength,
         generator=generator,
         guidance_scale=7,

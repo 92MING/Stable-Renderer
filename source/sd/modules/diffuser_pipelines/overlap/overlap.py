@@ -1,43 +1,32 @@
-import torch
 import time
 import tqdm
-import numpy
-from typing import List, Literal
-import torch.nn.functional as F
-from abc import abstractmethod, ABC
+
+from typing import List, Literal, Tuple, Protocol
+
 from diffusers import AutoencoderKL
+from .algorithms import OverlapAlgorithm
 from .overlap_scheduler import Scheduler
+
 from .utils import overlap_rate
 from ...data_classes.correspondenceMap import CorrespondenceMap
+from ...data_classes.common import Rectangle
+
 from ... import log_utils as logu
-from torch.multiprocessing import Pool, set_start_method
+
+import torch
+import torch.nn.functional as F
 
 
-class OverlapAlgorithm(ABC):
-    r"""
-    Interface for overlap algorithms
-    """
-    @abstractmethod
-    def __call__(
-        self,
-        frame_seq: List[torch.Tensor],
-        corr_map: CorrespondenceMap,
-        step: int = None,
-        timestep: int = None,
-        **kwargs,
-    ):
-        pass
-
-
-class Overlap(OverlapAlgorithm):
+class Overlap:
     r"""
     Parent class for all overlapping algorithms used in multi_frame_stable_diffusion.py
     """
 
     def __init__(
         self,
-        scheduler: 'Scheduler',
-        weight_option: Literal['average', 'adjacent', 'optical_flow', 'frame_distance', 'view_normal'] = 'adjacent',
+        alpha_scheduler: 'Scheduler',
+        corr_map_decay_scheduler: 'Scheduler',
+        algorithm: OverlapAlgorithm,
         max_workers: int = 1,
         verbose: bool = True
     ):
@@ -53,10 +42,11 @@ class Overlap(OverlapAlgorithm):
         assert max_workers > 0, "Number of max workers is at least 1"
         self._max_workers = max_workers
         self._verbose = verbose
-        self._weight_option = weight_option
+        self.algorithm = algorithm
 
         # Module for scheduling alpha, no need to be private
-        self.scheduler = scheduler
+        self.alpha_scheduler = alpha_scheduler
+        self.corr_map_decay_scheduler = corr_map_decay_scheduler
 
     @property
     def max_workers(self):
@@ -76,15 +66,6 @@ class Overlap(OverlapAlgorithm):
     def verbose(self, value: bool):
         self._verbose = value
 
-    @property
-    def weight_option(self):
-        return self._weight_option
-    
-    @weight_option.setter
-    def weight_option(self, value: str):
-        self._weight_option = value
-
-
     @staticmethod
     def overlap_rate(ovlp_seq: List[torch.Tensor], threshold: float = 0.0):
         """
@@ -92,6 +73,7 @@ class Overlap(OverlapAlgorithm):
         :param ovlp_seq: A list of overlapped frames. Note that this should haven't been overlapped with the original frames.
         """
         return overlap_rate(ovlp_seq, threshold)
+    
 
     def __call__(
         self,
@@ -101,196 +83,28 @@ class Overlap(OverlapAlgorithm):
         timestep: int = None,
         **kwargs,
     ):
-        if self._weight_option == "average":
-            return self.average_overlap(
-                frame_seq=frame_seq,
-                corr_map=corr_map,
-                step=step,
-                timestep=timestep,
-            )
-        elif self._weight_option == 'adjacent':
-            return self.adjacent_overlap(
-                frame_seq=frame_seq,
-                corr_map=corr_map,
-                step=step,
-                timestep=timestep,
-            )
-        elif self._weight_option == 'optical_flow':
-            return self.optical_flow_overlap(
-                frame_seq=frame_seq,
-                corr_map=corr_map,
-                step=step,
-                timestep=timestep,
-            )
-        elif self._weight_option == 'frame_distance':
-            return self.frame_distance_overlap(
-                frame_seq=frame_seq,
-                corr_map=corr_map,
-                step=step,
-                timestep=timestep,
-            )
-        elif self._weight_option == 'view_normal':
-            logu.warn("View normal overlap is buggy")
-            return self.view_normal_overlap(
-                frame_seq=frame_seq,
-                corr_map=corr_map,
-                step=step,
-                timestep=timestep,
-                **kwargs,
-            )
-        else:
-            raise NotImplementedError
-
-    def average_overlap(
-        self,
-        frame_seq: List[torch.Tensor],
-        corr_map: CorrespondenceMap,
-        step: int = None,
-        timestep: int = None,
-    ):
-        """
-        Do overlapping on a sequence of frames according to the corresponding map.
-        ONLY OVERLAP WITH SELF BUT NOT THE ORIGINAL FRAME.
-        :param frame_seq: A list of frames. Each element is a tensor of shape [B, C, H, W].
-        :param corr_map: A correspondence map.
-        :param step: The current step.
-        :param timestep: The current timestep.
-        :param max_workers: The number of workers for multiprocessing.
-        :return: A list of overlapped frames.
-        """
         assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
 
-        alpha = self.scheduler(step, timestep)
-        one_minus_alpha = 1 - alpha
         num_frames = len(frame_seq)
         batch_size, channels, frame_h, frame_w = frame_seq[0].shape
-        device = frame_seq[0].device
-        frame_seq_dtype = frame_seq[0].dtype
-        ovlp_seq = torch.zeros((num_frames, channels, frame_h, frame_w), dtype=frame_seq_dtype, device=device)  # [C, H, W]
-        # ovlp_count = torch.zeros((num_frames, frame_h, frame_w), dtype=torch.float32, device=device)  # [H, W]
-        unbatched_frame_seq = [frame[0] for frame in frame_seq]
+        frame_seq_stack = torch.stack(frame_seq, dim=0)  # [T, B, C, H, W] # Usually [16, 1, 4, 512, 512]
+        mask_seq = torch.zeros((num_frames, batch_size, channels, frame_h, frame_w), dtype=torch.uint8, device=frame_seq[0].device)  # [T, 1, H, W]
 
-        logu.info(f"Scheduler: alpha: {alpha} | timestep: {timestep:.2f}")
+        alpha = self.alpha_scheduler(step, timestep)
+        corr_map_decay = self.corr_map_decay_scheduler(step, timestep)
+        apply_corr_map = False
 
-        # assert ovlp_seq.device == frame_seq[0].device and ovlp_count.device == frame_seq[0].device, "ovlp_seq and ovlp_count should be on the same device as frame_seq"
+        # rectangle = Rectangle((170, 168), (351, 297))
+        rectangle = Rectangle((170, 168), (351, 220))
+        # rectangle = Rectangle((0, 0), (frame_w, frame_h))
+        at_frame = 0
 
-        tic = time.time()
-        if self.max_workers == 1:
-            for v_info in corr_map.Map.values():
-                # v_info = [(pos, t) for pos, t in v_info if t < num_frames]
-                len_info = len(v_info)
-                if len_info == 1:
-                    pos, t = v_info[0]
-                    h, w = pos
-                    ovlp_seq[t, :, h, w] = unbatched_frame_seq[t][:, h, w]
-                    # ovlp_count[t, h, w] += 1
-                else:
-                    value = 0
-                    for pos, t in v_info:
-                        h, w = pos
-                        value += unbatched_frame_seq[t][:, h, w]
-
-                    value /= len_info
-                    value *= alpha
-
-                    for pos, t in v_info:
-                        h, w = pos
-                        ovlp_seq[t, :, h, w] = value + one_minus_alpha * unbatched_frame_seq[t][:, h, w]
-                        # ovlp_count[t, h, w] += 1
-
-            # Overlap with self (very fast)
-            # ovlp_count = ovlp_count.unsqueeze(1).expand(num_frames, channels, -1, -1)
-            # ovlp_seq = torch.where(ovlp_count != 0, ovlp_seq / ovlp_count, ovlp_seq)
-            ovlp_seq = ovlp_seq.unsqueeze(1)
-            ovlp_seq = [ovlp_seq[i] for i in range(num_frames)]
-        else:
-            raise NotImplementedError(f"Multiprocessing not implemented")
-
-        toc = time.time()
-        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame") if self.verbose else ...
-
-        return ovlp_seq
-
-    def adjacent_overlap(
-        self,
-        frame_seq: List[torch.Tensor],
-        corr_map: CorrespondenceMap,
-        step: int = None,
-        timestep: int = None,
-    ):
-        assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
-
-        alpha = self.scheduler(step, timestep)
-        one_minus_alpha = 1 - alpha
-        num_frames = len(frame_seq)
-        batch_size, channels, frame_h, frame_w = frame_seq[0].shape
-        device = frame_seq[0].device
-        frame_seq_dtype = frame_seq[0].dtype
-        ovlp_seq = torch.zeros((num_frames, channels, frame_h, frame_w), dtype=frame_seq_dtype, device=device)  # [C, H, W]
-        unbatched_frame_seq = [frame[0] for frame in frame_seq]
-
-        logu.info(f"Scheduler: alpha: {alpha} | timestep: {timestep:.2f}")
-
-        tic = time.time()
-        if self.max_workers == 1:
-            for v_info in corr_map.Map.values():
-                len_info = len(v_info)
-                if len_info == 1:
-                    pos, t = v_info[0]
-                    h, w = pos
-                    ovlp_seq[t, :, h, w] = unbatched_frame_seq[t][:, h, w]
-                else:
-                    for i in range(len_info):
-                        value = 0
-                        count = 0
-                        pos_self, t_self = v_info[i]
-                        h_self, w_self = pos_self
-                        for j in range(len_info):
-                            pos_other, t_other = v_info[j]
-                            h_other, w_other = pos_other
-                            distance = abs(t_self - t_other)
-                            # weight = numpy.exp(-distance)  # Exponential decay
-                            weight = 1 / (distance + 1)  # Linear decay
-                            # weight = 1 / (distance ** 2 + 1)  # Quadratic decay
-                            value += unbatched_frame_seq[t_other][:, h_other, w_other] * weight
-                            count += weight
-                        ovlp_seq[t_self, :, h_self, w_self] = alpha * (value / count) + one_minus_alpha * unbatched_frame_seq[t_self][:, h_self, w_self]
-
-            ovlp_seq = ovlp_seq.unsqueeze(1) 
-            ovlp_seq = list(ovlp_seq.unbind(dim=0))
-        else:
-            raise NotImplementedError(f"Multiprocessing not implemented")
-
-        toc = time.time()
-        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame") if self.verbose else ...
-
-        return ovlp_seq
-
-    def frame_distance_overlap(
-            self,
-            frame_seq: List[torch.Tensor],
-            corr_map: CorrespondenceMap,
-            step: int = None,
-            timestep: int = None,
-    ):
-        assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
-
-        alpha = self.scheduler(step, timestep)
-        one_minus_alpha = 1 - alpha
-        num_frames = len(frame_seq)
-        batch_size, channels, frame_h, frame_w = frame_seq[0].shape
-        device = frame_seq[0].device
-        frame_seq_dtype = frame_seq[0].dtype
-
-        overlap_seq = torch.stack(frame_seq, dim=0)  # [T, B, C, H, W]
-        mask_seq = torch.zeros((num_frames, batch_size, channels, frame_h, frame_w), dtype=torch.uint8, device=device)  # [T, 1, H, W]
-
-        logu.info(f"Scheduler: alpha: {alpha} | timestep: {timestep:.2f}")
+        logu.info(f"Scheduler: alpha: {alpha} | corr_map_decay: {corr_map_decay:.2f} | timestep: {timestep:.2f}")
         
-        len_1_vertex_count = 0
+        len_1_vertex_count = index_decay_count = 0
+
         tic = time.time()
-        progress_total = len(corr_map)
-        progress_slice = progress_total // 100
+        progress_slice = len(corr_map) // 100
         pbar = tqdm.tqdm(total=100, desc='Overlap', unit='%', leave=False)
         
         if self.max_workers == 1:
@@ -301,154 +115,61 @@ class Overlap(OverlapAlgorithm):
                     # no value changes when vertex appear once only
                     len_1_vertex_count += 1
                     continue
-                pos_all, t_all = zip(*v_info)
-                h_all, w_all = zip(*pos_all)
-                
-                # compute dense frame distance from all occurance of vertex
-                t_all_tensor = torch.tensor(t_all, dtype=frame_seq_dtype).to(device)
-                
-                # gives a covariance-like matrix but elements being abs(a_i - a_j)
-                distances_matrix = torch.abs(t_all_tensor.unsqueeze(1) - t_all_tensor)
+                position_trace, frame_index_trace = zip(*v_info)
+                y_position_trace, x_position_trace = zip(*position_trace) # h, w
+                frame_index_trace, y_position_trace, x_position_trace = \
+                    list(frame_index_trace), list(y_position_trace), list(x_position_trace)
 
-                # every row of weights * latent_seq is latent_seq weighted by 1/distance
-                latent_seq = overlap_seq[t_all, :, :, h_all, w_all]
-                weights = 1 / (distances_matrix + 1)
-                weighted_average_latent_seq = torch.matmul(weights, latent_seq.squeeze()) / weights.sum(dim=0).reshape(-1, 1)
-                weighted_average_latent_seq = weighted_average_latent_seq.reshape_as(latent_seq)
-                overlap_seq[t_all, :, :, h_all, w_all] = alpha * weighted_average_latent_seq + one_minus_alpha * latent_seq
+                overlap_in_range = 3
+                for idx, (y_pos, x_pos) in enumerate(zip(y_position_trace, x_position_trace)):
+                    y_positions = [y_pos + i for i in range(-overlap_in_range, overlap_in_range + 1)]
+                    x_positions = [x_pos + i for i in range(-overlap_in_range, overlap_in_range + 1)]
+                    y_position_trace[idx] = y_positions
+                    x_position_trace[idx] = x_positions
+                    frame_index_trace[idx] = [frame_index_trace[idx]] * len(y_positions) 
+                    
+
+
+                latent_seq = frame_seq_stack[frame_index_trace, :, :, y_position_trace, x_position_trace]
+                overlapped_seq = self.algorithm.overlap(
+                    latent_seq, frame_index_trace, x_position_trace, y_position_trace, **kwargs)
+                
+                # apply_corr_map = any([
+                #     rectangle.is_in_rectangle((x, y)) and f == at_frame
+                #     for f, y, x in zip(frame_index_trace, y_position_trace, x_position_trace)
+                # ])
+                apply_corr_map = False
+                if apply_corr_map:
+                    frame_seq_stack[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * corr_map_decay * overlapped_seq + (1 - alpha * corr_map_decay) * latent_seq
+                    index_decay_count += 1
+                else:
+                    # print("overlap", overlapped_seq.shape)
+                    # print("latent", latent_seq.shape)
+                    frame_seq_stack[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * overlapped_seq + (1 - alpha) * latent_seq
+                del overlapped_seq, latent_seq
         else:
             raise NotImplementedError("Multiprocessing not implemented")
         toc = time.time()
-        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame | Vertex appeared once: {len_1_vertex_count * 100 /len(corr_map):.2f}%") if self.verbose else ...
-        
+        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame") if self.verbose else ...
+        logu.debug(f"Vertex appeared once: {len_1_vertex_count * 100 / max(len(corr_map), 1) :.2f}% | Index decayed: {index_decay_count}")
 
-        return overlap_seq
+        return frame_seq_stack
 
-    def optical_flow_overlap(
-        self,
-        frame_seq: List[torch.Tensor],
-        corr_map: CorrespondenceMap,
-        step: int = None,
-        timestep: int = None,
-    ):
-        assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
-
-        alpha = self.scheduler(step, timestep)
-        one_minus_alpha = 1 - alpha
-        num_frames = len(frame_seq)
-        batch_size, channels, frame_h, frame_w = frame_seq[0].shape
-        device = frame_seq[0].device
-        frame_seq_dtype = frame_seq[0].dtype
-
-        overlap_seq = torch.stack(frame_seq, dim=0)  # [T, B, C, H, W]
-        mask_seq = torch.zeros((num_frames, batch_size, channels, frame_h, frame_w), dtype=torch.uint8, device=device)  # [T, 1, H, W]
-
-        logu.info(f"Scheduler: alpha: {alpha} | timestep: {timestep:.2f}")
-
-        tic = time.time()
-        progress_total = len(corr_map)
-        progress_slice = progress_total // 100
-        pbar = tqdm.tqdm(total=100, desc='Overlap', unit='%', leave=False)
-        len_1_vertex_count = 0
-
-        if self.max_workers == 1:
-            for v_i, v_info in enumerate(corr_map.Map.values()):
-                pbar.update(1) if v_i % progress_slice == 0 else ...
-
-                if len(v_info) == 1:
-                    # no value changes when vertex appear once only
-                    len_1_vertex_count += 1
-                    continue
-                pos_all, t_all = zip(*v_info)
-                h_all, w_all = zip(*pos_all)
-                h_all_tensor = torch.tensor(h_all, dtype=frame_seq_dtype).to(device)
-                w_all_tensor = torch.tensor(w_all, dtype=frame_seq_dtype).to(device)
-                # compute vertex displacement from the previous occurance of vertex
-                h_distances = torch.abs(h_all_tensor.unsqueeze(1) - h_all_tensor)
-                w_distances = torch.abs(w_all_tensor.unsqueeze(1) - w_all_tensor)
-                distances_matrix = h_distances + w_distances
-
-                latent_seq = overlap_seq[t_all, :, :, h_all, w_all] 
-                weights = 1 / (distances_matrix + 1)
-                weighted_average_latent_seq = torch.matmul(weights, latent_seq.squeeze()) / weights.sum(dim=0).reshape(-1, 1)
-                weighted_average_latent_seq = weighted_average_latent_seq.reshape_as(latent_seq)
-                overlap_seq[t_all, :, :, h_all, w_all] = alpha * weighted_average_latent_seq + one_minus_alpha * latent_seq
-        else:
-            raise NotImplementedError(f"Multiprocessing not implemented")
-
-        toc = time.time()
-        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc - tic) / num_frames:.2f}s per frame | Vertex appeared once: {len_1_vertex_count / len(corr_map) * 100:.2f}%") if self.verbose else ...
-
-        return overlap_seq
-    
-    def view_normal_overlap(
-        self,
-        frame_seq: List[torch.Tensor],
-        corr_map: CorrespondenceMap,
-        step: int = None,
-        timestep: int = None,
-        view_normal_map: List[torch.Tensor] = None,
-    ):
-        assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
-        assert view_normal_map is not None, "normal_map is None"
-        assert view_normal_map[0].shape[:2] == (corr_map.height, corr_map.width), f"normal_map shape {view_normal_map[0].shape[:2]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
-
-        alpha = self.scheduler(step, timestep)
-        one_minus_alpha = 1 - alpha
-        num_frames = len(frame_seq)
-        batch_size, channels, frame_h, frame_w = frame_seq[0].shape
-        device = frame_seq[0].device
-        frame_seq_dtype = frame_seq[0].dtype
-
-        overlap_seq = torch.stack(frame_seq, dim=0)  # [T, B, C, H, W]
-        mask_seq = torch.zeros((num_frames, batch_size, channels, frame_h, frame_w), dtype=torch.uint8, device=device)  # [T, 1, H, W]
-
-        logu.info(f"Scheduler: alpha: {alpha} | timestep: {timestep:.2f}")
-
-        tic = time.time()
-        progress_total = len(corr_map)
-        progress_slice = progress_total // 100
-        pbar = tqdm.tqdm(total=100, desc='Overlap', unit='%', leave=False)
-        len_1_vertex_count = 0
-
-        if self.max_workers == 1:
-            for v_i, v_info in enumerate(corr_map.Map.values()):
-                pbar.update(1) if v_i % progress_slice == 0 else ...
-
-                if len(v_info) == 1:
-                    # no value changes when vertex appear once only
-                    len_1_vertex_count += 1
-                    continue
-                pos_all, t_all = zip(*v_info)
-                h_all, w_all = zip(*pos_all)
-                # extract vertex view normal from view normal map 
-                view_normal_seq = view_normal_map[t_all, h_all, w_all].to(device)
-
-                latent_seq = overlap_seq[t_all, :, :, h_all, w_all]
-                weighted_latent_seq = latent_seq.squeeze() * view_normal_seq / view_normal_seq.sum(dim=0)
-                weighted_latent_seq = weighted_latent_seq.reshape_as(latent_seq)
-                overlap_seq[t_all, :, :, h_all, w_all] = alpha * weighted_latent_seq + one_minus_alpha * latent_seq
-                
-        else:
-            raise NotImplementedError(f"Multiprocessing not implemented")
-
-        toc = time.time()
-        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc - tic) / num_frames:.2f}s per frame | Vertex appeared once: {len_1_vertex_count / len(corr_map) * 100:.2f}%") if self.verbose else ...
-
-        return list(overlap_seq.unbind(dim=0))
 
 class ResizeOverlap(Overlap):
     def __init__(
         self,
-        scheduler: Scheduler,
-        weight_option: str = 'adjacent',
+        alpha_scheduler: Scheduler,
+        corr_map_decay_scheduler: Scheduler,
+        algorithm: OverlapAlgorithm,
         max_workers: int = 1,
         verbose: bool = True,
         interpolate_mode: str = 'nearest'
     ):
         super().__init__(
-            scheduler=scheduler,
-            weight_option=weight_option,
+            alpha_scheduler=alpha_scheduler,
+            corr_map_decay_scheduler=corr_map_decay_scheduler,
+            algorithm=algorithm,
             max_workers=max_workers,
             verbose=verbose,
         )
@@ -478,7 +199,7 @@ class ResizeOverlap(Overlap):
         :param timestep: current inference timestep
         :return: A list of overlapped frame latents.
         """
-        alpha = self.scheduler(step, timestep)
+        alpha = self.alpha_scheduler(step, timestep)
         if alpha == 0:
             return frame_seq
         num_frames = len(frame_seq)
@@ -508,12 +229,16 @@ class VAEOverlap(Overlap):
         self,
         vae: AutoencoderKL,
         generator: torch.Generator,
-        scheduler: Scheduler,
+        algorithm: OverlapAlgorithm,
+        alpha_scheduler: Scheduler,
+        corr_map_decay_scheduler: Scheduler,
         max_workers: int = 1,
         verbose: bool = True,
     ):
         super().__init__(
-            scheduler=scheduler,
+            alpha_scheduler=alpha_scheduler,
+            corr_map_decay_scheduler=corr_map_decay_scheduler,
+            algorithm=algorithm,
             max_workers=max_workers,
             verbose=verbose,
         )

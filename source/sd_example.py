@@ -71,8 +71,8 @@ def main():
 
     # Overlapping
     overlap_scheduler = Scheduler(
-        alpha_start=1,
-        alpha_scheduler_type='constant',
+        interpolate_begin=1,
+        interpolate_type='constant',
     )
 
     overlap_algorithm = ResizeOverlap(
