@@ -143,7 +143,7 @@ if __name__ == "__main__":
 
         static_image = np.asarray(images.convert('RGB'))
 
-        drawn_array = draw_rectangle(static_image, (170, 168), (351, 297), (0, 0, 255), 2)
+        drawn_array = draw_rectangle(static_image, (170, 168), (351, 220), (0, 0, 255), 2)
 
         drawn_image = Image.fromarray(drawn_array)
         drawn_image.save(os.path.join(os.path.dirname(image_path), os.path.basename(image_path).replace(".gif", ".png")))

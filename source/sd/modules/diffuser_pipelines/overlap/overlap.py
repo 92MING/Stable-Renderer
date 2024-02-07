@@ -94,7 +94,9 @@ class Overlap:
         corr_map_decay = self.corr_map_decay_scheduler(step, timestep)
         apply_corr_map = False
 
-        rectangle = Rectangle((170, 168), (351, 297))
+        # rectangle = Rectangle((170, 168), (351, 297))
+        rectangle = Rectangle((170, 168), (351, 220))
+        # rectangle = Rectangle((0, 0), (frame_w, frame_h))
         at_frame = 0
 
         logu.info(f"Scheduler: alpha: {alpha} | corr_map_decay: {corr_map_decay:.2f} | timestep: {timestep:.2f}")
@@ -115,19 +117,34 @@ class Overlap:
                     continue
                 position_trace, frame_index_trace = zip(*v_info)
                 y_position_trace, x_position_trace = zip(*position_trace) # h, w
+                frame_index_trace, y_position_trace, x_position_trace = \
+                    list(frame_index_trace), list(y_position_trace), list(x_position_trace)
+
+                overlap_in_range = 3
+                for idx, (y_pos, x_pos) in enumerate(zip(y_position_trace, x_position_trace)):
+                    y_positions = [y_pos + i for i in range(-overlap_in_range, overlap_in_range + 1)]
+                    x_positions = [x_pos + i for i in range(-overlap_in_range, overlap_in_range + 1)]
+                    y_position_trace[idx] = y_positions
+                    x_position_trace[idx] = x_positions
+                    frame_index_trace[idx] = [frame_index_trace[idx]] * len(y_positions) 
+                    
+
 
                 latent_seq = frame_seq_stack[frame_index_trace, :, :, y_position_trace, x_position_trace]
                 overlapped_seq = self.algorithm.overlap(
                     latent_seq, frame_index_trace, x_position_trace, y_position_trace, **kwargs)
                 
-                apply_corr_map = any([
-                    rectangle.is_in_rectangle((x, y)) and f == at_frame
-                    for f, y, x in zip(frame_index_trace, y_position_trace, x_position_trace)
-                ])
+                # apply_corr_map = any([
+                #     rectangle.is_in_rectangle((x, y)) and f == at_frame
+                #     for f, y, x in zip(frame_index_trace, y_position_trace, x_position_trace)
+                # ])
+                apply_corr_map = False
                 if apply_corr_map:
                     frame_seq_stack[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * corr_map_decay * overlapped_seq + (1 - alpha * corr_map_decay) * latent_seq
                     index_decay_count += 1
                 else:
+                    # print("overlap", overlapped_seq.shape)
+                    # print("latent", latent_seq.shape)
                     frame_seq_stack[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * overlapped_seq + (1 - alpha) * latent_seq
                 del overlapped_seq, latent_seq
         else:
