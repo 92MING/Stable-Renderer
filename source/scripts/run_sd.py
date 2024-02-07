@@ -30,12 +30,12 @@ class Config:
     model_path=GetEnv('SD_PATH', 'runwayml/stable-diffusion-v1-5')
     control_net_model_paths=[
         GetEnv('CONTROLNET_DEPTH_MODEL','lllyasviel/sd-controlnet-depth'),
-        GetEnv('CONTROLNET_NORMAL_MODEL','lllyasviel/sd-controlnet-normal'),
+        # GetEnv('CONTROLNET_NORMAL_MODEL','lllyasviel/sd-controlnet-normal'),
         GetEnv('CONTROLNET_CANNY_MODEL','lllyasviel/sd-controlnet-canny'),
     ]
     device = GetEnv('DEVICE', ('mps' if platform == 'darwin' else 'cuda'))
     # pipeline generation configs
-    prompt = GetEnv('DEFAULT_SD_PROMPT', "wooden boat with a girl on a calm blue lake")
+    prompt = GetEnv('DEFAULT_SD_PROMPT', "leather basketball")
     neg_prompt = GetEnv('DEFAULT_SD_NEG_PROMPT', "low quality, bad anatomy")
     width = GetEnv('DEFAULT_IMG_WIDTH', 512, int)
     height = GetEnv('DEFAULT_IMG_HEIGHT', 512, int)
@@ -44,9 +44,9 @@ class Config:
     strength = 1.0
     # data preparation configs
     num_frames = GetEnv('DEFAULT_NUM_FRAMES',16, int)
-    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-11-20_boat_512")
+    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../rendered_frames/2023-11-28_normal_boat_512")
     # Overlap algorithm configs
-    overlap_algorithm = 'frame_distance'
+    overlap_algorithm = 'average'
     start_timestep = 500
     end_timestep = 1000
     max_workers = 1
@@ -76,8 +76,12 @@ if __name__ == '__main__':
     corr_map_decay_scheduler = Scheduler(
         start_timestep=750, end_timestep=1000,
         interpolate_begin=0, interpolate_end=1, power=1, interpolate_type='linear', no_interpolate_return=1)
+    kernel_radius_scheduler = Scheduler(
+        start_timestep=0, end_timestep=1000,
+        interpolate_begin=0, interpolate_end=0, power=1, interpolate_type='linear', no_interpolate_return=0)
     scheduled_overlap_algorithm = ResizeOverlap(alpha_scheduler=alpha_scheduler, 
                                                 corr_map_decay_scheduler=corr_map_decay_scheduler,
+                                                kernel_radius_scheduler=kernel_radius_scheduler,
                                                 algorithm=overlap_algorithm_factory(config.overlap_algorithm), 
                                                 max_workers=config.max_workers, 
                                                 interpolate_mode='nearest')
@@ -106,7 +110,7 @@ if __name__ == '__main__':
         os.path.join(config.frames_dir, 'canny'),
         num_frames=config.num_frames
     ).Data
-    controlnet_images = [[depth, normal, canny] for depth, normal, canny in zip(depth_images, normal_images, canny_images)]
+    controlnet_images = [[depth, canny] for depth, normal, canny in zip(depth_images, normal_images, canny_images)]
 
     view_normal_map = build_view_normal_map(normal_images, torch.tensor([0,0,1]))
 
@@ -119,7 +123,7 @@ if __name__ == '__main__':
         control_images=controlnet_images,
         width=config.width,
         height=config.height,
-        num_inference_steps=10,
+        num_inference_steps=5,
         strength=config.strength,
         generator=generator,
         guidance_scale=7,

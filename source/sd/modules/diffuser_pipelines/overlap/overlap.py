@@ -1,7 +1,7 @@
 import time
 import tqdm
 
-from typing import List, Literal, Tuple, Protocol
+from typing import List, Literal, Tuple, Protocol, Sequence
 
 from diffusers import AutoencoderKL
 from .algorithms import OverlapAlgorithm
@@ -26,6 +26,7 @@ class Overlap:
         self,
         alpha_scheduler: 'Scheduler',
         corr_map_decay_scheduler: 'Scheduler',
+        kernel_radius_scheduler: Scheduler,
         algorithm: OverlapAlgorithm,
         max_workers: int = 1,
         verbose: bool = True
@@ -47,6 +48,7 @@ class Overlap:
         # Module for scheduling alpha, no need to be private
         self.alpha_scheduler = alpha_scheduler
         self.corr_map_decay_scheduler = corr_map_decay_scheduler
+        self.kernel_radius_scheduler = kernel_radius_scheduler
 
     @property
     def max_workers(self):
@@ -74,7 +76,24 @@ class Overlap:
         """
         return overlap_rate(ovlp_seq, threshold)
     
+    def _get_extended_traces(self,
+                             kernel_radius: int,
+                             frame_index_trace: Sequence[int], 
+                             x_position_trace: Sequence[int], 
+                             y_position_trace: Sequence[int],):
+        extended_frame_index_trace, extended_y_position_trace, extended_x_position_trace = \
+            list(frame_index_trace), list(y_position_trace), list(x_position_trace)
 
+        for idx, (y_pos, x_pos) in enumerate(zip(extended_y_position_trace, extended_x_position_trace)):
+            y_positions = [y_pos + i for i in range(-kernel_radius, kernel_radius + 1)]
+            x_positions = [x_pos + i for i in range(-kernel_radius, kernel_radius + 1)]
+            extended_y_position_trace[idx] = y_positions
+            extended_x_position_trace[idx] = x_positions
+            extended_frame_index_trace[idx] = [frame_index_trace[idx]] * len(y_positions) 
+        
+        return extended_frame_index_trace, extended_y_position_trace, extended_x_position_trace
+
+    @torch.no_grad()
     def __call__(
         self,
         frame_seq: List[torch.Tensor],
@@ -88,18 +107,20 @@ class Overlap:
         num_frames = len(frame_seq)
         batch_size, channels, frame_h, frame_w = frame_seq[0].shape
         frame_seq_stack = torch.stack(frame_seq, dim=0)  # [T, B, C, H, W] # Usually [16, 1, 4, 512, 512]
+        frame_seq_stack_copy = frame_seq_stack.detach()
         mask_seq = torch.zeros((num_frames, batch_size, channels, frame_h, frame_w), dtype=torch.uint8, device=frame_seq[0].device)  # [T, 1, H, W]
 
         alpha = self.alpha_scheduler(step, timestep)
         corr_map_decay = self.corr_map_decay_scheduler(step, timestep)
         apply_corr_map = False
+        kernel_radius = int(self.kernel_radius_scheduler(step, timestep))
 
         # rectangle = Rectangle((170, 168), (351, 297))
         rectangle = Rectangle((170, 168), (351, 220))
         # rectangle = Rectangle((0, 0), (frame_w, frame_h))
         at_frame = 0
 
-        logu.info(f"Scheduler: alpha: {alpha} | corr_map_decay: {corr_map_decay:.2f} | timestep: {timestep:.2f}")
+        logu.info(f"Scheduler: alpha: {alpha} | corr_map_decay: {corr_map_decay:.2f} | kernel_radius: {kernel_radius} | timestep: {timestep:.2f}")
         
         len_1_vertex_count = index_decay_count = 0
 
@@ -117,22 +138,18 @@ class Overlap:
                     continue
                 position_trace, frame_index_trace = zip(*v_info)
                 y_position_trace, x_position_trace = zip(*position_trace) # h, w
-                frame_index_trace, y_position_trace, x_position_trace = \
-                    list(frame_index_trace), list(y_position_trace), list(x_position_trace)
 
-                overlap_in_range = 3
-                for idx, (y_pos, x_pos) in enumerate(zip(y_position_trace, x_position_trace)):
-                    y_positions = [y_pos + i for i in range(-overlap_in_range, overlap_in_range + 1)]
-                    x_positions = [x_pos + i for i in range(-overlap_in_range, overlap_in_range + 1)]
-                    y_position_trace[idx] = y_positions
-                    x_position_trace[idx] = x_positions
-                    frame_index_trace[idx] = [frame_index_trace[idx]] * len(y_positions) 
+                extended_frame_index_trace, extended_y_position_trace, extended_x_position_trace = \
+                    self._get_extended_traces(kernel_radius, frame_index_trace, x_position_trace, y_position_trace)
                     
-
-
                 latent_seq = frame_seq_stack[frame_index_trace, :, :, y_position_trace, x_position_trace]
+                average_pool_nearby_pixels_latent_seq = frame_seq_stack[
+                    extended_frame_index_trace, :, :, extended_y_position_trace, extended_x_position_trace].mean(dim=1)
+
                 overlapped_seq = self.algorithm.overlap(
-                    latent_seq, frame_index_trace, x_position_trace, y_position_trace, **kwargs)
+                    average_pool_nearby_pixels_latent_seq, frame_index_trace, x_position_trace, y_position_trace, **kwargs)
+                
+                del average_pool_nearby_pixels_latent_seq
                 
                 # apply_corr_map = any([
                 #     rectangle.is_in_rectangle((x, y)) and f == at_frame
@@ -140,12 +157,12 @@ class Overlap:
                 # ])
                 apply_corr_map = False
                 if apply_corr_map:
-                    frame_seq_stack[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * corr_map_decay * overlapped_seq + (1 - alpha * corr_map_decay) * latent_seq
+                    frame_seq_stack_copy[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * corr_map_decay * overlapped_seq + (1 - alpha * corr_map_decay) * latent_seq
                     index_decay_count += 1
                 else:
                     # print("overlap", overlapped_seq.shape)
                     # print("latent", latent_seq.shape)
-                    frame_seq_stack[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * overlapped_seq + (1 - alpha) * latent_seq
+                    frame_seq_stack_copy[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * overlapped_seq + (1 - alpha) * latent_seq
                 del overlapped_seq, latent_seq
         else:
             raise NotImplementedError("Multiprocessing not implemented")
@@ -153,7 +170,7 @@ class Overlap:
         logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame") if self.verbose else ...
         logu.debug(f"Vertex appeared once: {len_1_vertex_count * 100 / max(len(corr_map), 1) :.2f}% | Index decayed: {index_decay_count}")
 
-        return frame_seq_stack
+        return frame_seq_stack_copy
 
 
 class ResizeOverlap(Overlap):
@@ -161,6 +178,7 @@ class ResizeOverlap(Overlap):
         self,
         alpha_scheduler: Scheduler,
         corr_map_decay_scheduler: Scheduler,
+        kernel_radius_scheduler: Scheduler,
         algorithm: OverlapAlgorithm,
         max_workers: int = 1,
         verbose: bool = True,
@@ -169,6 +187,7 @@ class ResizeOverlap(Overlap):
         super().__init__(
             alpha_scheduler=alpha_scheduler,
             corr_map_decay_scheduler=corr_map_decay_scheduler,
+            kernel_radius_scheduler=kernel_radius_scheduler,
             algorithm=algorithm,
             max_workers=max_workers,
             verbose=verbose,
@@ -232,12 +251,14 @@ class VAEOverlap(Overlap):
         algorithm: OverlapAlgorithm,
         alpha_scheduler: Scheduler,
         corr_map_decay_scheduler: Scheduler,
+        kernel_radius_scheduler: Scheduler,
         max_workers: int = 1,
         verbose: bool = True,
     ):
         super().__init__(
             alpha_scheduler=alpha_scheduler,
             corr_map_decay_scheduler=corr_map_decay_scheduler,
+            kernel_radius_scheduler=kernel_radius_scheduler,
             algorithm=algorithm,
             max_workers=max_workers,
             verbose=verbose,
