@@ -320,7 +320,17 @@ class CorrespondenceMap:
                     del corr_map_copy[key]
                     break
         self._correspondence_map = corr_map_copy
-
-
+    
+    def merge_nearby(self, distance: int):
+        merged_corr_map = {}
+        for key in self._correspondence_map.keys():
+            object_id, material_id, texture_x, texture_y = key
+            trace = merged_corr_map.get((object_id, material_id, texture_x // distance, texture_y // distance), [])
+            for t in self._correspondence_map[key]:
+                if not t in trace:
+                    trace.append(t)
+            merged_corr_map[(object_id, material_id, texture_x // distance, texture_y // distance)] = trace
+        logu.info(f"Correspondence map vertices before merge: {len(self._correspondence_map)}, after merge: {len(merged_corr_map)}")
+        self._correspondence_map = merged_corr_map
 
 __all__ = ['CorrespondenceMap']
