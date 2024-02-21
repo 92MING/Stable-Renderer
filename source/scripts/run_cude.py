@@ -55,7 +55,7 @@ if __name__ == '__main__':
             self.camera.addComponent(CameraControl)
             # self.camera.transform.lookAt([0, 0, 0])
 
-            self.cube = GameObject('Cube', position=[0, 0, 0])
+            self.cube = GameObject('Cube', position=[0, 0.5, -1])
             self.cube.addComponent(MeshRenderer, mesh=self.cube_mesh, materials=self.cube_mat)
             self.cube.addComponent(AutoRotation)
 
