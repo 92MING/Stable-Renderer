@@ -36,6 +36,7 @@ class Config:
         # Download the two files: loose_controlnet.safetensors and config.json from the following link
         # https://huggingface.co/AIRDGempoll/LooseControlNet/tree/main
         # and place them in the following directory
+        # rename loose_controlnet.safetensors to diffusion_pytorch_model.safetensors
         GetEnv('CONTROLNET_LOOSE_DEPTH_MODEL','/research/d1/spc/ckwong1/document/Stable-Renderer/source/sd/models/loose_controlnet'),
         # GetEnv('CONTROLNET_NORMAL_MODEL','lllyasviel/sd-controlnet-normal'),
         # GetEnv('CONTROLNET_CANNY_MODEL','lllyasviel/sd-controlnet-canny'),
