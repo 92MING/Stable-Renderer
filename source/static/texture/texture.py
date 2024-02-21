@@ -6,11 +6,16 @@ from PIL import Image
 from static.enums import *
 from utils.decorator import Overload
 import numpy as np
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from static.shader import Shader
+
 
 class Texture(ResourcesObj):
     _BaseName = 'Texture'
 
-    def __init__(self, name,
+    def __init__(self,
+                 name,
                  format:TextureFormat=TextureFormat.RGB,
                  min_filter:TextureFilter=TextureFilter.LINEAR_MIPMAP_LINEAR,
                  mag_filter:TextureFilter=TextureFilter.LINEAR,
@@ -34,53 +39,67 @@ class Texture(ResourcesObj):
     @property
     def textureID(self):
         return self._texID
+
     @property
     def internalFormat(self):
         return self._internalFormat or self.format.get_default_internal_format()
+
     @property
     def buffer(self):
         return self._buffer
+
     @property
     def width(self):
         return self._width
+
     @property
     def height(self):
         return self._height
+
     @property
     def format(self):
         return self._format
+
     @format.setter
     def format(self, value):
         if self._texID is not None:
             raise Exception('Cannot change tex format after texture is loaded.')
         self._format = value
+
     @property
     def min_filter(self):
         return self._min_filter
+
     @min_filter.setter
     def min_filter(self, value:TextureFilter):
         if self._texID is not None:
             raise Exception('Cannot change filter after texture is loaded.')
         self._min_filter = value
+
     @property
     def mag_filter(self):
         return self._mag_filter
+
     @mag_filter.setter
     def mag_filter(self, value:TextureFilter):
         if self._texID is not None:
             raise Exception('Cannot change filter after texture is loaded.')
         self._mag_filter = value
+
     @property
     def s_wrap(self):
         return self._s_wrap
+
     @s_wrap.setter
     def s_wrap(self, value):
         if self._texID is not None:
             raise Exception('Cannot change s_wrap after texture is loaded.')
         self._s_wrap = value
+
     @property
     def t_wrap(self):
         return self._t_wrap
+
     @t_wrap.setter
     def t_wrap(self, value):
         if self._texID is not None:
@@ -99,6 +118,7 @@ class Texture(ResourcesObj):
         gl.glActiveTexture(gl.GL_TEXTURE0 + slot)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._texID)
         gl.glUniform1i(uniformID, slot)
+
     @Overload
     def bind(self, slot:int, name:str, shader:'Shader'):
         '''Use shader, and bind texture to a slot and set shader uniform with your given name.'''
@@ -112,6 +132,7 @@ class Texture(ResourcesObj):
         self._height = image.height
         self._width = image.width
         image.close()
+
     def sendToGPU(self):
         '''Send data to GPU memory'''
         if self._texID is not None:
@@ -135,6 +156,7 @@ class Texture(ResourcesObj):
         if (self.mag_filter in (TextureFilter.LINEAR_MIPMAP_LINEAR, TextureFilter.NEAREST_MIPMAP_NEAREST) or
             self.min_filter in (TextureFilter.LINEAR_MIPMAP_LINEAR, TextureFilter.NEAREST_MIPMAP_NEAREST)):
             gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
+
     def clear(self):
         '''
         Clear all data and release GPU memory if it has been loaded.
@@ -157,6 +179,10 @@ class Texture(ResourcesObj):
         self._width = None
         self._height = None
         self._internalFormat = None
+
+    @staticmethod
+    def CreateVirtualMap(height: int = 1024, width: int = 1024):
+        pass
 
     @classmethod
     def Load(cls, path, name=None,

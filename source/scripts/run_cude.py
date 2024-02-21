@@ -61,5 +61,6 @@ if __name__ == '__main__':
 
     Sample.Run(enableGammaCorrection=True,
                debug=False,
+               mapSavingInterval=4,
                winSize=(512, 512),
                needOutputMaps=True,)

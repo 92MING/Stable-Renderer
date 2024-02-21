@@ -40,6 +40,7 @@ class _FindableEnum(Enum):
             if e.value == value:
                 return e
         return None
+
 class MouseButton(_FindableEnum):
     LEFT = 0
     RIGHT = 1
@@ -50,16 +51,19 @@ class MouseButton(_FindableEnum):
     MOUSE_BTN_6 = 6
     MOUSE_BTN_7 = 7
     MOUSE_BTN_8 = 8
+
 class InputAction(_FindableEnum):
     RELEASE = 0
     PRESS = 1
     HOLD = 999
+
 class InputModifier(_FindableEnum):
     NONE = 0
     SHIFT = 1
     CTRL = 2
     ALT = 4
     SUPER = 8
+
 class Key(_FindableEnum):
     UNKNOWN = -1
     SPACE = 32
@@ -152,6 +156,7 @@ class TextureWrap(Enum):
     MIRROR_CLAMP_TO_EDGE = gl.GL_MIRROR_CLAMP_TO_EDGE
     CLAMP_TO_EDGE = gl.GL_CLAMP_TO_EDGE
     CLAMP_TO_BORDER = gl.GL_CLAMP_TO_BORDER
+
 class TextureFilter(Enum):
     NEAREST = gl.GL_NEAREST
     LINEAR = gl.GL_LINEAR
@@ -159,11 +164,14 @@ class TextureFilter(Enum):
     LINEAR_MIPMAP_NEAREST = gl.GL_LINEAR_MIPMAP_NEAREST
     NEAREST_MIPMAP_LINEAR = gl.GL_NEAREST_MIPMAP_LINEAR
     LINEAR_MIPMAP_LINEAR = gl.GL_LINEAR_MIPMAP_LINEAR
+
 class TextureFormat(Enum):
+
     RGB = gl.GL_RGB
     RGBA = gl.GL_RGBA
     DEPTH_COMPONENT = gl.GL_DEPTH_COMPONENT
     DEPTH_STENCIL = gl.GL_DEPTH_STENCIL
+
     def get_PIL_convert_mode(self):
         if self == TextureFormat.RGB:
             return 'RGB'
@@ -173,6 +181,7 @@ class TextureFormat(Enum):
             return 'L'
         elif self == TextureFormat.DEPTH_STENCIL:
             return 'L'
+
     def get_default_internal_format(self):
         if self == TextureFormat.RGB:
             return gl.GL_RGB
@@ -195,6 +204,7 @@ class PrimitiveType(Enum):
     QUADS = gl.GL_QUADS
     QUAD_STRIP = gl.GL_QUAD_STRIP
     POLYGON = gl.GL_POLYGON
+
 class ShaderType(Enum):
     """Shader types of OpenGL"""
     VERTEX = gl.GL_VERTEX_SHADER
