@@ -41,10 +41,18 @@ def load_pipe(
     else:
         controlnets = []
         for control_net_model_path in control_net_model_paths:
-            controlnet = ControlNetModel.from_pretrained(
-                control_net_model_path,
-                torch_dtype=torch_dtype
-            )
+            controlnet = None
+            try:
+                controlnet = ControlNetModel.from_pretrained(
+                    control_net_model_path,
+                    torch_dtype=torch_dtype
+                )
+            except Exception as e:
+                controlnet = ControlNetModel.from_pretrained(
+                    control_net_model_path,
+                    torch_dtype=torch_dtype,
+                    use_safetensors=True
+                )
             controlnets.append(controlnet)
         controlnet = MultiControlNetModel(controlnets)
 

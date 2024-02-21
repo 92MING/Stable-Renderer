@@ -1,7 +1,7 @@
 import time
 import tqdm
 
-from typing import List, Literal, Tuple, Protocol, Sequence
+from typing import List, Sequence
 
 from diffusers import AutoencoderKL
 from .algorithms import OverlapAlgorithm
@@ -80,13 +80,17 @@ class Overlap:
                              kernel_radius: int,
                              frame_index_trace: Sequence[int], 
                              x_position_trace: Sequence[int], 
-                             y_position_trace: Sequence[int],):
+                             y_position_trace: Sequence[int],
+                             max_x: int = 512,
+                             max_y: int = 512):
         extended_frame_index_trace, extended_y_position_trace, extended_x_position_trace = \
             list(frame_index_trace), list(y_position_trace), list(x_position_trace)
 
         for idx, (y_pos, x_pos) in enumerate(zip(extended_y_position_trace, extended_x_position_trace)):
-            y_positions = [y_pos + i for i in range(-kernel_radius, kernel_radius + 1)]
-            x_positions = [x_pos + i for i in range(-kernel_radius, kernel_radius + 1)]
+            y_positions, x_positions = [], []
+            for i in range(-kernel_radius, kernel_radius + 1):
+                y_positions.append(min(max(y_pos + i, 0), max_y-1))
+                x_positions.append(min(max(x_pos + i, 0), max_x-1))
             extended_y_position_trace[idx] = y_positions
             extended_x_position_trace[idx] = x_positions
             extended_frame_index_trace[idx] = [frame_index_trace[idx]] * len(y_positions) 
@@ -122,7 +126,7 @@ class Overlap:
 
         logu.info(f"Scheduler: alpha: {alpha} | corr_map_decay: {corr_map_decay:.2f} | kernel_radius: {kernel_radius} | timestep: {timestep:.2f}")
         
-        len_1_vertex_count = index_decay_count = 0
+        len_1_vertex_count = index_decay_count = avg_trace_length = 0
 
         tic = time.time()
         progress_slice = len(corr_map) // 100
@@ -135,12 +139,15 @@ class Overlap:
                 if len(v_info) == 1:
                     # no value changes when vertex appear once only
                     len_1_vertex_count += 1
+                    avg_trace_length += 1
                     continue
+                # Extract traces from correspondence map
                 position_trace, frame_index_trace = zip(*v_info)
                 y_position_trace, x_position_trace = zip(*position_trace) # h, w
-
                 extended_frame_index_trace, extended_y_position_trace, extended_x_position_trace = \
-                    self._get_extended_traces(kernel_radius, frame_index_trace, x_position_trace, y_position_trace)
+                    self._get_extended_traces(kernel_radius, frame_index_trace, x_position_trace, y_position_trace,
+                                              max_x=frame_w, max_y=frame_h)
+                avg_trace_length += len(frame_index_trace)
                     
                 latent_seq = frame_seq_stack[frame_index_trace, :, :, y_position_trace, x_position_trace]
                 average_pool_nearby_pixels_latent_seq = frame_seq_stack[
@@ -160,15 +167,13 @@ class Overlap:
                     frame_seq_stack_copy[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * corr_map_decay * overlapped_seq + (1 - alpha * corr_map_decay) * latent_seq
                     index_decay_count += 1
                 else:
-                    # print("overlap", overlapped_seq.shape)
-                    # print("latent", latent_seq.shape)
                     frame_seq_stack_copy[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * overlapped_seq + (1 - alpha) * latent_seq
                 del overlapped_seq, latent_seq
         else:
             raise NotImplementedError("Multiprocessing not implemented")
         toc = time.time()
         logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame") if self.verbose else ...
-        logu.debug(f"Vertex appeared once: {len_1_vertex_count * 100 / max(len(corr_map), 1) :.2f}% | Index decayed: {index_decay_count}")
+        logu.debug(f"Vertex appeared once: {len_1_vertex_count * 100 / max(len(corr_map), 1) :.2f}% | Average trace length: {avg_trace_length / max(len(corr_map), 1) :.2f} | Index decayed: {index_decay_count}")
 
         return frame_seq_stack_copy
 
