@@ -81,7 +81,7 @@ class Mesh(ResourcesObj):
             raise Exception('Data is not sent to GPU')
         gl.glBindVertexArray(self.vao)
         gl.glDrawArrays(self.drawMode.value, 0, self.totalFaceCount * self.vertexCountPerFace)
-    def _calculate_tangent(self, center_point_xyz, left_point_xyz, right_point_xyz, center_point_uv, left_point_uv, right_point_uv)->list[float]:
+    def _calculate_tangent(self, center_point_xyz, left_point_xyz, right_point_xyz, center_point_uv, left_point_uv, right_point_uv)->List[float]:
         '''
         calculate tangent.
         :param center_point_xyz: center point of the triangle in 3D space
@@ -159,8 +159,10 @@ class Mesh(ResourcesObj):
 
 # region basic shapes
 class _Mesh_Plane(Mesh):
+
     _plane_vertices = None
     '''For plane mesh, the vertices data is the same. So we can use the same data for all plane meshes.'''
+
     @classmethod
     def _GetPlaneVertices(cls):
         if cls._plane_vertices is None:
@@ -183,9 +185,11 @@ class _Mesh_Plane(Mesh):
         self._totalFaceCount = 1
         self._has_normals = True
         self._has_uvs = True
+
     @property
     def vertices(self):
         return self._GetPlaneVertices()
+
     def sendToGPU(self):
         if self.vao is not None:
             return  # already sent to GPU
@@ -219,6 +223,7 @@ class _Mesh_Plane(Mesh):
             gl.glDeleteBuffers(1, [self.vbo])
             self._vao = None
             self._vbo = None
+
 class _Mesh_Sphere(Mesh):
     def __new__(cls, segment:int):
         return super().__new__(cls, f'_Default_Sphere_Mesh_{segment}')
@@ -297,9 +302,12 @@ class _Mesh_Sphere(Mesh):
             self._vao = None
             self._vbo = None
             self._ebo = None
+
 class _Mesh_Cube(Mesh):
+
     _cube_vertices:List[float] = None
     _cube_indices:List[int] = None
+
     @classmethod
     def _GetCubeVertices(cls)->List[float]:
         if cls._cube_vertices is None:
@@ -316,6 +324,7 @@ class _Mesh_Cube(Mesh):
                 -0.5, 0.5, 0.5, 0, 0, 1, 1, 1,
             ]
         return cls._cube_vertices
+
     @classmethod
     def _GetCubeIndices(cls)->List[int]:
         if cls._cube_indices is None:
@@ -331,6 +340,7 @@ class _Mesh_Cube(Mesh):
 
     def __new__(cls):
         return super().__new__(cls, '_Default_Cube_Mesh')
+
     def __init__(self):
         super().__init__(self.name, keep_vertices=True)
         self._drawMode = PrimitiveType.TRIANGLES
@@ -339,15 +349,19 @@ class _Mesh_Cube(Mesh):
         self._ebo = None
         self._has_normals = True
         self._has_uvs = True
+
     @property
     def vertices(self)->List[float]:
         return self._GetCubeVertices()
+
     @property
     def indices(self)->List[int]:
         return self._GetCubeIndices()
+
     @property
     def ebo(self):
         return self._ebo
+
     def sendToGPU(self):
         if self.vao is not None:
             return
@@ -382,6 +396,7 @@ class _Mesh_Cube(Mesh):
             raise Exception('Data is not sent to GPU')
         gl.glBindVertexArray(self.vao)
         gl.glDrawElements(gl.GL_TRIANGLES, len(self.indices), gl.GL_UNSIGNED_INT, None)
+
     def clear(self):
         if self.vao is not None:
             gl.glDeleteVertexArrays(1, [self.vao])
@@ -390,6 +405,7 @@ class _Mesh_Cube(Mesh):
             self._vao = None
             self._vbo = None
             self._ebo = None
+
 # endregion
 
 __all__ = ['Mesh']

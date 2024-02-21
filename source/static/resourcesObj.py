@@ -2,8 +2,11 @@ from utils.global_utils import GetOrAddGlobalValue, GetGlobalValue
 import os
 
 _RESOURCES_CLSES = GetOrAddGlobalValue('_RESOURCES_CLSES', dict()) #cls_name: cls
+
 class ResourcesObjMeta(type):
+
     _Format_Clses:dict = None # format: sub cls
+
     def __new__(cls, *args, **kwargs):
         cls_name = args[0]
         if cls_name in _RESOURCES_CLSES:
@@ -92,6 +95,7 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
     def __new__(cls, name, *args, **kwargs):
         if cls._Instances is None:
             cls._Instances = {}
+
         if name in cls._Instances:
             obj = cls._Instances[name]
             obj.__init__ = lambda *a, **kw: None
@@ -101,6 +105,7 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
             obj._name = name
             cls._Instances[name] = obj
             return obj
+
     def __init__(self, name, *args, **kwargs):
         pass
 

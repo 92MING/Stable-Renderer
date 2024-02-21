@@ -11,8 +11,7 @@ class ResourcesManager(Manager):
 
     def _prepare(self):
         resources_clses = GetOrAddGlobalValue('_RESOURCES_CLSES', dict()).values()
-        base_clses = [cls for cls in resources_clses if cls._BaseName == cls.ClsName()]
-        for cls in sorted(base_clses, key=lambda cls: cls._LoadOrder):
+        for cls in sorted(resources_clses, key=lambda cls: cls._LoadOrder):
             for instance in cls.AllInstances():
                 try:
                     instance.sendToGPU()
