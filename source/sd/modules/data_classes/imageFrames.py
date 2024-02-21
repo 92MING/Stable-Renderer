@@ -15,7 +15,7 @@ class ImageFrames(Frames):
     def from_existing_directory(cls,
                                 directory: str,
                                 num_frames: int):
-        assert os.path.exists(directory), f"Directroy {directory} not found"
+        assert os.path.exists(directory), f"Directory {directory} not found"
         file_filter = lambda fname: fname.endswith((".jpeg", ".png", ".bmp", ".jpg"))
         extract_key = lambda fname: int(re.search(r"\d+", fname).group())
         data_container = []

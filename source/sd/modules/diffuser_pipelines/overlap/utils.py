@@ -132,7 +132,7 @@ def draw_rectangle(image: np.ndarray,
 
 if __name__ == "__main__":
     def gen_canny_helper():
-        root = "/research/d1/spc/ckwong1/document/Stable-Renderer/resources/pre-generated-maps/miku"
+        root = "/research/d1/spc/ckwong1/document/Stable-Renderer/resources/example-map-outputs/cube"
         generate_canny_images(
             images_path=os.path.join(root, 'color'),
             output_path=os.path.join(root, 'canny'),

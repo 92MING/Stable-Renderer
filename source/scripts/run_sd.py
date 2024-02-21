@@ -32,8 +32,13 @@ class Config:
     model_path=GetEnv('SD_PATH', 'runwayml/stable-diffusion-v1-5')
     control_net_model_paths=[
         # GetEnv('CONTROLNET_DEPTH_MODEL','lllyasviel/sd-controlnet-depth'),
+
+        # Download the two files: loose_controlnet.safetensors and config.json from the following link
+        # https://huggingface.co/AIRDGempoll/LooseControlNet/tree/main
+        # and place them in the following directory
+        GetEnv('CONTROLNET_LOOSE_DEPTH_MODEL','/research/d1/spc/ckwong1/document/Stable-Renderer/source/sd/models/loose_controlnet'),
         # GetEnv('CONTROLNET_NORMAL_MODEL','lllyasviel/sd-controlnet-normal'),
-        GetEnv('CONTROLNET_CANNY_MODEL','lllyasviel/sd-controlnet-canny'),
+        # GetEnv('CONTROLNET_CANNY_MODEL','lllyasviel/sd-controlnet-canny'),
     ]
     device = GetEnv('DEVICE', ('mps' if platform == 'darwin' else 'cuda'))
     # pipeline generation configs
@@ -46,7 +51,7 @@ class Config:
     strength = 1.0
     # data preparation configs
     num_frames = GetEnv('DEFAULT_NUM_FRAMES',16, int)
-    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../resources/pre-generated-maps/boat")
+    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../resources/example-map-outputs/cube")
     overlap_algorithm = 'average'
     start_timestep = 500
     end_timestep = 1000
@@ -112,7 +117,7 @@ if __name__ == '__main__':
         os.path.join(config.frames_dir, 'canny'),
         num_frames=config.num_frames
     ).Data
-    controlnet_images = [canny for depth, normal, canny in zip(depth_images, normal_images, canny_images)]
+    controlnet_images = [depth for depth, normal, canny in zip(depth_images, normal_images, canny_images)]
 
     view_normal_map = build_view_normal_map(normal_images, torch.tensor([0,0,1]))
 
@@ -129,7 +134,7 @@ if __name__ == '__main__':
         strength=config.strength,
         generator=generator,
         guidance_scale=7,
-        controlnet_conditioning_scale=0.8,
+        controlnet_conditioning_scale=1.0,
         add_predicted_noise=False,
         correspondence_map=corr_map,
         overlap_algorithm=scheduled_overlap_algorithm,
