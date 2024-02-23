@@ -67,7 +67,7 @@ class Camera(Component):
 
     @property
     def viewMatrix(self):
-        pos = self.transform.globalPos
+        pos = self.transform.position
         forward = self.transform.forward
         up = self.transform.up
         return glm.lookAt(pos, pos + forward, up)
@@ -96,7 +96,7 @@ class Camera(Component):
         if self.isMainCamera:
             if self.engine.WindowManager.BgColor != self.bgColor:
                 self.engine.WindowManager.BgColor = self.bgColor
-            worldPos, worldForward = self.transform.globalPos, self.transform.forward
+            worldPos, worldForward = self.transform.position, self.transform.forward
             viewMatrix, projectionMatrix = self.viewMatrix, self.projectionMatrix
             if self.engine.RuntimeManager.UpdateUBO_ViewMatrix != viewMatrix:
                 self.engine.RuntimeManager.UpdateUBO_ViewMatrix(viewMatrix)

@@ -23,7 +23,7 @@ if __name__ == '__main__':
             self.moveFowardSpd = 0.1
             self._camera = None
         def start(self):
-            self.transform.localPos = self.defaultPos
+            self.transform.localPosition = self.defaultPos
             self.transform.lookAt([0, 1, 0])
             self.transform.setLocalRotY(0)
         @property
@@ -34,14 +34,14 @@ if __name__ == '__main__':
         def update(self):
             inputManager = self.engine.InputManager
             if inputManager.GetKeyDown(Key.R):
-                self.transform.globalPos = self.defaultPos
+                self.transform.position = self.defaultPos
             if inputManager.GetMouseBtn(MouseButton.LEFT):
                 up = self.transform.up
                 right = self.transform.right
                 mouseDelta = inputManager.MouseDelta
-                self.transform.globalPos = self.transform.globalPos + right * -mouseDelta[0] * self.moveSpd + up * mouseDelta[1] * self.moveSpd
+                self.transform.position = self.transform.position + right * -mouseDelta[0] * self.moveSpd + up * mouseDelta[1] * self.moveSpd
             if inputManager.HasMouseScrolled:
-                self.transform.globalPos = self.transform.globalPos + self.transform.forward * inputManager.MouseScroll[1] * self.moveFowardSpd
+                self.transform.position = self.transform.position + self.transform.forward * inputManager.MouseScroll[1] * self.moveFowardSpd
 
     class Sample(Engine):
         def beforePrepare(self):

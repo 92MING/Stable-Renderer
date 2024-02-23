@@ -7,8 +7,8 @@ from static import Color
 
 class WindowManager(Manager):
 
-    _FrameEndFuncOrder = RenderManager._FrameEndFuncOrder + 1 # swap buffer should be called after render
-    _ReleaseFuncOrder = 999 # terminate glfw should be called at the end
+    FrameEndFuncOrder = RenderManager.FrameEndFuncOrder + 1 # swap buffer should be called after render
+    ReleaseFuncOrder = 999 # terminate glfw should be called at the end
 
     def __init__(self, title, size, windowResizable = False, bgColor=Color.CLEAR):
         super().__init__()
@@ -42,9 +42,9 @@ class WindowManager(Manager):
     def _resizeCallback(self, window, width, height):
         self._onWindowResize.invoke(width, height)
 
-    def _onFrameBegin(self):
+    def on_frame_begin(self):
         self._onWindowResize.release()
-    def _release(self):
+    def release(self):
         glfw.terminate()
 
     # region properties

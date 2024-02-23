@@ -6,7 +6,8 @@ from PIL import Image
 from static.enums import *
 from utils.decorator import Overload
 import numpy as np
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from static.shader import Shader
 
@@ -125,9 +126,28 @@ class Texture(ResourcesObj):
         shader.useProgram()
         self.bind(slot, shader.getUniformID(name))
 
-    def load(self, path):
-        '''Default load by PIL'''
+    @Overload
+    def load(self, path: Union[str, Path]):
+        '''Load the image on the given path by PIL.'''
+        print('Loading texture by path:', path, '...')
         image = Image.open(path).convert(self.format.get_PIL_convert_mode())
+        self._buffer = image.transpose(Image.FLIP_TOP_BOTTOM).tobytes()
+        self._height = image.height
+        self._width = image.width
+        image.close()
+
+    @Overload
+    def load(self, data: bytes, width: int, height: int):
+        '''Load by bytes directly'''
+        print('Loading texture by bytes...')
+        self._buffer = data
+        self._width = width
+        self._height = height
+
+    @Overload
+    def load(self, image: Image):
+        '''Load by PIL image'''
+        print('Loading texture by PIL image...')
         self._buffer = image.transpose(Image.FLIP_TOP_BOTTOM).tobytes()
         self._height = image.height
         self._width = image.width
@@ -181,8 +201,27 @@ class Texture(ResourcesObj):
         self._internalFormat = None
 
     @staticmethod
-    def CreateVirtualMap(height: int = 1024, width: int = 1024):
-        pass
+    def CreateVirtualTex(name=None,
+                         height: int = 1024,
+                         width: int = 1024,
+                         fill_data: float = 1.0,
+                         )->'Texture':
+        if not name:
+            name = f"VirtualTex_{width}x{height}"
+            count = 0
+            while name in ResourcesObj.AllInstances():
+                count += 1
+                name = f"VirtualTex_{width}x{height}_{count}"
+        texture = Texture(name,
+                          TextureFormat.RGB,
+                          TextureFilter.LINEAR_MIPMAP_LINEAR,
+                          TextureFilter.LINEAR,
+                          TextureWrap.REPEAT,
+                          TextureWrap.REPEAT)
+        texture.load(np.full((width, height, 3), int(fill_data*255), dtype=np.int32).tobytes(),
+                     width,
+                     height)
+        return texture
 
     @classmethod
     def Load(cls, path, name=None,

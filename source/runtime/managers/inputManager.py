@@ -57,9 +57,9 @@ class InputManager(Manager):
         glfw.set_mouse_button_callback(window, self._mouseButtonCallback)
         glfw.set_key_callback(window, self._keyCallback)
 
-    def _onFrameBegin(self):
+    def on_frame_begin(self):
         glfw.poll_events()  # update input info
-    def _onFrameEnd(self):
+    def on_frame_end(self):
         self._mouseDelta = (0, 0)
         self._mouseScroll = (0, 0)
         for key in self._mouseKeys.copy():

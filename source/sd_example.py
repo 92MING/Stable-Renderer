@@ -31,11 +31,11 @@ def main():
     prompt = "a boat on the lake, best quality, beautiful, good lighting"
     neg_prompt = "low quality, bad anatomy"
 
-    # Prepare torch generator
+    # prepare torch generator
     seed = 42  # Random seed
     generator = torch.Generator(device=config.device).manual_seed(seed)
 
-    # 2. Prepare images
+    # 2. prepare images
     n = 10  # Number of frames to use
     start = 2  # Start frame
     end = n  # End frame
@@ -46,7 +46,7 @@ def main():
 
     width, height = frames[0].size
 
-    # 3. Prepare control images.
+    # 3. prepare control images.
     depth_dir = TEST_DIR / "depth"
     normal_dir = TEST_DIR / "normal"
     depth_img_paths = utils.list_frames(depth_dir)[:n]
@@ -61,7 +61,7 @@ def main():
 
     control_images = [[e[0], e[1]] for e in zip(depth_images, normal_images)]
 
-    # 4. Prepare correspondence map
+    # 4. prepare correspondence map
     corr_map = utils.make_correspondence_map(TEST_DIR / "id", TEST_DIR / "corr_map.pkl", force_recreate=False, num_frames=n)
     corr_map = utils.truncate_corr_map(corr_map, start=start, end=end)
 

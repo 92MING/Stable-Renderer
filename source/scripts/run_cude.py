@@ -1,66 +1,34 @@
 import sys, os
-sys.path.append(os.getcwd())
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import os.path
-from runtime.components import Camera, MeshRenderer
+from runtime.components import Camera, MeshRenderer, CameraControl
 from runtime.gameObj import GameObject
 from runtime.component import Component
 from runtime.engine import Engine
-from static import Material, Mesh, Texture, DefaultTextureType, Key, MouseButton
-from utils.path_utils import *
-
+from static import Material, Mesh, Texture, DefaultTextureType
 
 if __name__ == '__main__':
 
     class AutoRotation(Component):
         def update(self):
-            self.transform.rotateLocalY(0.2)
-
-    class CameraControl(Component):
-        def awake(self):
-            self.defaultPos = [0, 1.25, 3]
-            self.moveSpd = 0.005
-            self.moveFowardSpd = 0.1
-            self._camera = None
-        def start(self):
-            self.transform.localPos = self.defaultPos
-            self.transform.lookAt([0, 1, 0])
-            self.transform.setLocalRotY(0)
-        @property
-        def camera(self)->Camera:
-            if self._camera is None:
-                self._camera = self.gameObj.getComponent(Camera)
-            return self._camera
-        def update(self):
-            inputManager = self.engine.InputManager
-            if inputManager.GetKeyDown(Key.R):
-                self.transform.globalPos = self.defaultPos
-            if inputManager.GetMouseBtn(MouseButton.LEFT):
-                up = self.transform.up
-                right = self.transform.right
-                mouseDelta = inputManager.MouseDelta
-                self.transform.globalPos = self.transform.globalPos + right * -mouseDelta[0] * self.moveSpd + up * mouseDelta[1] * self.moveSpd
-            if inputManager.HasMouseScrolled:
-                self.transform.globalPos = self.transform.globalPos + self.transform.forward * inputManager.MouseScroll[1] * self.moveFowardSpd
+            self.transform.rotateLocalY(0.3)
 
     class Sample(Engine):
         def beforePrepare(self):
             self.cube_mesh = Mesh.Cube()
             self.cube_mat = Material.Default_Opaque_Material()
-            self.cube_mat.addDefaultTexture(Texture.Load(os.path.join(RESOURCES_DIR, 'boat', 'boatColor.png')), DefaultTextureType.DiffuseTex)
-            # self.boatMaterial.addDefaultTexture(Texture.Load(os.path.join(RESOURCES_DIR, 'boat', 'boatNormal.png')), DefaultTextureType.NormalTex)
+            self.cube_mat.addDefaultTexture(Texture.CreateVirtualTex(), DefaultTextureType.DiffuseTex)
 
-            self.camera = GameObject('Camera', position=[4, 4, -3])
+            self.camera = GameObject('Main Cam', position=[4, 4, -3])
             self.camera.addComponent(Camera)
-            self.camera.addComponent(CameraControl)
-            # self.camera.transform.lookAt([0, 0, 0])
+            self.camera.addComponent(CameraControl, defaultPos=[4, 4, -3], defaultLookAt=[0, 0, 0])
 
-            self.cube = GameObject('Cube', position=[0, 0.5, -1])
+            self.cube = GameObject('Rect Cube', position=[0, 0, 0], scale=[0.9, 0.9 ,2.6])
             self.cube.addComponent(MeshRenderer, mesh=self.cube_mesh, materials=self.cube_mat)
             self.cube.addComponent(AutoRotation)
 
-    Sample.Run(enableGammaCorrection=True,
+    Sample.Run(enableGammaCorrection=False,
                debug=False,
-               mapSavingInterval=4,
+               mapSavingInterval=8,
                winSize=(512, 512),
-               needOutputMaps=True,)
+               needOutputMaps=False,)

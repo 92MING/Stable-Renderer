@@ -145,7 +145,7 @@ class Material(ResourcesObj):
 
     def sendToGPU(self):
         for uniName, (tex, slot) in self._textures.items():
-            tex.sendToGPU() # actually no need, since currently all Texture are sent to GPU on _prepare() of ResourcesManager
+            tex.sendToGPU() # actually no need, since currently all Texture are sent to GPU on prepare() of ResourcesManager
     def clear(self):
         for uniName, (tex, slot) in self._textures.items():
             tex.clear()

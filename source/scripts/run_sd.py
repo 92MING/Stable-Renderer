@@ -17,7 +17,7 @@ import os
 from PIL import Image
 import numpy as np
 from utils.global_utils import GetEnv
-from utils.path_utils import GIF_OUTPUT_DIR, MAP_OUTPUT_DIR
+from utils.path_utils import GIF_OUTPUT_DIR, MAP_OUTPUT_DIR, RESOURCES_DIR
 from datetime import datetime
 
 def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
@@ -48,11 +48,11 @@ class Config:
     width = GetEnv('DEFAULT_IMG_WIDTH', 512, int)
     height = GetEnv('DEFAULT_IMG_HEIGHT', 512, int)
     seed = GetEnv('DEFAULT_SEED', 1235, int)
-    no_half = GetEnv('DEFAULT_NO_HALF', False, bool)
+    no_half = GetEnv('DEFAULT_NO_HALF', True, bool)
     strength = 1.0
     # data preparation configs
     num_frames = GetEnv('DEFAULT_NUM_FRAMES',16, int)
-    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../resources/example-map-outputs/cube")
+    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', os.path.join(RESOURCES_DIR, 'example-map-outputs', 'cube'))
     overlap_algorithm = 'average'
     start_timestep = 500
     end_timestep = 1000
@@ -93,7 +93,7 @@ if __name__ == '__main__':
                                                 max_workers=config.max_workers, 
                                                 interpolate_mode='nearest')
     
-    # 3. Prepare data
+    # 3. prepare data
     corr_map = CorrespondenceMap.from_existing_directory_numpy(
         os.path.join(config.frames_dir, 'id'),
         enable_strict_checking=False,
@@ -131,7 +131,7 @@ if __name__ == '__main__':
         control_images=controlnet_images,
         width=config.width,
         height=config.height,
-        num_inference_steps=10,
+        num_inference_steps=1000,
         strength=config.strength,
         generator=generator,
         guidance_scale=7,

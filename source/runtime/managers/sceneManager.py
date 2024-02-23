@@ -19,7 +19,7 @@ class SceneManager(Manager):
         # TODO: switch to scene
         pass
 
-    def _prepare(self):
+    def prepare(self):
         if self.MainScene is not None:
             self.MainScene.prepare()
 

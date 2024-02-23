@@ -75,7 +75,7 @@ if __name__ == '__main__':
     scheduled_overlap_algorithm = StartEndScheduler(
         start_timestep=config.start_timestep, end_timestep=config.end_timestep, overlap=overlap_algorithm)
 
-    # 3. Prepare data
+    # 3. prepare data
     corr_map = CorrespondenceMap.from_existing_directory_numpy(
         os.path.join(config.frames_dir, 'id'),
         enable_strict_checking=False,

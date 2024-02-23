@@ -5,6 +5,8 @@ from inspect import signature, getmro, Parameter
 from collections import OrderedDict
 from utils.type_utils import valueTypeCheck
 from utils.global_utils import GetOrAddGlobalValue
+from typing import overload as typing_overload
+
 _overloadFuncDict = GetOrAddGlobalValue("_overloadFuncDict", dict()) # {clsName: {funcName: [(prams,func, acceptArgs, accreptKws),]}}
 _overLoadModuleFuncDict = GetOrAddGlobalValue("_overLoadModuleFuncDict", dict()) # {moduleName: {funcName: [(prams,func, acceptArgs, accreptKws),]}}
 
@@ -27,8 +29,11 @@ class NoSuchFunctionError(Exception):
 class WrongCallingError(Exception):
     pass
 
-class Overload:
+Overload = typing_overload
+
+class _Overload:
     '''Must be used inside class definition.'''
+
     def __init__(self, func):
         self._instance = None
         upperName, funcName, fromModule = _getNames(func)
@@ -95,6 +100,7 @@ class Overload:
     def __get__(self, instance, owner):
         self._instance = instance
         return self
+
     def __call__(self, *args, **kwargs):
         if not self._fromModule:
             if self._instance is None:
@@ -118,5 +124,7 @@ class Overload:
                     except _WrongInputError:
                         pass
             raise NoSuchFunctionError(f'No such function with args: {args} and kwargs:{kwargs}')
+
+Overload = locals()['_Overload']
 
 __all__ = ["Overload", "NoSuchFunctionError", "WrongCallingError"]

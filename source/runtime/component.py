@@ -1,8 +1,16 @@
 from runtime.engineObj import EngineObj
 from utils.global_utils import GetOrAddGlobalValue
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .gameObj import GameObject
+    from .components.transform import Transform
 
 _COMPONENT_CLSES = GetOrAddGlobalValue("_COMPONENT_CLSES", {})
+
 class ComponentMeta(type):
+    '''
+    This metaclass is used to make sure that there is only one cls for each component.
+    '''
     def __new__(cls, *args, **kwargs):
         clsname = args[0]
         if clsname in _COMPONENT_CLSES:
@@ -11,6 +19,8 @@ class ComponentMeta(type):
             cls = super().__new__(cls, *args, **kwargs)
             _COMPONENT_CLSES[clsname] = cls
             return cls
+
+
 class Component(EngineObj, metaclass=ComponentMeta):
     '''Base cls of all components, e.g. Camera, Light, etc.'''
 
@@ -37,18 +47,20 @@ class Component(EngineObj, metaclass=ComponentMeta):
     @classmethod
     def ComponentName(cls):
         return cls.__qualname__
+
     @classmethod
     def FindComponentCls(cls, cls_name):
         try:
             return _COMPONENT_CLSES[cls_name]
         except KeyError:
             raise KeyError(f'Component with class name: {cls_name} not found.')
+
     def __class_getitem__(cls, item):
         '''You can find a component cls by using this syntax: Component[cls_name]'''
         return cls.FindComponentCls(item)
     # endregion
 
-    def __init__(self, gameObj:'GameObject', enable=True):
+    def __init__(self, gameObj:'GameObject', enable=True, **kwargs):
         '''Each component must start with super().__init__(gameObj, enable, ...)'''
         if self.__class__.__qualname__ == 'Component':
             raise Exception('Component is an abstract class. You can not create an instance of it.')
@@ -58,18 +70,23 @@ class Component(EngineObj, metaclass=ComponentMeta):
         self._enable = enable
         self._started = False
         self._awaked = False
+
     def __ge__(self, other):
         return self.Priority >= other.Priority
+
     def __gt__(self, other):
         return self.Priority > other.Priority
+
     def __le__(self, other):
         return self.Priority <= other.Priority
+
     def __lt__(self, other):
         return self.Priority < other.Priority
 
     def awake(self):
         '''Called when this component is added to a GameObject (in case it is enabled). Awake does not follow the priority rule & will be called immediately.'''
         pass
+
     def start(self):
         '''Called when this component runs for the first time'''
         pass
@@ -80,19 +97,24 @@ class Component(EngineObj, metaclass=ComponentMeta):
                 self._awaked = True
                 self.awake()
             self.onEnable()
+
     def _tryStart(self):
         if not self._started and self.enable and self._awaked:
             self._started = True
             self.start()
+
     def _checkAwakeAndStart(self):
         self._tryAwake()
         self._tryStart()
+
     def fixedUpdate(self):
         '''Called every fixed frame'''
         self._checkAwakeAndStart()
+
     def update(self):
         '''Called every frame'''
         self._checkAwakeAndStart()
+
     def lateUpdate(self):
         '''Called every frame after update'''
         self._checkAwakeAndStart()
@@ -100,12 +122,13 @@ class Component(EngineObj, metaclass=ComponentMeta):
     def onEnable(self):
         '''Called when this component is enabled. onEnable will not follow the priority rule.'''
         pass
+
     def onDisable(self):
         '''
         Called when this component is disabled. onDisable will not follow the priority rule.
         When destroy a GameObject, onDisable will be called before onDestroy.
         '''
-        pass
+
     def onDestroy(self):
         '''
         Called when this component is destroyed.
@@ -113,20 +136,27 @@ class Component(EngineObj, metaclass=ComponentMeta):
         onDestroy will not follow the priority rule.
         onDisable will be called before onDestroy.
         '''
-        pass
 
     @property
     def gameObj(self)->'GameObject':
         return self._gameObj
+
     @property
     def transform(self)->'Transform':
+        '''
+        Shortcut to get the transform of the GameObject that this component is attached to.
+        Note that gameobj can have no transform, it will rise an error in that case.
+        '''
         return self._gameObj.transform
+
     @property
     def enable(self):
         return self._enable and self._gameObj.active
+
     @enable.setter
     def enable(self, value):
         self.setEnable(value)
+
     def setEnable(self, value):
         if self._enable != value:
             self._enable = value
@@ -135,5 +165,7 @@ class Component(EngineObj, metaclass=ComponentMeta):
                     self._tryAwake()
                 else:
                     self.onDisable()
+
+
 
 __all__ = ['Component']

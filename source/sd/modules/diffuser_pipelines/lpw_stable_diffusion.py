@@ -1038,7 +1038,7 @@ class StableDiffusionLongPromptWeightingPipeline(
         timesteps, num_inference_steps = self.get_timesteps(num_inference_steps, strength, device, image is None)
         latent_timestep = timesteps[:1].repeat(batch_size * num_images_per_prompt)
 
-        # 6. Prepare latent variables
+        # 6. prepare latent variables
         latents, init_latents_orig, noise = self.prepare_latents(
             image,
             latent_timestep,
@@ -1053,7 +1053,7 @@ class StableDiffusionLongPromptWeightingPipeline(
             latents,
         )
 
-        # 7. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
+        # 7. prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
         # 8. Denoising loop

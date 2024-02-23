@@ -1,12 +1,14 @@
 '''GameObject is the class contains components and behaviors.'''
+
+from typing import Union, List, Optional, Set, Dict
+import heapq
+import glm
+
 from utils.base_clses import NamedObj
 from utils.global_utils import GetOrAddGlobalValue
-from runtime.engineObj import EngineObj
-from typing import Union, List, Optional
-import heapq
 from runtime.component import Component, ComponentMeta
 from runtime.components.transform import Transform
-import glm
+from runtime.engineObj import EngineObj
 
 class AutoSortList(list):
     def append(self, obj):
@@ -15,17 +17,24 @@ class AutoSortList(list):
         for obj in objs:
             self.append(obj)
 
-_gameObj_tags = GetOrAddGlobalValue("_GAMEOBJ_TAGS", {}) # tag: set of gameObj
-_root_gameObjs = GetOrAddGlobalValue("_ROOT_GAMEOBJS", []) # list of root gameObj(no parent)
+_gameObj_tags: Dict[str, Set['GameObject']] = GetOrAddGlobalValue("_GAMEOBJ_TAGS", {})
+'''{tag: set[gameObj]}'''
+
+_root_gameObjs: List['GameObject'] = GetOrAddGlobalValue("_ROOT_GAMEOBJS", []) # list of root gameObj(no parent)
+'''list of root gameObj. Root gameObjs are gameObjs without parent'''
+
+
 class GameObject(EngineObj, NamedObj):
 
     # region class methods
     @staticmethod
-    def RootObjs()->list:
+    def RootObjs()->List['GameObject']:
         return _root_gameObjs
+
     @staticmethod
     def FindObjs_ByTag(tag)->set:
         return _gameObj_tags.get(tag, set())
+
     @classmethod
     def FindObj_ByName(cls, name)->'GameObject':
         '''Return None if not found'''
@@ -72,26 +81,31 @@ class GameObject(EngineObj, NamedObj):
         if not needTransform and (position is not None or rotation is not None or scale is not None):
             raise ValueError("If needTransform is False, posiiton, rotation and scale cannot be set.")
         if position is not None:
-            self.transform.localPos = glm.vec3(position)
+            self.transform.localPosition = glm.vec3(position)
         if rotation is not None:
-            self.transform.setLocalRot(rotation[0], rotation[1], rotation[2])
+            self.transform.localRotation = glm.vec3(rotation[0], rotation[1], rotation[2])
         if scale is not None:
             self.transform.localScale = glm.vec3(scale)
 
     # region child & parent
     def hasChild(self, child):
         return child in self.children
+
     def getChild(self, index):
         return self.children[index]
+
     @property
     def children(self)->List['GameObject']:
         return self._children
+
     @property
     def childCount(self):
         return len(self.children)
+
     @property
     def parent(self):
         return self._parent
+
     @parent.setter
     def parent(self, new_parent):
         """
@@ -108,12 +122,14 @@ class GameObject(EngineObj, NamedObj):
             self.parent.children.append(self)
         else:
             GameObject.RootObjs().append(self)
+
     @property
     def siblingIndex(self):
         if self.parent is not None:
             return self.parent.children.index(self)
         else:
             return GameObject.RootObjs().index(self)
+
     @siblingIndex.setter
     def siblingIndex(self, new_index):
         if new_index == self.siblingIndex:
@@ -135,6 +151,7 @@ class GameObject(EngineObj, NamedObj):
             active = par.active
             par = par.parent
         return active
+
     @active.setter
     def active(self, value:bool):
         if self._active == value:
@@ -145,6 +162,7 @@ class GameObject(EngineObj, NamedObj):
                 comp.onDisable()
             else:
                 comp.onEnable()
+
     def destroy(self):
         if self.parent is not None:
             self.parent.children.remove(self)
@@ -161,8 +179,10 @@ class GameObject(EngineObj, NamedObj):
     @property
     def tags(self):
         return self._tags
+
     def hasTag(self, tag):
         return tag in self.tags
+
     def addTag(self, tag):
         if self.hasTag(tag):
             return
@@ -170,6 +190,7 @@ class GameObject(EngineObj, NamedObj):
         if tag not in _gameObj_tags:
             _gameObj_tags[tag] = set()
         _gameObj_tags[tag].add(self)
+
     def removeTag(self, tag):
         if not self.hasTag(tag):
             return
@@ -188,6 +209,7 @@ class GameObject(EngineObj, NamedObj):
             return [comp for comp in self._components if comp.enable]
         else:
             return self._components
+
     def allComponents(self, enableOnly=True)->List[Component]:
         '''
         return all components it and its children have
@@ -198,6 +220,7 @@ class GameObject(EngineObj, NamedObj):
             result.extend(child.childComponents(enableOnly))
         result.extend(self.components(enableOnly))
         return result
+
     def hasComponent(self, comp: Union[ComponentMeta, str, Component], enableOnly=False):
         '''
         whether it has component of type `comp`. If there exist a subclass of `comp`, also return True
@@ -213,6 +236,7 @@ class GameObject(EngineObj, NamedObj):
             return comp in self.components(enableOnly=enableOnly)
         else:
             raise TypeError("comp must be a subclass of Component, or a component instance, or component name")
+
     def getComponent(self, comp: Union[ComponentMeta, str, Component], enableOnly=False)->Optional[Component]:
         '''
         return the first component of type `comp`
@@ -235,6 +259,7 @@ class GameObject(EngineObj, NamedObj):
                 if isinstance(c, comp):
                     return c
         return None
+
     def getComponents(self, comp: Union[ComponentMeta, str, Component], enableOnly=False):
         '''
         return all components of type `comp`
@@ -250,6 +275,7 @@ class GameObject(EngineObj, NamedObj):
             return [c for c in self.components(enableOnly=enableOnly) if c.ComponentName == comp]
         elif isinstance(comp, Component):
             return [c for c in self.components(enableOnly=enableOnly) if c == comp]
+
     def removeComponent(self, comp: Union[ComponentMeta, str, Component], enableOnly=False):
         '''
         remove the first component of type `comp`
@@ -275,6 +301,7 @@ class GameObject(EngineObj, NamedObj):
                     c.onDisable() # call onDisable before destroy
                     c.onDestory()
                     return
+
     def removeComponents(self, comp: Union[ComponentMeta, str, Component], enableOnly=False):
         '''
         remove all components of type `comp`
@@ -297,6 +324,7 @@ class GameObject(EngineObj, NamedObj):
                 if isinstance(c, comp):
                     c.onDisable() # call onDisable before destroy
                     c.onDestory()
+
     def addComponent(self, comp: Union[ComponentMeta, str, Component], enable=True, *args, **kwargs)->Optional[Component]:
         '''
         add a component of type `comp`
@@ -333,6 +361,7 @@ class GameObject(EngineObj, NamedObj):
                         raise RuntimeError(f"GameObject: {self.name} has no component: {require}. Auto add failed")
             self._components.append(comp)
             comp._tryAwake()  # call awake if the gameobject is active and the component is enabled
+
     @property
     def transform(self) -> Transform:
         t = self.getComponent(Transform)
@@ -349,6 +378,7 @@ class GameObject(EngineObj, NamedObj):
             comp.fixedUpdate()
         for child in self.children:
             child._fixedUpdate()
+
     def _lateUpdate(self):
         '''internal use for lateUpdate and components'''
         comps = self.components(enableOnly=True)
@@ -356,6 +386,7 @@ class GameObject(EngineObj, NamedObj):
             comp.lateUpdate()
         for child in self.children:
             child._lateUpdate()
+
     def _update(self):
         '''internal use for update and components'''
         comps = self.components(enableOnly=True)
@@ -363,16 +394,19 @@ class GameObject(EngineObj, NamedObj):
             comp.update()
         for child in self.children:
             child._update()
+
     @staticmethod
     def _RunFixedUpdate():
         '''internal use for fixedUpdate and components'''
         for obj in _root_gameObjs:
             obj._fixedUpdate()
+
     @staticmethod
     def _RunLateUpdate():
         '''internal use for lateUpdate and components'''
         for obj in _root_gameObjs:
             obj._lateUpdate()
+
     @staticmethod
     def _RunUpdate():
         '''internal use for update and components'''

@@ -58,6 +58,7 @@ class InputAction(_FindableEnum):
     HOLD = 999
 
 class InputModifier(_FindableEnum):
+    '''Keyboard input Modifier'''
     NONE = 0
     SHIFT = 1
     CTRL = 2
@@ -65,6 +66,7 @@ class InputModifier(_FindableEnum):
     SUPER = 8
 
 class Key(_FindableEnum):
+    '''Key codes of GLFW'''
     UNKNOWN = -1
     SPACE = 32
     APOSTROPHE = 39

@@ -15,7 +15,7 @@ from typing import Union
 class RenderManager(Manager):
     '''Manager of all rendering stuffs'''
 
-    _FrameRunFuncOrder = RuntimeManager._FrameRunFuncOrder + 1  # always run after runtimeManager
+    FrameRunFuncOrder = RuntimeManager.FrameRunFuncOrder + 1  # always run after runtimeManager
 
     def __init__(self,
                  enableHDR=True,
@@ -428,12 +428,14 @@ class RenderManager(Manager):
             gl.glTexParameteri(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_WRAP_R, gl.GL_CLAMP_TO_EDGE)
             gl.glBindTexture(gl.GL_TEXTURE_CUBE_MAP, 0)
         return shadowMapID
+
     def GetLightShadowMap(self, size:int, dimension:int = 2):
         '''return a shadow map texture id. If map with the same size and dimension doesn't exist, create one.'''
         assert dimension in (2, 3) and size > 0
         if (size, dimension) not in self._lightShadowMaps:
             self._lightShadowMaps[(size, dimension)] = self._createLightShadowMap(size, dimension)
         return self._lightShadowMaps[(size, dimension)]
+
     def DeleteLightShadowMap(self, mapID):
         for key, id in self._lightShadowMaps.items():
             if id == mapID:
@@ -443,13 +445,14 @@ class RenderManager(Manager):
     # endregion
 
     # region run
-    def _onFrameRun_debug(self):
+    def debug_mode_on_frame_run(self):
         # direct output when debug mode
         self.BindFrameBuffer(0)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         self._excute_render_task()
-    def _onFrameRun(self):
+
+    def on_frame_run(self):
         # normal render
         self.BindFrameBuffer(self._gBuffer)
         gl.glEnable(gl.GL_DEPTH_TEST)
@@ -498,7 +501,7 @@ class RenderManager(Manager):
         self._postProcessTasks.execute(ignoreErr=True)
         self._final_draw()  # default post process shader is used here. Will also bind to FBO 0(screen)
 
-    def _onFrameEnd(self):
+    def on_frame_end(self):
         glfw.swap_buffers(self.engine.WindowManager.Window)
     # endregion
 

@@ -727,7 +727,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         if do_overlapping:
             pass
 
-        # 7. Prepare control image
+        # 7. prepare control image
         if not do_controlnet:
             pass
         elif isinstance(controlnet, ControlNetModel):
@@ -779,7 +779,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         timesteps, num_inference_steps = self.get_timesteps(num_inference_steps, strength, device, is_text2img=not do_img2img)
         latent_timestep = timesteps[:1].repeat(batch_size * num_images_per_prompt)
 
-        # 9. Prepare latent variables
+        # 9. prepare latent variables
         if do_img2img or do_controlnet:
             num_frames = len(images) if do_img2img else 0
             if do_controlnet:
@@ -819,7 +819,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 same_init_latents=same_init_latents,
             )
 
-        # 10. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
+        # 10. prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
         # 10.1 Create tensor stating which controlnets to keep

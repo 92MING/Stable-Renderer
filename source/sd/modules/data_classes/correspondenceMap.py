@@ -12,6 +12,7 @@ from typing import Callable, Tuple, Union, List
 from .utils.sortableElement import SortableElement
 from .common import Rectangle
 from .. import log_utils as logu, config
+from utils.os_utils import is_windows, is_mac
 
 CACHE_DIR = "./.cache"
 MAP_OUTPUT_DIR = config.test_dir / 'boat'
@@ -113,7 +114,7 @@ class CorrespondenceMap:
             sorted_ids = sorted_ids[:num_frames]
         else:
             num_frames = len(sorted_ids)
-        # Prepare correspondence map
+        # prepare correspondence map
         logu.info("[INFO] Preparing correspondence map...")
         corr_map = {}
         for frame_idx, id_data in tqdm(enumerate(sorted_ids), total=len(sorted_ids)):
@@ -169,6 +170,9 @@ class CorrespondenceMap:
                 raise FileNotFoundError(f"No output directory found in {MAP_OUTPUT_DIR}")
             directory = os.path.abspath(os.path.join(MAP_OUTPUT_DIR, sorted(current_dirs)[-1], 'id'))
 
+        if is_windows():
+            directory = directory.replace('/', '\\')
+
         if use_cache:
             cache_corr_map = cls._load_correspodence_map_from_cache(directory)
             if cache_corr_map is not None:
@@ -196,7 +200,7 @@ class CorrespondenceMap:
             sorted_ids = sorted_ids[:num_frames]
         else:
             num_frames = len(sorted_ids)
-        # Prepare correspondence map
+        # prepare correspondence map
         logu.info("Preparing correspondence map...")
         corr_map = {}
         for frame_idx, id_data in tqdm(enumerate(sorted_ids), total=len(sorted_ids)):

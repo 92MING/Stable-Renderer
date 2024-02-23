@@ -38,6 +38,7 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
     @classmethod
     def ClsName(cls):
         return cls.__qualname__
+
     @classmethod
     def BaseClsName(cls):
         baseClsName = cls._BaseName
@@ -46,9 +47,11 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
             if '_' in baseClsName:
                 baseClsName = baseClsName.split('_')[0]
         return baseClsName
+
     @classmethod
     def FindFormat(cls, format):
         return cls._Format_Clses.get(format, None)
+
     @classmethod
     def Format(cls):
         if cls._Format is None:
@@ -57,21 +60,26 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
         if format.startswith('.'):
             format = format[1:]
         return format
+
     @classmethod
     def SupportedFormats(cls):
         return cls._Format_Clses.keys()
+
     def __class_getitem__(cls, item):
         return cls.FindFormat(item)
+
     @classmethod
     def Find(cls, name):
         if cls._Instances is None:
             cls._Instances = {}
         return cls._Instances.get(name, None)
+
     @classmethod
     def AllInstances(cls):
         if cls._Instances is None:
             cls._Instances = {}
         return cls._Instances.values()
+
     @classmethod
     def _GetPathAndName(cls, path, name=None):
         '''

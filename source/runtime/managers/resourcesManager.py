@@ -6,10 +6,10 @@ import traceback
 
 class ResourcesManager(Manager):
 
-    _PrepareFuncOrder = SceneManager._PrepareFuncOrder + 1  # after SceneManager (after all gameobj/components are created)
-    _ReleaseFuncOrder = 0 # release resources should be done at the beginning
+    PrepareFuncOrder = SceneManager.PrepareFuncOrder + 1  # after SceneManager (after all gameobj/components are created)
+    ReleaseFuncOrder = 0 # release resources should be done at the beginning
 
-    def _prepare(self):
+    def prepare(self):
         resources_clses = GetOrAddGlobalValue('_RESOURCES_CLSES', dict()).values()
         for cls in sorted(resources_clses, key=lambda cls: cls._LoadOrder):
             for instance in cls.AllInstances():
@@ -22,7 +22,7 @@ class ResourcesManager(Manager):
                 except Exception:
                     raise Exception(f'Error when sending {instance.__class__.__qualname__}:{instance.name} to GPU, traceback: {traceback.format_exc()}')
 
-    def _release(self):
+    def release(self):
         resources_clses = GetOrAddGlobalValue('_RESOURCES_CLSES', dict()).values()
         base_clses = [cls for cls in resources_clses if cls._BaseName == cls.ClsName()]
         for cls in sorted(base_clses, key=lambda cls: cls._LoadOrder, reverse=True):
