@@ -29,7 +29,7 @@ def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
 
 class Config:
     # pipeline init configs
-    model_path=GetEnv('SD_PATH', 'runwayml/stable-diffusion-v1-5')
+    model_path=GetEnv('SD_PATH', '/research/d1/spc/ckwong1/document/Stable-Renderer/source/sd/models/Stable-Diffusion/AIDv2_10.safetensors')
     control_net_model_paths=[
         # GetEnv('CONTROLNET_DEPTH_MODEL','lllyasviel/sd-controlnet-depth'),
 
@@ -43,7 +43,7 @@ class Config:
     ]
     device = GetEnv('DEVICE', ('mps' if platform == 'darwin' else 'cuda'))
     # pipeline generation configs
-    prompt = GetEnv('DEFAULT_SD_PROMPT', "Luxurious cruise on a calm blue lake")
+    prompt = GetEnv('DEFAULT_SD_PROMPT', "Rubik's cube, with the front side white, left side red")
     neg_prompt = GetEnv('DEFAULT_SD_NEG_PROMPT', "low quality, bad anatomy")
     width = GetEnv('DEFAULT_IMG_WIDTH', 512, int)
     height = GetEnv('DEFAULT_IMG_HEIGHT', 512, int)
