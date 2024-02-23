@@ -25,12 +25,14 @@ from diffusers.configuration_utils import FrozenDict
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.utils import deprecate, logging
 from transformers import CLIPTextModel, CLIPTokenizer
+
 from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, preprocess_image
 from ..data_classes.correspondenceMap import CorrespondenceMap
 from .. import log_utils as logu
 from ..utils import save_latents
 from .overlap import Overlap
 from .overlap.johnny_overlap import overlap as temp_overlap
+from .two_step_schedulers import TwoStepScheduler
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -79,7 +81,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
         tokenizer: CLIPTokenizer,
         unet: UNet2DConditionModel,
         controlnet: Union[ControlNetModel, List[ControlNetModel], Tuple[ControlNetModel], MultiControlNetModel],
-        scheduler,
+        scheduler: TwoStepScheduler,
         safety_checker,
         feature_extractor,
         requires_safety_checker: bool = True
@@ -855,7 +857,9 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                             controlnet_cond_scale = controlnet_cond_scale[0]
                         cond_scale = controlnet_cond_scale * controlnet_keep[step]
 
-                for frame_idx in tqdm.tqdm(range(num_frames), desc="Denoising", leave=False):
+                noise_predictions = []
+                original_sample_predictions = [] 
+                for frame_idx in tqdm.tqdm(range(num_frames), desc="Predicting Original Samples", leave=False):
                     latents_frame = latents_seq[frame_idx]
 
                     # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
@@ -908,9 +912,68 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                         noise_pred_uncond, noise_pred_cond = noise_pred.chunk(2)
                         noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
                         noise_pred = rescale_noise_cfg(noise_pred, noise_pred_cond, guidance_rescale=guidance_rescale)
+                    
+                    # compute original sample prediction x_0 | t
+                    pred_original_sample = self.scheduler.predict_original_sample(
+                        noise_pred, t, latents_frame, **extra_step_kwargs
+                    )
+
+                    noise_predictions.append(noise_pred)
+                    original_sample_predictions.append(pred_original_sample)
+
+                # Do overlapping on the original sample predictions
+                if do_overlapping:
+                    try:
+                        save_dir = callback_kwargs.get('save_dir')
+                        if isinstance(save_dir, str):
+                            save_dir = os.path.join(save_dir, 'overlapped')
+                        else:
+                            save_dir = save_dir / 'overlapped'
+                        save_latents(
+                            step, t, original_sample_predictions,
+                            save_dir=save_dir,
+                            prefix='latents',
+                            postfix='before_overlap',
+                            decoder=callback_kwargs.get('decoder', 'vae-approx'),
+                            vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
+                        )
+                    except Exception as e:
+                        logu.error(f"{e}, latent not saved")
+
+                    original_sample_predictions = overlap_algorithm.__call__(
+                        original_sample_predictions,
+                        corr_map=correspondence_map,
+                        step=step,
+                        timestep=t,
+                        view_normal_map=view_normal_map,
+                    )
+
+                    try:
+                        save_dir = callback_kwargs.get('save_dir')
+                        if isinstance(save_dir, str):
+                            save_dir = os.path.join(save_dir, 'overlapped')
+                        else:
+                            save_dir = save_dir / 'overlapped'
+                        save_latents(step, t, original_sample_predictions,
+                                     save_dir=save_dir,
+                                     prefix='latents',
+                                     postfix='after_overlap',
+                                     decoder=callback_kwargs.get('decoder', 'vae-approx'),
+                                     vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
+                                     )
+                    except Exception as e:
+                        logu.error(f"{e}, latent not saved")
+                
+                
+                for frame_idx in tqdm.tqdm(range(num_frames), desc="Predicting Previous Samples", leave=False):
+                    latents_frame = latents_seq[frame_idx]
+                    noise_pred = noise_predictions[frame_idx]
+                    pred_original_sample = original_sample_predictions[frame_idx]
 
                     # compute the previous noisy sample x_t -> x_t-1
-                    latents_frame = self.scheduler.step(noise_pred, t, latents_frame, **extra_step_kwargs, return_dict=False)[0]
+                    latents_frame = self.scheduler.predict_previous_sample(
+                        pred_original_sample, noise_pred, t, latents_frame, **extra_step_kwargs
+                    )
 
                     if hasattr(self.scheduler, "_step_index"):
                         self.scheduler._step_index -= 1
@@ -934,56 +997,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                 if hasattr(self.scheduler, '_step_index') and self.scheduler._step_index is not None:
                     self.scheduler._step_index += 1
 
-                if do_overlapping:
-                    try:
-                        save_dir = callback_kwargs.get('save_dir')
-                        if isinstance(save_dir, str):
-                            save_dir = os.path.join(save_dir, 'overlapped')
-                        else:
-                            save_dir = save_dir / 'overlapped'
-                        save_latents(
-                            step, t, latents_seq,
-                            save_dir=save_dir,
-                            prefix='latents',
-                            postfix='before_overlap',
-                            decoder=callback_kwargs.get('decoder', 'vae-approx'),
-                            vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
-                        )
-                    except Exception as e:
-                        logu.error(f"{e}, latent not saved")
-
-                    latents_seq = overlap_algorithm.__call__(
-                        latents_seq,
-                        corr_map=correspondence_map,
-                        step=step,
-                        timestep=t,
-                        view_normal_map=view_normal_map,
-                    )
-                    # latents_seq = temp_overlap(
-                    #     latents_seq,
-                    #     corr_map=correspondence_map,
-                    #     pipe=self,
-                    #     step=step,
-                    #     timestep=t,
-                    #     init_latents_orig_seq=init_latents_orig_seq,
-                    #     noise_seq=noise_seq,
-                    # )
-
-                    try:
-                        save_dir = callback_kwargs.get('save_dir')
-                        if isinstance(save_dir, str):
-                            save_dir = os.path.join(save_dir, 'overlapped')
-                        else:
-                            save_dir = save_dir / 'overlapped'
-                        save_latents(step, t, latents_seq,
-                                     save_dir=save_dir,
-                                     prefix='latents',
-                                     postfix='after_overlap',
-                                     decoder=callback_kwargs.get('decoder', 'vae-approx'),
-                                     vae=self.vae if callback_kwargs.get('decoder', 'vae-approx') == 'vae' else None
-                                     )
-                    except Exception as e:
-                        logu.error(f"{e}, latent not saved")
+                
 
                 # call the callback, if provided
                 if step == len(timesteps) - 1 or ((step + 1) > num_warmup_steps and (step + 1) % self.scheduler.order == 0):

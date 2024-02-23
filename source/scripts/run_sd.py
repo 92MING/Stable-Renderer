@@ -8,9 +8,9 @@ from sd.modules.diffuser_pipelines.overlap import Overlap, ResizeOverlap, Schedu
 from sd.modules.diffuser_pipelines.overlap.algorithms import overlap_algorithm_factory
 from sd.modules.diffuser_pipelines.overlap.scheduler import StartEndScheduler
 from sd.modules.diffuser_pipelines.overlap.utils import build_view_normal_map
+from sd.modules.diffuser_pipelines.two_step_schedulers import EulerAncestralDiscreteScheduler
 import sd.modules.log_utils as logu
 
-from diffusers import EulerAncestralDiscreteScheduler
 from sys import platform
 import torch
 import os
@@ -29,21 +29,21 @@ def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
 
 class Config:
     # pipeline init configs
-    model_path=GetEnv('SD_PATH', '/research/d1/spc/ckwong1/document/Stable-Renderer/source/sd/models/Stable-Diffusion/AIDv2_10.safetensors')
+    model_path=GetEnv('SD_PATH', 'runwayml/stable-diffusion-v1-5')
     control_net_model_paths=[
-        # GetEnv('CONTROLNET_DEPTH_MODEL','lllyasviel/sd-controlnet-depth'),
-
         # Download the two files: loose_controlnet.safetensors and config.json from the following link
         # https://huggingface.co/AIRDGempoll/LooseControlNet/tree/main
         # and place them in the following directory
         # rename loose_controlnet.safetensors to diffusion_pytorch_model.safetensors
-        GetEnv('CONTROLNET_LOOSE_DEPTH_MODEL','/research/d1/spc/ckwong1/document/Stable-Renderer/source/sd/models/loose_controlnet'),
+        # GetEnv('CONTROLNET_LOOSE_DEPTH_MODEL','/research/d1/spc/ckwong1/document/Stable-Renderer/source/sd/models/loose_controlnet'),
+
+        GetEnv('CONTROLNET_DEPTH_MODEL','lllyasviel/sd-controlnet-depth'),
         # GetEnv('CONTROLNET_NORMAL_MODEL','lllyasviel/sd-controlnet-normal'),
-        # GetEnv('CONTROLNET_CANNY_MODEL','lllyasviel/sd-controlnet-canny'),
+        GetEnv('CONTROLNET_CANNY_MODEL','lllyasviel/sd-controlnet-canny'),
     ]
     device = GetEnv('DEVICE', ('mps' if platform == 'darwin' else 'cuda'))
     # pipeline generation configs
-    prompt = GetEnv('DEFAULT_SD_PROMPT', "Rubik's cube, with the front side white, left side red")
+    prompt = GetEnv('DEFAULT_SD_PROMPT', "Golden boat on a calm lake")
     neg_prompt = GetEnv('DEFAULT_SD_NEG_PROMPT', "low quality, bad anatomy")
     width = GetEnv('DEFAULT_IMG_WIDTH', 512, int)
     height = GetEnv('DEFAULT_IMG_HEIGHT', 512, int)
@@ -52,7 +52,7 @@ class Config:
     strength = 1.0
     # data preparation configs
     num_frames = GetEnv('DEFAULT_NUM_FRAMES',16, int)
-    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../resources/example-map-outputs/cube")
+    frames_dir = GetEnv('DEFAULT_FRAME_INPUT', "../resources/example-map-outputs/boat")
     overlap_algorithm = 'average'
     start_timestep = 500
     end_timestep = 1000
@@ -71,6 +71,7 @@ if __name__ == '__main__':
         no_half=config.no_half  # Disable fp16 on MacOS
     )
     scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
+    # scheduler = DDPMScheduler.from_config(pipe.scheduler.config)
     pipe.scheduler = scheduler
     pipe.to(config.device)
 
@@ -118,7 +119,7 @@ if __name__ == '__main__':
         os.path.join(config.frames_dir, 'canny'),
         num_frames=config.num_frames
     ).Data
-    controlnet_images = [depth for depth, normal, canny in zip(depth_images, normal_images, canny_images)]
+    controlnet_images = [[depth, canny] for depth, normal, canny in zip(depth_images, normal_images, canny_images)]
 
     view_normal_map = build_view_normal_map(normal_images, torch.tensor([0,0,1]))
 
@@ -135,7 +136,7 @@ if __name__ == '__main__':
         strength=config.strength,
         generator=generator,
         guidance_scale=7,
-        controlnet_conditioning_scale=1.0,
+        controlnet_conditioning_scale=0.8,
         add_predicted_noise=False,
         correspondence_map=corr_map,
         overlap_algorithm=scheduled_overlap_algorithm,

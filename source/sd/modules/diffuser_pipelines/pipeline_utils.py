@@ -41,6 +41,7 @@ def load_pipe(
             control_net_model_paths[0],
             torch_dtype=torch_dtype
         )
+        controlnet.set_attn_processor(CrossFrameAttnProcessor(batch_size=2))
     else:
         controlnets = []
         for control_net_model_path in control_net_model_paths:
@@ -56,7 +57,8 @@ def load_pipe(
                     torch_dtype=torch_dtype,
                     use_safetensors=True
                 )
-            controlnet.unet.set_attn_processor(CrossFrameAttnProcessor(batch_size=2))
+            logu.info(f"Loaded controlnet from {control_net_model_path}.")
+            controlnet.set_attn_processor(CrossFrameAttnProcessor(batch_size=2))
             controlnets.append(controlnet)
         controlnet = MultiControlNetModel(controlnets)
 
