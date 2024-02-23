@@ -3,8 +3,11 @@ import torch
 import time
 from sys import platform
 from typing import Sequence
+
 from diffusers import ControlNetModel
+from diffusers.pipelines.text_to_video_synthesis.pipeline_text_to_video_zero import CrossFrameAttnProcessor
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
+
 from .multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
 from .. import log_utils as logu
 from utils.global_utils import GetEnv
@@ -38,6 +41,7 @@ def load_pipe(
             control_net_model_paths[0],
             torch_dtype=torch_dtype
         )
+        controlnet.set_attn_processor(CrossFrameAttnProcessor(batch_size=2))
     else:
         controlnets = []
         for control_net_model_path in control_net_model_paths:
@@ -53,6 +57,8 @@ def load_pipe(
                     torch_dtype=torch_dtype,
                     use_safetensors=True
                 )
+            logu.info(f"Loaded controlnet from {control_net_model_path}.")
+            controlnet.set_attn_processor(CrossFrameAttnProcessor(batch_size=2))
             controlnets.append(controlnet)
         controlnet = MultiControlNetModel(controlnets)
 
@@ -76,7 +82,7 @@ def load_pipe(
             use_safetensors=use_safetensors,
             scheduler_type=scheduler_type,
         )
-
+    pipe.unet.set_attn_processor(CrossFrameAttnProcessor(batch_size=2))
     pipe.safety_checker = None
     pipe.to(device)
 
