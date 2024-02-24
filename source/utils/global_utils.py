@@ -73,6 +73,12 @@ def GetOrAddGlobalValue(key: str, defaultValue:object):
     else:
         _globalValues[key] = defaultValue
         return defaultValue
+def GetOrCreateGlobalValue(key: str, creator:callable, *args, **kwargs):
+    if key in _globalValues:
+        return _globalValues[key]
+    else:
+        _globalValues[key] = creator(*args, **kwargs)
+        return _globalValues[key]
 
 __all__ = [ 'SetGlobalValue', 'GetGlobalValue', 'RemoveGlobalValue', 'ClearGlobalValue', 'GetGlobalValueKeys', 'GetGlobalValueValues', 'GetGlobalValueItems', 'GetGlobalValueDict',
-            'HasGlobalValue', 'GetOrAddGlobalValue' ]
+            'HasGlobalValue', 'GetOrAddGlobalValue', 'GetOrCreateGlobalValue']

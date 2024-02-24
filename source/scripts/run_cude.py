@@ -1,11 +1,12 @@
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from runtime.components import Camera, MeshRenderer, CameraControl
-from runtime.gameObj import GameObject
-from runtime.component import Component
-from runtime.engine import Engine
-from static import Material, Mesh, Texture, DefaultTextureType
+from engine.runtime.components import Camera, MeshRenderer, CameraControl
+from engine.runtime.gameObj import GameObject
+from engine.runtime.component import Component
+from engine.engine import Engine
+from engine.static import Material, Mesh, Texture, DefaultTextureType
+from engine.managers import DiffusionManager
 
 if __name__ == '__main__':
 
@@ -31,4 +32,4 @@ if __name__ == '__main__':
                debug=False,
                mapSavingInterval=8,
                winSize=(512, 512),
-               needOutputMaps=False,)
+               needOutputMaps=False)

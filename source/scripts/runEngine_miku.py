@@ -1,10 +1,10 @@
 import os.path
-from runtime.components import Camera, MeshRenderer
-from runtime.gameObj import GameObject
-from runtime.component import Component
-from runtime.engine import Engine
-from runtime.components import CameraControl
-from static import Mesh, Material, Material_MTL, Key, MouseButton
+from engine.runtime.components import Camera, MeshRenderer
+from engine.runtime.gameObj import GameObject
+from engine.runtime.component import Component
+from engine.engine import Engine
+from engine.runtime.components import CameraControl
+from engine.static import Mesh, Material, Material_MTL, Key, MouseButton
 from utils.path_utils import *
 
 if __name__ == '__main__':

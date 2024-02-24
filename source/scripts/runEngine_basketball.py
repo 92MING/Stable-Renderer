@@ -2,11 +2,11 @@ import sys, os
 sys.path.append(os.getcwd())
 
 import os.path
-from runtime.components import Camera, MeshRenderer, CameraControl
-from runtime.gameObj import GameObject
-from runtime.component import Component
-from runtime.engine import Engine
-from static import Material, Mesh, Texture, DefaultTextureType
+from engine.runtime.components import Camera, MeshRenderer, CameraControl
+from engine.runtime.gameObj import GameObject
+from engine.runtime.component import Component
+from engine.engine import Engine
+from engine.static import Material, Mesh, Texture, DefaultTextureType
 from utils.path_utils import *
 
 
