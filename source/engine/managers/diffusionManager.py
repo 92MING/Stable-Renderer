@@ -1,12 +1,15 @@
 import os.path
 import OpenGL.GL as gl
+import numpy as np
+import glm
+import multiprocessing
+
 from .manager import Manager
 from utils.path_utils import *
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-import numpy as np
-import glm
 from PIL import Image
+
 
 @dataclass
 class FrameData:
@@ -31,18 +34,19 @@ class FrameData:
             'depth': self.depthData[y, x], # [z]
         }
 
+
 class DiffusionManager(Manager):
     def __init__(self,
                  needOutputMaps=False,
                  mapMinimizeRatio=64,
                  maxFrameCacheCount=24,
                  mapSavingInterval=12,
-                 threadPoolSize=6,):
+                 threadPoolSize=None,):
         '''
         :param needOutputMaps: if output maps (id, color, depth...) result to disk
         :param maxFrameCacheCount: how many frames data should be stored in each
         :param mapSavingInterval: the frame interval between two map saving
-        :param threadPoolSize: the size of thread pool. Threads are using for saving/loading maps asynchronously
+        :param threadPoolSize: the size of thread pool. Threads are using for saving/loading maps asynchronously. If None, use the number of CPU cores.
         '''
         super().__init__()
         self._needOutputMaps = needOutputMaps
@@ -50,6 +54,8 @@ class DiffusionManager(Manager):
         self._maxFrameCacheCount = maxFrameCacheCount
         self._mapSavingInterval = mapSavingInterval
 
+        if not threadPoolSize:
+            threadPoolSize = multiprocessing.cpu_count()
         self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize) # for saving maps asynchronously
         self._outputPath = get_map_output_dir(create_if_not_exists=False)
 
@@ -57,42 +63,51 @@ class DiffusionManager(Manager):
     @property
     def MapMinimizeRatio(self)->int:
         return self._mapMinimizeRatio
+    
     @MapMinimizeRatio.setter
     def MapMinimizeRatio(self, value:int):
         '''Ratio should be a perfect square'''
         assert (value > 0 and glm.sqrt(value) == int(glm.sqrt(value))), 'MapMinimizeRatio must be a perfect square'
         self._mapMinimizeRatio = value
+        
     @property
     def ShouldOutputFrame(self):
         '''Return if the current frame's map data should be output to disk'''
         return self._needOutputMaps and self.engine.RuntimeManager.FrameCount % self._mapSavingInterval == 0
+    
     @property
     def NeedOutputMaps(self)->bool:
         return self._needOutputMaps
+    
     @NeedOutputMaps.setter
     def NeedOutputMaps(self, value:bool):
         self._needOutputMaps = value
+        
     @property
     def MaxFrameCacheCount(self)->int:
         return self._maxFrameCacheCount
+    
     @MaxFrameCacheCount.setter
     def MaxFrameCacheCount(self, value:int):
         self._maxFrameCacheCount = value
+        
     @property
     def MapSavingInterval(self)->int:
         return self._mapSavingInterval
+    
     @MapSavingInterval.setter
     def MapSavingInterval(self, value:int):
         self._mapSavingInterval = value
     # endregion
 
     # region ouput maps
-    def _outputData(self, name:str, data:np.ndarray):
+    def _outputNumpyData(self, name:str, data:np.ndarray):
         '''output data in .npy format directly'''
         outputPath = os.path.join(self._outputPath, name)
         if not os.path.exists(outputPath):
             os.makedirs(outputPath)
-        data.dump(os.path.join(outputPath, f'{name}_{self.engine.RuntimeManager.FrameCount}.npy'))
+        np.save(os.path.join(outputPath, f'{name}_{self.engine.RuntimeManager.FrameCount}.npy'), data)
+        
     def OutputData(self, name:str, data:np.ndarray):
         '''
         output data in .npy format directly
@@ -101,8 +116,8 @@ class DiffusionManager(Manager):
         :return:
         '''
         if self._needOutputMaps:
-            self._threadPool.submit(self._outputData, name, data)
-
+            self._threadPool.submit(self._outputNumpyData, name, data)
+        
     def _outputMap(self, name:str, mapData:np.ndarray, multi255=True, outputFormat='RGB', dataType=np.uint8):
         '''this method will be pass to thread pool for saving maps asynchronously'''
         if multi255:
@@ -113,6 +128,7 @@ class DiffusionManager(Manager):
         if not os.path.exists(outputPath):
             os.makedirs(outputPath)
         img.save(os.path.join(outputPath, f'{name}_{self.engine.RuntimeManager.FrameCount}.png'))
+
     def OutputMap(self, name:str, mapData:np.ndarray, multi255=True, outputFormat='RGB', dataType=np.uint8):
         '''
         output map data to OUTPUT_DIR/runtime_map/name/year-month-day-hour_index.png
@@ -125,15 +141,21 @@ class DiffusionManager(Manager):
         '''
         if self._needOutputMaps:
             self._threadPool.submit(self._outputMap, name, mapData, multi255, outputFormat, dataType)
+
     def _outputDepthMap(self, mapData:np.ndarray):
         depth_data_max, depth_data_min = np.max(mapData), np.min(mapData)
-        depth_data_normalized = (mapData - depth_data_min) / (depth_data_max - depth_data_min)
+        diff = depth_data_max - depth_data_min
+        if diff != 0:
+            depth_data_normalized = (mapData - depth_data_min) / diff
+        else:
+            depth_data_normalized = mapData
         depth_data_int8 = (depth_data_normalized * 255).astype(np.uint8)
         depth_img = Image.fromarray(np.squeeze(depth_data_int8), mode='L')
         outputPath = os.path.join(self._outputPath, 'depth')
         if not os.path.exists(outputPath):
             os.makedirs(outputPath)
         depth_img.save(os.path.join(outputPath, f'depth_{self.engine.RuntimeManager.FrameCount}.png'))
+
     def OutputDepthMap(self, mapData:np.ndarray):
         '''output method especially for depth map'''
         if self._needOutputMaps:

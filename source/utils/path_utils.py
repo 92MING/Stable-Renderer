@@ -6,20 +6,21 @@ PROJECT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'
 RESOURCES_DIR = os.path.join(PROJECT_DIR, 'resources')
 '''resources directory, for obj, shader, texture, etc.'''
 SHADER_DIR = os.path.join(RESOURCES_DIR, 'shaders')
-'''Default shader directory'''
-DEFAULT_QUAD_VS_SHADER_PATH = os.path.join(SHADER_DIR, 'quad_vs.glsl')
-'''Default quad vertex shader path'''
-DEFAULT_QUAD_FS_SHADER_PATH = os.path.join(SHADER_DIR, 'quad_fs.glsl')
-'''Default quad fragment shader path'''
 
-CACHE_DIR = os.path.join(PROJECT_DIR, '.cache')
-'''cache directory, for caching corr map'''
+
 OUTPUT_DIR = os.path.join(PROJECT_DIR, 'output')
 '''output directory, for runtime map, etc.'''
+CACHE_DIR = os.path.join(OUTPUT_DIR, '.cache')
+'''cache directory, for caching corr map'''
 MAP_OUTPUT_DIR = os.path.join(OUTPUT_DIR, 'runtime_map')
 '''runtime map output directory, for saving normal map, pos map, id map, etc., during runtime.'''
 GIF_OUTPUT_DIR = os.path.join(OUTPUT_DIR, 'gif')
-TEMP_OUTPUT_DIR = os.path.join(OUTPUT_DIR, 'temp')
+'''gif output directory, for saving gif result by StableDiffusion'''
+TEMP_OUTPUT_DIR = os.path.join(OUTPUT_DIR, 'tmp')
+'''temp output directory. For any usage.'''
+
+__all__ = ['RESOURCES_DIR', 'SHADER_DIR', 'OUTPUT_DIR', 'CACHE_DIR', 'MAP_OUTPUT_DIR', 'GIF_OUTPUT_DIR', 'TEMP_OUTPUT_DIR',]
+
 
 @Overload
 def get_map_output_dir(create_if_not_exists:bool=True):
@@ -33,10 +34,11 @@ def get_map_output_dir(create_if_not_exists:bool=True):
     if create_if_not_exists:
         os.makedirs(cur_map_output_dir, exist_ok=True)
     return cur_map_output_dir
+
 @Overload
 def get_map_output_dir(day:int, index:int, month:int=None, year:int=None):
     '''
-    Return a subdir under MAP_OUTPUT_DIR with yout specified time.
+    Return a subdir under MAP_OUTPUT_DIR with your specified time.
     If month or year is not specified, use current month or year.
     If no such subdir, raise FileNotFoundError.
     '''
@@ -50,5 +52,4 @@ def get_map_output_dir(day:int, index:int, month:int=None, year:int=None):
     return cur_subdir
 
 
-
-__all__ = ['RESOURCES_DIR', 'SHADER_DIR', 'DEFAULT_QUAD_VS_SHADER_PATH', 'DEFAULT_QUAD_FS_SHADER_PATH', 'OUTPUT_DIR', 'MAP_OUTPUT_DIR', 'get_map_output_dir']
+__all__.extend(['get_map_output_dir',])

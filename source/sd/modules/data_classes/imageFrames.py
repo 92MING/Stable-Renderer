@@ -1,5 +1,5 @@
 from .frames import Frames
-from .utils.sortableElement import SortableElement
+from utils.data_struct import SortableElement
 from PIL import Image
 from PIL.Image import Image as PILImage
 from typing import Callable, List

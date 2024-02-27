@@ -29,7 +29,7 @@ class NoSuchFunctionError(Exception):
 class WrongCallingError(Exception):
     pass
 
-Overload = typing_overload
+Overload = typing_overload          # for faking IDE to believe 'Overload' = typing.overload
 
 class _Overload:
     '''Must be used inside class definition.'''
@@ -125,6 +125,7 @@ class _Overload:
                         pass
             raise NoSuchFunctionError(f'No such function with args: {args} and kwargs:{kwargs}')
 
-Overload = locals()['_Overload']
+locals()['Overload'] = _Overload    # for faking IDE to believe 'Overload' = typing.overload
+
 
 __all__ = ["Overload", "NoSuchFunctionError", "WrongCallingError"]

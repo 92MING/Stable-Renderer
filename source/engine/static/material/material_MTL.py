@@ -1,13 +1,18 @@
 import os.path
 from .material import Material, DefaultTextureType
-from typing import Tuple, Dict
+from typing import Tuple, Dict, TYPE_CHECKING, Optional
 from ..texture import Texture
 from utils.global_utils import GetGlobalValue
+if TYPE_CHECKING:
+    from engine.engine import Engine
 
 class Material_MTL(Material):
     '''Special Material class for loading mtl file. It is used for loading mtl file only.'''
 
     _Format = 'mtl'
+
+    _realName: Optional[str] = None
+    '''Real name in .mtl file'''
 
     @property
     def realName(self):
@@ -19,7 +24,8 @@ class Material_MTL(Material):
         if tex is None:
             tex = Texture.Load(path=path)
         return tex
-    def load(self, dirPath, dataLines:Tuple[str,...]):
+
+    def load(self, dirPath:str, dataLines:Tuple[str,...]):
         '''
         Different to super().load(self, path), this Material_MTL will load the data from a list of strings(lines) directly.
         The "dirPath" is the folder path of the mtl file. It is for searching the texture files.
@@ -73,18 +79,26 @@ class Material_MTL(Material):
                     self.addDefaultTexture(self._getTex(path, name), DefaultTextureType.NormalTex)
 
     @classmethod
-    def Load(cls, path, name=None, shader=None) -> Dict[str, 'Material_MTL']:
+    def Load(cls, path) -> Tuple['Material_MTL']:
         '''
-        The "Load" of MTL will return a dict of materials. The key of the dict is the real name of the material.
+        Load a .mtl file and return a tuple of Material_MTL objects.
+
+        Args:
+            path: path of the .mtl file
+
+        Returns:
+            tuple of Material_MTL objects(since a .mtl file has multiple materials)
         '''
-        path, name = cls._GetPathAndName(path, name)
+        path, _ = cls._GetPathAndName(path)
         dirPath = os.path.dirname(path)
+
         with open(path, 'r') as f:
             lines = [line.strip('\n') for line in f.readlines()]
-            materials = {}
+            materials = []
             currMatDataLines = []
-            currMat:Material_MTL = None
+            currMat: Optional[Material_MTL] = None
             engine: 'Engine' = GetGlobalValue('_ENGINE_SINGLETON')
+
             for line in lines:
                 if line.startswith('#') or line in ("\n", ""): continue
                 elif line.startswith('newmtl'):
@@ -101,9 +115,10 @@ class Material_MTL(Material):
                     while matName in Material.AllInstances():
                         count += 1
                         matName = f'{matName}_{count}'
+
                     currMat = cls.Default_Opaque_Material(name=matName) if not engine.IsDebugMode else cls.Debug_Material(name=matName)
                     currMat._realName = realMatName
-                    materials[realMatName] = currMat
+                    materials.append(currMat)
 
                 elif currMat is not None:
                     currMatDataLines.append(line)
@@ -112,6 +127,8 @@ class Material_MTL(Material):
             if currMat is not None:
                 currMat.load(dirPath, tuple(currMatDataLines))
 
-            return materials
+            return tuple(materials)
+
+
 
 __all__ = ['Material_MTL']

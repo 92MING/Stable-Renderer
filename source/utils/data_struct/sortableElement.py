@@ -39,5 +39,6 @@ class SortableElement(Comparable):
 
     def __str__(self):
         return f"{self.__repr__}, object: {self._object}"
-    
+
+
 __all__ = ['SortableElement']

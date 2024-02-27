@@ -28,7 +28,7 @@ class CameraControl(Component):
               moveSpd = 0.005,
               zoomSpd = 0.2,
               horizontalRotSpd = 0.075,
-              verticalRotSpd = 0.02,
+              verticalRotSpd = 0.06,
               defaultPos: glm.vec3=None,
               defaultLookAt: glm.vec3=None,):
         super().__init__(gameObj, enable=enable)

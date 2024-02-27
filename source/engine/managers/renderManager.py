@@ -258,7 +258,7 @@ class RenderManager(Manager):
             self.SwapScreenTexture()
         return wrap
 
-    def _excute_render_task(self):
+    def _execute_render_task(self):
         allTasks = list(self._renderTasks.tempEvents + self._renderTasks.events)
         allTasks.sort(key=lambda x: x.order)
         for task in allTasks:
@@ -450,23 +450,27 @@ class RenderManager(Manager):
         self.BindFrameBuffer(0)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-        self._excute_render_task()
+        self._execute_render_task()
 
     def on_frame_run(self):
         # normal render
         self.BindFrameBuffer(self._gBuffer)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-        self._excute_render_task()  # depth test will be enabled in this function
+        self._execute_render_task()  # depth test will be enabled in this function
 
         # region SD
         # output data to SD
         colorAndDepthData = self._getTextureImg(self._gBuffer_color_and_depth_texture, gl.GL_RGBA, gl.GL_FLOAT, np.float32, 4, flipY=True)
         colorData = colorAndDepthData[:, :, :3]
         depthData = colorAndDepthData[:, :, 3]
+        
         posData = self._getTextureImg(self._gBuffer_pos_texture, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3, flipY=True)
+        
         normalData = self._getTextureImg(self._gBuffer_normal_texture, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3, flipY=True)
+        
         worldNormalData = self._getTextureImg(self._gBuffer_normal_world_texture, gl.GL_RGB, gl.GL_FLOAT, np.float32, 3, flipY=True)
+        
         idData = self._getTextureImg(self._gBuffer_id_texture, gl.GL_RGBA_INTEGER, gl.GL_INT, np.int32, 4, flipY=True)
 
         if self.engine.SDManager.ShouldOutputFrame:

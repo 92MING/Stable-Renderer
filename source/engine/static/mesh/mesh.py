@@ -1,9 +1,9 @@
 import os
 import OpenGL.GL as gl
 import numpy as np
-from typing import List
 import ctypes
 import math
+from typing import List, Final, Union, Type
 
 from utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
 from engine.static.resourcesObj import ResourcesObj
@@ -13,58 +13,167 @@ from engine.static.enums import PrimitiveType
 class Mesh(ResourcesObj):
     '''Mesh class. It is used to store the vertices, normals, uvs, etc. of a mesh. It also provides functions to load and draw the mesh.'''
 
-    _BaseName = 'Mesh'
+    # region class properties
+    _BaseName: Final[str] = 'Mesh'
+    '''Basename is for internal use only. All subclass of Mesh will have the same basename. Do not change it.'''
+    # endregion
 
-    def __init__(self, name, keep_vertices:bool=False):
-        super().__init__(name)
+    # region instance properties
+    _meshID: int
+    '''MeshID is a unique ID for each mesh. It is used to identify the mesh. It is automatically generated when the mesh is created.'''
+
+    # AI stuff
+    _generateVertexID: bool = False
+    '''If True, vertex IDs will be generated when loading the mesh. This is a technique for AI rendering.'''
+    _vertexBoundingBoxLength: float = 0.0
+    '''
+    The length of the bounding box when generating vertex IDs. This is a technique for AI rendering.
+    This will only be used when `generateVertexID` = True. 
+    When:    
+        * `vertexBoundingBoxLength` = 0: means every vertex has its own ID.
+        * `vertexBoundingBoxLength` > 0: means vertices within the same bounding box will have the same ID. This is a technique for AI rendering.
+    '''
+
+    # mesh data
+    _vertices: List[float]
+    '''
+    vertices data.
+    Format:
+        * has normal & uv: [x, y, z, nx, ny, nz, u, v, ...]
+        * has normal only: [x, y, z, nx, ny, nz, ...]
+        * has uv only: [x, y, z, u, v, ...]
+        * has neither normal nor uv: [x, y, z, ...]
+    '''
+    _vertexCountPerFace: int = 0
+    '''number of vertices per face'''
+    _totalFaceCount: int = 0
+    '''total number of faces'''
+    _has_normals: Union[bool, None] = None
+    '''If the mesh has normals. `None` means unknown'''
+    _has_uvs: Union[bool, None] = None
+    '''If the mesh has uvs. `None` means unknown'''
+
+    # opengl stuff
+    _vao: Union[int, None] = None
+    '''Vertex Array Object. `None` means not sent to GPU. Otherwise, it is the buffer ID.'''
+    _vbo: Union[int, None] = None
+    '''Vertex Buffer Object. `None` means not sent to GPU. Otherwise, it is the buffer ID.'''
+    _drawMode: Union[PrimitiveType, None] = None
+    '''The OpenGL drawing mode of the mesh. `None` means unknown. It should be set when `load` is called'''
+    _keep_vertices: bool = False
+    '''If keep vertices, the vertices data will be kept in memory(after send to GPU). Otherwise, they will be cleared.'''
+    # endregion
+
+    @staticmethod
+    def _GenerateMeshID()->int:
         currentID = GetOrAddGlobalValue('_MeshCount', 1) # 0 is reserved
-        self._meshID = currentID # for corresponding map
         SetGlobalValue('_MeshCount', currentID+1)
-        self._keep_vertices = keep_vertices
-        self._has_normals = None # means unknown (cuz not yet loaded)
-        self._has_uvs = None # means unknown (cuz not yet loaded)
+        return currentID
+
+    def __init__(self,
+                 name: str,
+                 keep_vertices:bool=False,
+                 generateVertexID:bool=False,
+                 vertexBoundingBoxLength:float=0.0):
+        '''
+        Args:
+            * name: name is used to identify the mesh. If not specified, the name will be the path/ auto-generated.
+            * keep_vertices: if True, vertex data will still be kept after sent to GPU.
+            * generateVertexID: if True, vertex IDs will be generated when loading the mesh. This is a technique for AI rendering.
+            * vertexBoundingBoxLength: The length of the bounding box when generating vertex IDs. This is a technique for AI rendering.
+                                        This will only be used when `generateVertexID` = True.
+                                        When:
+                                            * `vertexBoundingBoxLength` = 0: means every vertex has its own ID.
+                                            * `vertexBoundingBoxLength` > 0: means vertices within the same bounding box will have the same ID. This is a technique for AI rendering.
+        '''
+        super().__init__(name)
+        self._meshID = self._GenerateMeshID()
         self._vertices = []
-        self._drawMode: PrimitiveType = None
-        self._vao = None
-        self._vbo = None
-        self._vertexCountPerFace = 0  # number of vertices per face
-        self._totalFaceCount = 0
+        self._keep_vertices = keep_vertices
+        self._generateVertexID = generateVertexID
+        if vertexBoundingBoxLength < 0:
+            raise ValueError('vertexBoundingBoxLength must be non-negative')
+        self._vertexBoundingBoxLength = vertexBoundingBoxLength
 
     # region properties
     @property
     def meshID(self):
         '''MeshID is a unique ID for each mesh. It is used to identify the mesh. It is automatically generated when the mesh is created.'''
         return self._meshID
+    
     @property
     def vertexCountPerFace(self):
         '''number of vertices per face'''
         return self._vertexCountPerFace
+    
     @property
     def totalFaceCount(self):
         return self._totalFaceCount
+    
     @property
     def vao(self):
         return self._vao
+    
     @property
     def vbo(self):
         return self._vbo
+
+    @property
+    def sentToGPU(self):
+        '''Check if the mesh data is sent to GPU.'''
+        return self.vao is not None
+    
     @property
     def keep_vertices(self):
         '''If keep vertices, the vertices data will be kept in memory(after send to GPU). Otherwise, they will be cleared.'''
         return self._keep_vertices
+
+    @property
+    def generateVertexID(self):
+        '''If True, vertex IDs will be generated when loading the mesh. This is a technique for AI rendering.'''
+        return self._generateVertexID
+
+    @generateVertexID.setter
+    def generateVertexID(self, value:bool):
+        if self.sentToGPU:
+            raise Exception('Cannot change generateVertexID after data is sent to GPU')
+        self._generateVertexID = value
+
+    @property
+    def vertexBoundingBoxLength(self):
+        '''
+        The length of the bounding box when generating vertex IDs. This is a technique for AI rendering.
+        This will only be used when `generateVertexID` = True.
+        When:
+            * `vertexBoundingBoxLength` = 0: means every vertex has its own ID.
+            * `vertexBoundingBoxLength` > 0: means vertices within the same bounding box will have the same ID. This is a technique for AI rendering.
+        '''
+        return self._vertexBoundingBoxLength
+
+    @vertexBoundingBoxLength.setter
+    def vertexBoundingBoxLength(self, value:float):
+        if self.sentToGPU:
+            raise Exception('Cannot change vertexBoundingBoxLength after data is sent to GPU')
+        if value < 0:
+            raise ValueError('vertexBoundingBoxLength must be non-negative')
+        self._vertexBoundingBoxLength = value
+
     @property
     def has_normals(self):
         if self._has_normals is None:
             raise Exception('has_normals is unknown. Please load the mesh first.')
         return self._has_normals
+    
     @property
     def has_uvs(self):
         if self._has_uvs is None:
             raise Exception('has_uvs is unknown. Please load the mesh first.')
         return self._has_uvs
+    
     @property
     def vertices(self):
         return self._vertices
+    
     @property
     def drawMode(self):
         return self._drawMode
@@ -74,6 +183,7 @@ class Mesh(ResourcesObj):
     def load(self, path:str):
         '''Load data from file. Override this function to implement loading data from file'''
         raise NotImplementedError
+
     def draw(self, group:int=None):
         '''
         Draw the mesh. Override this function to implement drawing the mesh.
@@ -85,47 +195,42 @@ class Mesh(ResourcesObj):
             raise Exception('Data is not sent to GPU')
         gl.glBindVertexArray(self.vao)
         gl.glDrawArrays(self.drawMode.value, 0, self.totalFaceCount * self.vertexCountPerFace)
-    def _calculate_tangent(self, center_point_xyz, left_point_xyz, right_point_xyz, center_point_uv, left_point_uv, right_point_uv)->List[float]:
-        '''
-        calculate tangent.
-        :param center_point_xyz: center point of the triangle in 3D space
-        :param left_point_xyz: left point of the triangle in 3D space
-        :param right_point_xyz: right point of the triangle in 3D space
-        :param center_point_uv: center point of the triangle in UV space
-        :param left_point_uv: left point of the triangle in UV space
-        :param right_point_uv: right point of the triangle in UV space
-        :return: tangent, bitangent
-        '''
-        edge1 = np.array(left_point_xyz) - np.array(center_point_xyz)
-        edge2 = np.array(right_point_xyz) - np.array(center_point_xyz)
-        deltaUV1 = np.array(left_point_uv) - np.array(center_point_uv)
-        deltaUV2 = np.array(right_point_uv) - np.array(center_point_uv)
 
-        f = 1.0 / (deltaUV1[0] * deltaUV2[1] - deltaUV2[0] * deltaUV1[1])
-        tangent = [0, 0, 0]
-        tangent[0] = f * (deltaUV2[1] * edge1[0] - deltaUV1[1] * edge2[0])
-        tangent[1] = f * (deltaUV2[1] * edge1[1] - deltaUV1[1] * edge2[1])
-        tangent[2] = f * (deltaUV2[1] * edge1[2] - deltaUV1[1] * edge2[2])
-        return tangent
     # endregion
 
     @classmethod
-    def Load(cls, path: str, name=None, keep_vertices:bool=False)->'Mesh':
+    def Load(cls,
+             path: str,
+             name: Union[str, None]=None,
+             keep_vertices:bool=False,
+             generateVertexID:bool=False,
+             vertexBoundingBoxLength:float=0.0,
+             )->'Mesh':
         '''
         load a mesh from file
-        :param path: path of the mesh file
-        :param name: name is used to identify the mesh. If not specified, the name will be the path of the mesh file
-        :param keep_vertices: if True, the vertices data will be kept in memory(after send to GPU). Otherwise, they will be cleared.
-        :return: Mesh object
+
+        Args:
+            * path: path of the mesh file
+            * name: name is used to identify the mesh. If not specified, the name will be the path of the mesh file
+            * keep_vertices: if True, the vertices data will be kept in memory(after send to GPU). Otherwise, they will be cleared.
+            * generateVertexID: if True, vertex IDs will be generated when loading the mesh. This is a technique for AI rendering.
+            * vertexBoundingBoxLength: The length of the bounding box when generating vertex IDs. This is a technique for AI rendering.
+                                        This will only be used when `generateVertexID` = True.
+                                        When:
+                                            * `vertexBoundingBoxLength` = 0: means every vertex has its own ID.
+                                            * `vertexBoundingBoxLength` > 0: means vertices within the same bounding box will have the same ID. This is a technique for AI rendering.
         '''
         path, name = cls._GetPathAndName(path, name)
         if '.' not in os.path.basename(path):
             raise ValueError('path must contain file extension')
         ext = path.split('.')[-1]
-        formatCls:'Mesh' = cls.FindFormat(ext)
+        formatCls:Type['Mesh'] = cls.FindFormat(ext)
         if formatCls is None:
             raise ValueError(f'unsupported mesh format: {ext}')
-        mesh = formatCls(name, keep_vertices)
+        mesh = formatCls(name=name,
+                         keep_vertices=keep_vertices,
+                         generateVertexID=generateVertexID,
+                         vertexBoundingBoxLength=vertexBoundingBoxLength)
         mesh.load(path)
         return mesh
 
@@ -140,6 +245,7 @@ class Mesh(ResourcesObj):
             cls._Plane_Mesh = _Mesh_Plane()
         return cls._Plane_Mesh
     _Sphere_Meshes = {}
+
     @classmethod
     def Sphere(cls, segment=32)->'Mesh':
         '''
@@ -151,6 +257,7 @@ class Mesh(ResourcesObj):
             cls._Sphere_Meshes[segment] = _Mesh_Sphere(segment)
         return cls._Sphere_Meshes[segment]
     _Cube_Mesh = None
+
     @classmethod
     def Cube(cls)->'Mesh':
         '''
@@ -180,6 +287,7 @@ class _Mesh_Plane(Mesh):
 
     def __new__(cls):
         return super().__new__(cls, '_Default_Plane_Mesh')
+
     def __init__(self):
         super().__init__(self.name, keep_vertices=True)
         self._vao = None
@@ -216,11 +324,13 @@ class _Mesh_Plane(Mesh):
         # uv
         gl.glEnableVertexAttribArray(2)
         gl.glVertexAttribPointer(2, 2, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(6 * 4))
+
     def draw(self, group:int=None):
         if self.vao is None:
             raise Exception('Data is not sent to GPU')
         gl.glBindVertexArray(self.vao)
         gl.glDrawArrays(gl.GL_TRIANGLE_FAN, 0, 4)
+
     def clear(self):
         if self.vao is not None:
             gl.glDeleteVertexArrays(1, [self.vao])
@@ -229,8 +339,10 @@ class _Mesh_Plane(Mesh):
             self._vbo = None
 
 class _Mesh_Sphere(Mesh):
+
     def __new__(cls, segment:int):
         return super().__new__(cls, f'_Default_Sphere_Mesh_{segment}')
+
     def __init__(self, segment:int):
         super().__init__(self.name)
         self.segment = segment
@@ -316,16 +428,16 @@ class _Mesh_Cube(Mesh):
     def _GetCubeVertices(cls)->List[float]:
         if cls._cube_vertices is None:
             cls._cube_vertices = [
-                # x, y, z, nx, ny, nz, u, v
-                -0.5, -0.5, -0.5, 0, 0, -1, 0, 0,
-                0.5, -0.5, -0.5, 0, 0, -1, 1, 0,
-                0.5, 0.5, -0.5, 0, 0, -1, 1, 1,
-                -0.5, 0.5, -0.5, 0, 0, -1, 0, 1,
+                # x, y, z,         nx, ny, nz,   u, v
+                -0.5, -0.5, -0.5,  0, 0, -1,    0, 0,
+                0.5, -0.5, -0.5,   0, 0,  1,    1, 0,
+                0.5, 0.5, -0.5,    0, 0, -1,    1, 1,
+                -0.5, 0.5, -0.5,   0, 0, -1,    0, 1,
 
-                -0.5, -0.5, 0.5, 0, 0, 1, 1, 0,
-                0.5, -0.5, 0.5, 0, 0, 1, 0, 0,
-                0.5, 0.5, 0.5, 0, 0, 1, 0, 1,
-                -0.5, 0.5, 0.5, 0, 0, 1, 1, 1,
+                -0.5, -0.5, 0.5,   0, 0, 1,     1, 0,
+                0.5, -0.5, 0.5,    0, 0, 1,     0, 0,
+                0.5, 0.5, 0.5,     0, 0, 1,     0, 1,
+                -0.5, 0.5, 0.5,    0, 0, 1,     1, 1,
             ]
         return cls._cube_vertices
 

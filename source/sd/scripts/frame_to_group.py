@@ -1,7 +1,7 @@
 import sys, os
 sys.path.append(os.getcwd())
 
-import modules.utils as utils
+import sd.modules.utils as utils
 import re
 import os
 from PIL import Image

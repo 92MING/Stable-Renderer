@@ -3,17 +3,19 @@ from engine.static.enums import RenderOrder
 from engine.static.resourcesObj import ResourcesObj
 from engine.static.texture import Texture
 from engine.static.shader import Shader, Supported_Shader_Value_Types
-from typing import Union, get_args, Dict, Tuple
+from typing import Union, get_args, Dict, Tuple, TypeVar, Type
 from enum import Enum
 from dataclasses import dataclass
 from utils.type_utils import valueTypeCheck
 from utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
 import glm
 
+T = TypeVar('T', bound='Material')
+'''Type var for child class of Material'''
+
 @dataclass
 class DefaultTexture:
     '''This class is used to store the default texture info in glsl.'''
-
     name: str
     '''Name of the default texture, e.g. diffuseTex'''
     shader_check_name: str
@@ -32,8 +34,8 @@ class DefaultTextureType(Enum):
     '''Light reflection texture of the material'''
     EmissionTex = DefaultTexture('emissionTex', 'hasEmissionTex', 3)
     '''Light emission texture of the material'''
-    OcclusionTex = DefaultTexture('occlusionTex', 'hasOcclusionTex', 4) # AO
-    '''Ambient occlusion texture of the material'''
+    OcclusionTex = DefaultTexture('occlusionTex', 'hasOcclusionTex', 4)
+    '''Ambient occlusion texture of the material. Known as `AO` texture.'''
     MetallicTex = DefaultTexture('metallicTex', 'hasMetallicTex', 5)
     '''Metallic texture of the material'''
     RoughnessTex = DefaultTexture('roughnessTex', 'hasRoughnessTex', 6)
@@ -123,18 +125,19 @@ class Material(ResourcesObj):
 
     # region cls method
     @classmethod
-    def Load(cls, path, name=None, shader=None) -> Union['Material', Tuple['Material', ...]]:
-        '''Try to load a material from given path.'''
-        path, name = cls._GetPathAndName(path, name)
+    def Load(cls: Type[T], path, *args, **kwargs) -> Union[T, Tuple[T]]:
+        '''
+        Try to load a material from given path.
+
+        Each subclass should override this method to provide the corresponding load method.
+        '''
         format = path.split('.')[-1].lower()
         if format == "":
             raise ValueError(f'No format specified for {path}')
         subcls = cls.FindFormat(format)
         if subcls is None:
             raise ValueError(f'Not supported format {format} for {path}')
-        subcls = subcls(name, shader)
-        subcls.load(path)
-        return subcls
+        return subcls.Load(path, *args, **kwargs)
     # endregion
 
     def __init__(self, name, shader:Shader=None, order:Union[RenderOrder, int]=RenderOrder.OPAQUE):
@@ -143,7 +146,7 @@ class Material(ResourcesObj):
         :param shader: shader of the material. If None, will use Shader.Default_Defer_Shader()
         :param order: render order of the material.
         '''
-        super().__init__(self, name)
+        super().__init__(name)
         if shader is None:
             shader = Shader.Default_GBuffer_Shader() if not self.engine.IsDebugMode else Shader.Debug_Shader()
         self._shader:'Shader' = shader
@@ -157,22 +160,28 @@ class Material(ResourcesObj):
     @property
     def id(self)->int:
         return self._id
+
     @property
     def shader(self)->Shader:
         return self._shader
+
     @shader.setter
     def shader(self, value:Shader):
         self._shader = value
+
     @property
     def drawAvailable(self) -> bool:
         '''Return True if the material is ready to draw(e.g. shader is not None).'''
         return self._shader is not None
+
     @property
     def renderOrder(self)->int:
         return self._renderOrder
+
     @renderOrder.setter
     def renderOrder(self, value:Union[RenderOrder, int]):
         self._renderOrder = value.value if isinstance(value, RenderOrder) else value
+
 
     def sendToGPU(self):
         for uniName, (tex, slot) in self._textures.items():
@@ -201,8 +210,10 @@ class Material(ResourcesObj):
                     self._textures.pop(other_name)
                     break
         self._textures[name] = (texture, order)
+
     def removeTexture(self, name:str):
         self._textures.pop(name)
+
     def addDefaultTexture(self, texture:Texture, default_type:DefaultTextureType):
         '''
         add default texture with default name and order. Will replace the existing one with the same order & name.
@@ -236,6 +247,7 @@ class Material(ResourcesObj):
         for name, value in self._variables.items():
             self._shader.setUniform(name, value)
         self._shader.setUniform('materialID', self.id) # for corresponding map
+
 
 
 __all__ = ['Material', 'DefaultTextureType']

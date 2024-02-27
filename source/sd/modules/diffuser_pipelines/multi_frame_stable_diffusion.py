@@ -1,3 +1,4 @@
+import diffusers
 import torch
 import PIL
 import numpy
@@ -73,7 +74,9 @@ def preprocess_mask(mask, batch_size, scale_factor=8, blur_radius=0):
         return mask
 
 
-class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipeline, StableDiffusionControlNetInpaintPipeline, DiffusionPipeline):
+class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipeline,
+                                       StableDiffusionControlNetInpaintPipeline,
+                                       DiffusionPipeline):
     def __init__(
         self,
         vae: AutoencoderKL,

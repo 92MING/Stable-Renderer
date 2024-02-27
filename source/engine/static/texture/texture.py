@@ -4,9 +4,11 @@ import OpenGL.error
 import numpy as np
 from pathlib import Path
 from PIL import Image
+from PIL.Image import Image as ImageType
 
 from ..resourcesObj import ResourcesObj
 from ..enums import *
+from ..color import Color
 from utils.decorator import Overload
 
 from typing import TYPE_CHECKING, Union
@@ -149,7 +151,7 @@ class Texture(ResourcesObj):
         self._height = height
 
     @Overload
-    def load(self, image: Image):
+    def load(self, image: ImageType):
         '''Load by PIL image'''
         print('Loading texture by PIL image...')
         self._buffer = image.transpose(Image.FLIP_TOP_BOTTOM).tobytes()
@@ -208,7 +210,7 @@ class Texture(ResourcesObj):
     def CreateVirtualTex(name=None,
                          height: int = 1024,
                          width: int = 1024,
-                         fill_data: float = 1.0,
+                         fill_color: Color = Color.WHITE,
                          )->'Texture':
         if not name:
             name = f"VirtualTex_{width}x{height}"
@@ -222,9 +224,9 @@ class Texture(ResourcesObj):
                           TextureFilter.LINEAR,
                           TextureWrap.REPEAT,
                           TextureWrap.REPEAT)
-        texture.load(np.full((width, height, 3), int(fill_data*255), dtype=np.int32).tobytes(),
-                     width,
-                     height)
+        color = (int(fill_color.r * 255), int(fill_color.g * 255), int(fill_color.b * 255))
+        fake_image = Image.new('RGB', (width, height), color)
+        texture.load(fake_image)
         return texture
 
     @classmethod

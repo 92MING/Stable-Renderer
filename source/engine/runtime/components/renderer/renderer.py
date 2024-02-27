@@ -26,10 +26,12 @@ class Renderer(Component):
             self._materials.append(value)
         else:
             self._materials[0] = value
+
     @property
     def materials(self)->Tuple[Material, ...]:
         '''Return the materials list.'''
         return tuple(self._materials)
+
     def addMaterial(self, material:Union[Material, Iterable[Material]], duplicateCheck=False):
         '''
         Add a material to the list.
@@ -44,6 +46,7 @@ class Renderer(Component):
                 self._materials.append(material) if material not in self._materials else None
             else:
                 self._materials.append(material)
+
     def removeMaterial(self, material:Material):
         '''
         Remove a material from the list. If the material is not in the list, do nothing.
@@ -58,6 +61,7 @@ class Renderer(Component):
     def _draw(self):
         '''Draw to screen. Override this method to implement your own drawing logic. Usually add render task to RenderManager here'''
         raise NotImplementedError
+
     def _drawAvailable(self):
         '''Check if this renderer is available to draw. Override this method to implement your own logic.'''
         return len(self._materials) > 0 and reduce(lambda x, y: x and y, map(lambda x: x.drawAvailable, self._materials), True)

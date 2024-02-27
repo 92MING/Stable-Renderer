@@ -2,12 +2,13 @@ import os.path
 import ctypes
 import OpenGL.GL as gl
 import numpy as np
-from typing import List
+from typing import List, Final
 from tqdm import tqdm
 from dataclasses import dataclass
 
 from .mesh import Mesh
 from engine.static.enums import PrimitiveType
+from utils.math_utils import calculate_tangent
 
 @dataclass
 class MTL_Data:
@@ -18,12 +19,22 @@ class MTL_Data:
 class Mesh_OBJ(Mesh):
     '''Specialized Mesh for .obj file format. It can load .obj file and send the data to GPU.'''
 
-    _Format = 'obj'
+    _Format: Final[str] = 'obj'
 
-    def __init__(self, name, keep_vertices:bool=False):
-        super().__init__(name, keep_vertices)
-        self.materials:List[MTL_Data] = []
-        '''The material here is not the same as the material in the engine, but MTL_Data'''
+    _materials: List[MTL_Data]
+    '''The material here is not the same as the material in the engine, but MTL_Data'''
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._materials = []
+
+    @property
+    def materials(self):
+        '''
+        MTL data list. Each element is a MTL_Data object.
+        Note: this is not the same as the `material` in the engine.
+        '''
+        return self._materials
 
     def clear(self):
         super().clear()
@@ -122,9 +133,13 @@ class Mesh_OBJ(Mesh):
                                 center_uv = uvs[k]
                                 left_uv = uvs[k-1 if k>0 else len(uvs)-1]
                                 right_uv = uvs[k+1 if k<len(uvs)-1 else 0]
-                                tangent = self._calculate_tangent(center_point, left_point, right_point,
-                                                                                 center_uv, left_uv, right_uv)
-                                self.vertices.extend(tangent)
+                                tangent = calculate_tangent(np.array(center_point, dtype=np.float32),
+                                                            np.array(left_point, dtype=np.float32),
+                                                            np.array(right_point, dtype=np.float32),
+                                                            np.array(center_uv, dtype=np.float32),
+                                                            np.array(left_uv, dtype=np.float32),
+                                                            np.array(right_uv, dtype=np.float32))
+                                self.vertices.extend(tangent.tolist())
                 faceCount += 1
         if currMatName is not None:
             self.materials.append(MTL_Data(lastMatEnd, faceCount - lastMatEnd, currMatName))
@@ -135,9 +150,11 @@ class Mesh_OBJ(Mesh):
     def sendToGPU(self):
         if self.vao is not None:
             return # already sent to GPU
+
         super().sendToGPU()
+
         if len(self.vertices) == 0:
-            raise Exception('No data to send to GPU')
+            raise Exception(f'Mesh `{self.name}` has no data to send to GPU')
         self._vao = gl.glGenVertexArrays(1)
         gl.glBindVertexArray(self.vao)
 

@@ -1,6 +1,6 @@
 '''GameObject is the class contains components and behaviors.'''
 
-from typing import Union, List, Optional, Set, Dict
+from typing import Union, List, Optional, Set, Dict, TypeVar, Type
 import heapq
 import glm
 
@@ -23,6 +23,8 @@ _gameObj_tags: Dict[str, Set['GameObject']] = GetOrAddGlobalValue("_GAMEOBJ_TAGS
 _root_gameObjs: List['GameObject'] = GetOrAddGlobalValue("_ROOT_GAMEOBJS", []) # list of root gameObj(no parent)
 '''list of root gameObj. Root gameObjs are gameObjs without parent'''
 
+CT = TypeVar('CT', bound='Component')
+'''Type variable for component class'''
 
 class GameObject(EngineObj, NamedObj):
 
@@ -221,7 +223,7 @@ class GameObject(EngineObj, NamedObj):
         result.extend(self.components(enableOnly))
         return result
 
-    def hasComponent(self, comp: Union[ComponentMeta, str, Component], enableOnly=False):
+    def hasComponent(self, comp: Union[Type[CT], str, CT], enableOnly=False):
         '''
         whether it has component of type `comp`. If there exist a subclass of `comp`, also return True
         :param comp: Subclass of Component / component instance / component name
@@ -237,7 +239,7 @@ class GameObject(EngineObj, NamedObj):
         else:
             raise TypeError("comp must be a subclass of Component, or a component instance, or component name")
 
-    def getComponent(self, comp: Union[ComponentMeta, str, Component], enableOnly=False)->Optional[Component]:
+    def getComponent(self, comp: Union[Type[CT], str, CT], enableOnly=False)->Optional[CT]:
         '''
         return the first component of type `comp`
         :param comp: Subclass of Component / component instance / component name
@@ -260,7 +262,7 @@ class GameObject(EngineObj, NamedObj):
                     return c
         return None
 
-    def getComponents(self, comp: Union[ComponentMeta, str, Component], enableOnly=False):
+    def getComponents(self, comp: Union[Type[CT], str, CT], enableOnly=False)->List[CT]:
         '''
         return all components of type `comp`
         :param comp: Subclass of Component / component instance / component name
@@ -276,7 +278,7 @@ class GameObject(EngineObj, NamedObj):
         elif isinstance(comp, Component):
             return [c for c in self.components(enableOnly=enableOnly) if c == comp]
 
-    def removeComponent(self, comp: Union[ComponentMeta, str, Component], enableOnly=False):
+    def removeComponent(self, comp: Union[Type[CT], str, CT], enableOnly=False):
         '''
         remove the first component of type `comp`
         :param comp: Subclass of Component / component instance / component name
@@ -302,7 +304,7 @@ class GameObject(EngineObj, NamedObj):
                     c.onDestory()
                     return
 
-    def removeComponents(self, comp: Union[ComponentMeta, str, Component], enableOnly=False):
+    def removeComponents(self, comp: Union[Type[CT], str, CT], enableOnly=False):
         '''
         remove all components of type `comp`
         :param comp: Subclass of Component / component instance / component name
@@ -325,7 +327,7 @@ class GameObject(EngineObj, NamedObj):
                     c.onDisable() # call onDisable before destroy
                     c.onDestory()
 
-    def addComponent(self, comp: Union[ComponentMeta, str, Component], enable=True, *args, **kwargs)->Optional[Component]:
+    def addComponent(self, comp: Union[Type[CT], str, CT], enable=True, *args, **kwargs)->Optional[CT]:
         '''
         add a component of type `comp`
         :param comp: Subclass of Component / component instance / component name

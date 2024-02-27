@@ -1,21 +1,20 @@
 import numpy
-from PIL import Image
-# from utils.path_utils import MAP_OUTPUT_DIR, CACHE_DIR
 import os
 import re
 import pickle
 import random
-
 import numpy as np
 from tqdm import tqdm
-from typing import Callable, Tuple, Union, List
-from .utils.sortableElement import SortableElement
+from typing import Callable, Tuple, Union, List, TypeVar, Type, Optional
+
 from .common import Rectangle
 from .. import log_utils as logu, config
 from utils.os_utils import is_windows, is_mac
+from utils.data_struct import SortableElement
+from utils.path_utils import MAP_OUTPUT_DIR
 
-CACHE_DIR = "./.cache"
-MAP_OUTPUT_DIR = config.test_dir / 'boat'
+T = TypeVar('T', bound='CorrespondenceMap')
+
 
 # TODO: Same number of dropout over the time steps
 # TODO: Use the same noise map?
@@ -33,7 +32,10 @@ class CorrespondenceMap:
     """
 
     def __init__(self,
-                 correspondence_map: dict, width: int = None, height: int = None, num_frames: int = None):
+                 correspondence_map: dict,
+                 width: Optional[int] = None,
+                 height: Optional[int] = None,
+                 num_frames: Optional[int] = None):
         # avoid calling directly, should be initiated using classmethods
         self._correspondence_map = correspondence_map
         self._width = width
@@ -52,11 +54,11 @@ class CorrespondenceMap:
 
     @property
     def width(self) -> int:
-        return self._width
+        return self._width  # type: ignore
 
     @property
     def height(self) -> int:
-        return self._height
+        return self._height # type: ignore
 
     @property
     def size(self) -> tuple:
@@ -64,104 +66,27 @@ class CorrespondenceMap:
 
     @property
     def num_frames(self) -> int:
-        return self._num_frames
+        return self._num_frames # type: ignore
 
     @classmethod
-    def from_existing_directory_img(cls,
-                                    directory: str,
-                                    num_frames: int = None,
-                                    pixel_position_callback: Callable[[int, int], Tuple[int, int]] = None,
-                                    enable_strict_checking: bool = True,
-                                    use_cache: bool = False):
-        r"""
-        Create CorrespondenceMap instance from using the images in an existing directory.
-        Directory should exist and numeric values should be present in the filename for every image files.
-        The numeric values will be used as the key to sort id maps into ascending order for the construction of CorrespondenceMap
-        Files not ending with ('.jpeg', '.png', '.bmp', '.jpg') are considered as non-image files, which will be skipped.
-
-        :param directory: directory where id maps are stored as images
-        :param num_frames: first n frames to be used for building correspondence map, all frames will be used if not specified
-        :param pixel_position_callback: callback function to be applied on pixel position read from frames
-        :param enable_strict_checking: when enabled, check uniqueness, only one pixel position should be added to the same id in every frame,
-                                        when disabled, only the first pixel position will be added to the same id in every frame, subsequent pixels will be ignored
-
-        """
-        if use_cache:
-            cache_corr_map = cls._load_correspodence_map_from_cache(directory)
-            if cache_corr_map is not None:
-                return cache_corr_map
-
-        # Load and sort image maps from directory according to frame number
-        assert os.path.exists(directory), f"Directory {directory} not found"
-        id_data_container = []
-        for i, file in enumerate(os.listdir(directory)):
-            if not file.endswith((".jpeg", ".png", ".bmp", ".jpg")):
-                logu.warn(f"[INFO] Skipping non-image file {file}")
-                continue
-            match = re.search(r"\d+", file)
-            if match:
-                frame_idx = int(match.group())
-                id_data_img = Image.open(os.path.join(directory, file))
-                if i == 0:
-                    width, height = id_data_img.size
-                id_data_array = np.array(id_data_img)
-                id_data_container.append(SortableElement(value=frame_idx, object=id_data_array))
-            else:
-                raise RuntimeError(f"{file} has no numeric component in filename.")
-
-        sorted_ids = sorted(id_data_container)
-        if num_frames is not None:
-            sorted_ids = sorted_ids[:num_frames]
-        else:
-            num_frames = len(sorted_ids)
-        # prepare correspondence map
-        logu.info("[INFO] Preparing correspondence map...")
-        corr_map = {}
-        for frame_idx, id_data in tqdm(enumerate(sorted_ids), total=len(sorted_ids)):
-            assert len(id_data.Object.shape) >= 2, "id_data should be at least 2D."
-            # iterate elements, where elements have shape with first 2 dimensions dropped
-            # add pixel position [i, j] to corr_map dictionary with tuple(id_key) as key
-            for i, row in enumerate(id_data.Object):
-                for j, id in enumerate(row):
-                    if np.array_equal(id, np.zeros_like(id)):
-                        continue
-                    id_key = tuple(id)
-                    pix_xpos, pix_ypos = pixel_position_callback(i, j) if pixel_position_callback is not None else (i, j)
-                    if corr_map.get(id_key) is None:
-                        corr_map[id_key] = [([pix_xpos, pix_ypos], frame_idx)]
-                    else:
-                        # check uniqueness, only one pixel position should be added to the same id per every frame
-                        if enable_strict_checking:
-                            assert len(corr_map[id_key]) < frame_idx, f"Corr_map[key={id_key}] value={corr_map[id_key]} has already appended a pixel position at frame index {frame_idx}."
-                        else:
-                            if len(corr_map[id_key]) >= frame_idx:
-                                continue
-                        corr_map[id_key].append(([pix_xpos, pix_ypos], frame_idx))
-
-        ret = CorrespondenceMap(corr_map, width, height, num_frames)
-        if use_cache:
-            cls._save_correspondence_map_to_cache(directory, ret)
-        return ret
-
-    @classmethod
-    def from_existing_directory_numpy(cls,
-                                      directory: str = None,
-                                      num_frames: int = None,
-                                      pixel_position_callback: Callable[[int, int], Tuple[int, int]] = None,
-                                      enable_strict_checking: bool = True,
-                                      use_cache: bool = False):
+    def from_existing(cls,
+                     directory: Optional[str] = None,
+                     num_frames: Optional[int] = None,
+                     get_pixel_position_callback: Optional[Callable[[int, int], Tuple[int, int]]] = None,
+                     enable_strict_checking: bool = True,):
         r"""
         Create CorrespondenceMap instance from using the numpy files in an existing output path .
         Directory should exist and numeric values should be present in the filename for every files.
         The numeric values will be used as the key to sort id maps into ascending order for the construction of CorrespondenceMap
         Files not ending with .npy are considered as non-numpy files, which will be skipped.
 
-        :param directory: directory where id maps are stored as images. If not given, the default output path with lastest timestamp will be used.
+        :param directory: This can be:
+            * directory where id maps are stored as .npy. If not given, the default output path with lastest timestamp will be used.
+            * the corresponding cache path
         :param num_frames: first n frames to be used for building correspondence map, all frames will be used if not specified
-        :param pixel_position_callback: callback function to be applied on pixel position read from frames
+        :param get_pixel_position_callback: callback function to be applied on pixel position read from frames
         :param enable_strict_checking: when enabled, check uniqueness, only one pixel position should be added to the same id in every frame,
                                         when disabled, only the first pixel position will be added to the same id in every frame, subsequent pixels will be ignored
-        :param use_cache: whether to use cache to speed up loading. Cache will be generated if not found.
 
         """
         if directory is None:
@@ -173,16 +98,28 @@ class CorrespondenceMap:
         if is_windows():
             directory = directory.replace('/', '\\')
 
-        if use_cache:
-            cache_corr_map = cls._load_correspodence_map_from_cache(directory)
+        cache_path = None
+        if os.path.isfile(directory) and directory.endswith('.pkl'):
+            cache_path = directory
+        elif 'corr_map.pkl' in os.listdir(directory):   # if the cache file is in the directory
+            cache_path = os.path.join(directory, 'corr_map.pkl')
+        elif directory.endswith('id') and 'corr_map.pkl' in os.listdir(os.path.join(directory, '..')):
+            cache_path = os.path.join(directory, '..', 'corr_map.pkl')
+        if cache_path is not None:
+            cache_corr_map = cls.load_correspondence_map_from_cache(cache_path)
             if cache_corr_map is not None:
                 return cache_corr_map
-
-        # Load and sort image maps from directory according to frame number
+        
         assert os.path.exists(directory), f"Directory {directory} not found"
+        assert os.path.isdir(directory), f"{directory} is not a directory"
+        
+        if not directory.endswith('id') and 'id' in os.listdir(directory):  # switch to id directory automatically
+            directory = os.path.join(directory, 'id')
+        
+        # Load and sort image maps from directory according to frame number
         id_data_container = []
         for i, file in enumerate(os.listdir(directory)):
-            if not file.endswith((".npy")):
+            if not file.endswith(".npy"):
                 logu.warn(f"[WARNING] Skipping non-numpy file {file}")
                 continue
             match = re.search(r"\d+", file)
@@ -191,7 +128,7 @@ class CorrespondenceMap:
                 id_data_array = numpy.load(os.path.join(directory, file), allow_pickle=True)
                 if i == 0:
                     width, height = id_data_array.shape[1], id_data_array.shape[0]
-                id_data_container.append(SortableElement(value=frame_idx, object=id_data_array))
+                id_data_container.append(SortableElement(value=frame_idx, object=id_data_array))    # type: ignore
             else:
                 raise RuntimeError(f"{file} has no numeric component in filename.")
 
@@ -200,61 +137,68 @@ class CorrespondenceMap:
             sorted_ids = sorted_ids[:num_frames]
         else:
             num_frames = len(sorted_ids)
+            
         # prepare correspondence map
         logu.info("Preparing correspondence map...")
         corr_map = {}
         for frame_idx, id_data in tqdm(enumerate(sorted_ids), total=len(sorted_ids)):
             assert len(id_data.Object.shape) >= 2, "id_data should be at least 2D."
             # iterate elements, where elements have shape with first 2 dimensions dropped
-            # add pixel position [i, j] to corr_map dictionary with tuple(id_key) as key
             for i, row in enumerate(id_data.Object):
                 for j, id in enumerate(row):
                     if np.array_equal(id, np.zeros_like(id)):
-                        continue
+                        continue    # means no id
+                    
                     id_key = tuple(id)
-                    pix_xpos, pix_ypos = pixel_position_callback(i, j) if pixel_position_callback is not None else (i, j)
+                    pix_xpos, pix_ypos = get_pixel_position_callback(i, j) if get_pixel_position_callback is not None else (i, j)
+                    
                     if corr_map.get(id_key) is None:
                         corr_map[id_key] = [([pix_xpos, pix_ypos], frame_idx)]
                     else:
                         # check uniqueness, only one pixel position should be added to the same id per every frame
                         if enable_strict_checking:
                             assert len(corr_map[id_key]) < frame_idx, f"Corr_map[key={id_key}] value={corr_map[id_key]} has already appended a pixel position at frame index {frame_idx}."
-                        else:
-                            if len(corr_map[id_key]) >= frame_idx:
-                                continue
+                        # else:
+                        #     if len(corr_map[id_key]) >= frame_idx:
+                        #         continue
                         corr_map[id_key].append(([pix_xpos, pix_ypos], frame_idx))
 
         ret = CorrespondenceMap(corr_map, width, height, num_frames)
-        if use_cache:
-            cls._save_correspondence_map_to_cache(directory, ret)
+        cache_path = os.path.join(directory, ('..' if directory.endswith('id') else ''), 'corr_map.pkl')
+        ret.save_cache(path=cache_path)
         return ret
 
 # TODO: integrate utils.make_corr_map
-    @ staticmethod
-    def _get_cache_path(img_from_dir: str):
-        return os.path.join(CACHE_DIR, os.path.basename(os.path.dirname(img_from_dir)), 'corr_map.pkl')
+    @ classmethod
+    def load_correspondence_map_from_cache(cls: Type[T], path: str)->T:
+        '''
+        Load the correspondence map from a cache file, if it exists.
+        
+        Args:
+            * path: the full path to the cache file. If a dir is given, the file will be loaded from '{path}/corr_map.pkl'
+        '''
+        if os.path.exists(path) and os.path.isdir(path):
+            path = os.path.join(path, 'corr_map.pkl')
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Correspondence map cache file not found at {path}")
+        
+        with open(path, 'rb') as f:
+            corr_map: T = pickle.load(f)
+            logu.success(f"[SUCCESS] Correspondence map loaded from {path}")
+            return corr_map
 
-    @ staticmethod
-    def _load_correspodence_map_from_cache(img_from_dir: str):
-        cached_fname = CorrespondenceMap._get_cache_path(img_from_dir)
-        if os.path.exists(cached_fname):
-            try:
-                with open(cached_fname, 'rb') as f:
-                    corr_map: CorrespondenceMap = pickle.load(f)
-                logu.success(f"[SUCCESS] Correspondence map loaded from {cached_fname}")
-                return corr_map
-            except Exception as e:
-                os.remove(cached_fname)
-        return None
-
-    @ staticmethod
-    def _save_correspondence_map_to_cache(img_from_dir: str, corr_map):
-        cache_fname = CorrespondenceMap._get_cache_path(img_from_dir)
-        if not os.path.exists(cache_fname):
-            os.makedirs(os.path.dirname(cache_fname), exist_ok=True)
-            with open(cache_fname, 'wb') as f:
-                pickle.dump(corr_map, f)
-            logu.success(f"[SUCCESS] Correspondence map created and cached to {cache_fname}")
+    def save_cache(self, path: str):
+        '''
+        Save the correspondence map to a file, for quick loading in the future.
+        
+        Args:
+            * path: the full path to save the cache file. If a dir is given, the file will be saved as '{path}/corr_map.pkl'
+        '''
+        if os.path.exists(path) and os.path.isdir(path):
+            path = os.path.join(path, 'corr_map.pkl')
+        with open(path, 'wb') as f:
+            pickle.dump(self, f)
+        logu.success(f"[SUCCESS] Correspondence map created and cached to {path}")
     
     def dropout_index(self, probability: float, seed: int):
         """Randomly drop indices in correspondence map with `probability`.
@@ -308,7 +252,7 @@ class CorrespondenceMap:
                 return False
             # Assumes top left of an image is the origin [0, 0]
             if isinstance(rectangle, Rectangle):
-                return rectangle.is_in_rectangle(position)
+                return rectangle.is_in_rectangle(position)  # type: ignore
             elif isinstance(rectangle, tuple):
                 top_left, bottom_right = rectangle
                 return (position[0] < bottom_right[0] and position[0] > top_left[0]) and  \
@@ -336,5 +280,6 @@ class CorrespondenceMap:
             merged_corr_map[(object_id, material_id, texture_x // distance, texture_y // distance)] = trace
         logu.info(f"Correspondence map vertices before merge: {len(self._correspondence_map)}, after merge: {len(merged_corr_map)}")
         self._correspondence_map = merged_corr_map
+
 
 __all__ = ['CorrespondenceMap']

@@ -1,11 +1,15 @@
-from utils.global_utils import GetOrAddGlobalValue, GetGlobalValue
+from utils.global_utils import GetOrCreateGlobalValue, GetGlobalValue
 from uuid import uuid4
+from typing import Dict, TYPE_CHECKING, TypeVar, Optional
 import os
+if TYPE_CHECKING:
+    from engine.engine import Engine
 
 def _random_str():
     return str(uuid4()).replace('-', '')
 
-_RESOURCES_CLSES = GetOrAddGlobalValue('_RESOURCES_CLSES', dict()) #cls_name: cls
+_RESOURCES_CLSES = GetOrCreateGlobalValue('_RESOURCES_CLSES', dict)
+'''cls_name: cls'''
 
 class ResourcesObjMeta(type):
 
@@ -26,18 +30,25 @@ class ResourcesObjMeta(type):
         _RESOURCES_CLSES[cls_name] = cls
         return cls
 
+_AllBaseClsInstances: Dict[str, Dict[str, 'ResourcesObj']] = GetOrCreateGlobalValue('_AllBaseClsInstances', dict) # base_cls_name: cls_instances
+'''
+{ base_cls_name: {name: instance, ...} }
+Dict for all instances of base classes, e.g. Mesh, Material, Texture...
+'''
+
+RC = TypeVar('RC', bound='Type[ResourcesObj]')
+'''Type hint for sub-classes of ResourcesObj'''
+
 class ResourcesObj(metaclass=ResourcesObjMeta):
     '''Class for resources that need to load to GPU before get into the main loop'''
 
     # region cls properties
-    _Format:str = None # format of the data, e.g. "obj" for "Mesh_OBJ"
+    _Format: str = None # format of the data, e.g. "obj" for "Mesh_OBJ"
     '''override this property to specify the format of the mesh data, e.g. "obj"'''
-    _LoadOrder = 0
+    _LoadOrder: int = 0
     '''override this property to specify the order of loading to GPU by ResourcesManager, the smaller the earlier'''
-    _BaseName = None
+    _BaseName: str = None
     '''Override this to set the base name of the class, e.g. "Mesh" for "Mesh_OBJ"'''
-
-    _Instances: dict = None  # {name: Obj, ...}
 
     _internal_id: str = None
     '''For internal use only, do not override this'''
@@ -56,17 +67,29 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
         return baseClsName
 
     @classmethod
-    def FindFormat(cls, format):
+    def FindFormat(cls:RC, format)->RC:
+        '''Find the sub-class that supports the given format, e.g. Mesh.FindFormat("obj") will return Mesh_OBJ.'''
         return cls._Format_Clses.get(format, None)
 
     @classmethod
-    def Format(cls):
+    def Format(cls: RC)->Optional[str]:
         if cls._Format is None:
             return None
         format = cls._Format.lower().strip()
         if format.startswith('.'):
             format = format[1:]
         return format
+
+    @classmethod
+    def BaseInstances(cls):
+        '''
+        For internal use only, do not override this
+        This contains all the instances of the sub-baseclass, e.g. Mesh._ClassInstances contains all instances of its sub class.
+        '''
+        cls_basename = cls.BaseClsName()
+        if cls_basename not in _AllBaseClsInstances:
+            _AllBaseClsInstances[cls_basename] = {}
+        return _AllBaseClsInstances[cls_basename]
 
     @classmethod
     def SupportedFormats(cls):
@@ -77,15 +100,12 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
 
     @classmethod
     def Find(cls, name):
-        if cls._Instances is None:
-            cls._Instances = {}
-        return cls._Instances.get(name, None)
+        return cls.BaseInstances().get(name, None)
 
     @classmethod
     def AllInstances(cls):
-        if cls._Instances is None:
-            cls._Instances = {}
-        return cls._Instances.values()
+        '''All instances of this sub-baseclass, e.g. Mesh.AllInstances() contains all instances of its sub class, including MeshObj, etc.'''
+        return cls.BaseInstances().values()
 
     @classmethod
     def _GetPathAndName(cls, path, name=None):
@@ -108,21 +128,16 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
     # endregion
 
     def __new__(cls, name, *args, **kwargs):
-        if cls._Instances is None:
-            cls._Instances = {}
-
-        if name in cls._Instances:
-            obj = cls._Instances[name]
-            obj.__init__ = lambda *a, **kw: None
-            return obj
+        if name in cls.BaseInstances():
+            return cls.BaseInstances()[name]
         else:
             obj = super().__new__(cls)
             obj._name = name
             obj._internal_id = _random_str()
-            cls._Instances[name] = obj
+            cls.BaseInstances()[name] = obj
             return obj
 
-    def __init__(self, name, *args, **kwargs):
+    def __init__(self, name: str, *args, **kwargs):
         pass
 
     @property
@@ -140,9 +155,6 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
         return self.__class__._engine
 
     # region abstract methods
-    def load(self, path):
-        '''The real load method'''
-        raise NotImplementedError
 
     def sendToGPU(self):
         '''Override this to send the data to GPU'''
@@ -152,16 +164,8 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
         '''Override this to clear the data from GPU'''
         pass
 
-    @classmethod
-    def Load(cls, path, name=None) -> 'ResourcesObj':
-        '''
-        Override this method to load the data from file.
-        e.g.:
-            def Load(cls, path, name=None):
-                path, name = cls._GetNameAndPath(path, name)
-                ... # your code here
-        '''
-        raise NotImplementedError
     # endregion
+
+
 
 __all__ = ['ResourcesObj', 'ResourcesObjMeta']

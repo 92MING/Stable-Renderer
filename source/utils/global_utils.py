@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-'''常用的全局变量操作, 無論如何import此模塊, 都會得到同一個全局變量字典。不涉及global()或者os.environ. 如果有.env, 會自動讀取。'''
+'''
+Utils for building/reading globally unique values.
+If ".env" exist, this module will load it and set the environment variables.
+'''
 
 import sys, os
 
@@ -25,7 +28,11 @@ if _needInit:
         if os.path.exists(path):
             load_dotenv(path)
 
-def GetEnv(key: str, default = None, type = str):
+from typing import TypeVar, Type, Optional
+
+T = TypeVar('T')
+
+def GetEnv(key: str, default: Optional[T] = None, type: Type[T] = str)->Optional[T]:
     '''
     Get value from os.environ.
     :param key: the key of the value

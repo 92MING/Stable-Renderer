@@ -243,29 +243,29 @@ class Shader(NamedObj, EngineObj):
     def Default_GBuffer_Shader(cls):
         if cls._Default_GBuffer_Shader is None:
             cls._Default_GBuffer_Shader = Shader("default_Gbuffer_shader",
-                                                  os.path.join(SHADER_DIR, "default_Gbuffer_vs.glsl"),
-                                                  os.path.join(SHADER_DIR, "default_Gbuffer_fs.glsl"))
+                                                  os.path.join(SHADER_DIR, "default_Gbuffer.vert.glsl"),
+                                                  os.path.join(SHADER_DIR, "default_Gbuffer.frag.glsl"))
         return cls._Default_GBuffer_Shader
     @classmethod
     def Default_Defer_Shader(cls):
         if cls._Default_Defer_Shader is None:
             cls._Default_Defer_Shader = Shader("default_defer_render_shader",
-                                                os.path.join(SHADER_DIR, "default_defer_render_vs.glsl"),
-                                                os.path.join(SHADER_DIR, "default_defer_render_fs.glsl"))
+                                                os.path.join(SHADER_DIR, "default_defer_render.vert.glsl"),
+                                                os.path.join(SHADER_DIR, "default_defer_render.frag.glsl"))
         return cls._Default_Defer_Shader
     @classmethod
     def Default_Post_Shader(cls):
         if cls._Default_Post_Shader is None:
             cls._Default_Post_Shader = Shader("default_post_process",
-                                              os.path.join(SHADER_DIR, 'default_post_process_vs.glsl'),
-                                              os.path.join(SHADER_DIR, 'default_post_process_fs.glsl'))
+                                              os.path.join(SHADER_DIR, 'default_post_process.vert.glsl'),
+                                              os.path.join(SHADER_DIR, 'default_post_process.frag.glsl'))
         return cls._Default_Post_Shader
     @classmethod
     def Debug_Shader(cls):
         if cls._Debug_Shader is None:
             cls._Debug_Shader = Shader("debug_shader",
-                                        os.path.join(SHADER_DIR, "debug_vs.glsl"),
-                                        os.path.join(SHADER_DIR, "debug_fs.glsl"))
+                                        os.path.join(SHADER_DIR, "debug.vert.glsl"),
+                                        os.path.join(SHADER_DIR, "debug.frag.glsl"))
         return cls._Debug_Shader
     # endregion
 

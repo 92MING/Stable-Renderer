@@ -91,7 +91,7 @@ def make_correspondence_map(from_dir, save_to_path, num_frames=None, force_recre
             logu.warn(f"Correspondence map {save_to_path} is corrupted. It will be re-created.")
     else:
         logu.info(f"Creating correspondence map from {from_dir}")
-        corr_map = CorrespondenceMap.from_existing_directory_numpy(
+        corr_map = CorrespondenceMap.from_existing(
             from_dir,
             enable_strict_checking=False,
             # pixel_position_callback=lambda x, y: (x//8, y//8),

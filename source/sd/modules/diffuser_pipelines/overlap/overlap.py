@@ -104,6 +104,7 @@ class Overlap:
         corr_map: CorrespondenceMap,
         step: int = None,
         timestep: int = None,
+        apply_corr_map_decay: bool = False,
         **kwargs,
     ):
         assert frame_seq[0].shape[2:] == (corr_map.height, corr_map.width), f"frame shape {frame_seq[0].shape[2:]} does not match corr_map shape {(corr_map.height, corr_map.width)}"
@@ -116,7 +117,7 @@ class Overlap:
 
         alpha = self.alpha_scheduler(step, timestep)
         corr_map_decay = self.corr_map_decay_scheduler(step, timestep)
-        apply_corr_map = False
+        apply_corr_map_decay = False
         kernel_radius = int(self.kernel_radius_scheduler(step, timestep))
 
         # rectangle = Rectangle((170, 168), (351, 297))
@@ -162,8 +163,8 @@ class Overlap:
                 #     rectangle.is_in_rectangle((x, y)) and f == at_frame
                 #     for f, y, x in zip(frame_index_trace, y_position_trace, x_position_trace)
                 # ])
-                apply_corr_map = False
-                if apply_corr_map:
+                apply_corr_map_decay = False
+                if apply_corr_map_decay:
                     frame_seq_stack_copy[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * corr_map_decay * overlapped_seq + (1 - alpha * corr_map_decay) * latent_seq
                     index_decay_count += 1
                 else:

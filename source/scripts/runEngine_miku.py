@@ -1,4 +1,7 @@
-import os.path
+import os, sys
+source_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(source_dir)
+
 from engine.runtime.components import Camera, MeshRenderer
 from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
@@ -7,12 +10,13 @@ from engine.runtime.components import CameraControl
 from engine.static import Mesh, Material, Material_MTL, Key, MouseButton
 from utils.path_utils import *
 
+
 if __name__ == '__main__':
 
     class AutoRotation(Component):
         def update(self):
             self.transform.rotateLocalY(0.5)
-
+    
     class Sample(Engine):
         def beforePrepare(self):
             mikuPath = os.path.join(RESOURCES_DIR, 'miku')
@@ -21,10 +25,10 @@ if __name__ == '__main__':
 
             camera = GameObject('Camera')
             camera.addComponent(Camera)
-            camera.addComponent(CameraControl, defaultPos=[4, 4, -3], defaultLookAt=[0, 0, 0])
+            camera.addComponent(CameraControl, defaultPos=[1.3, 2.8, 1.3], defaultLookAt=[0, 2.8, 0])
 
-            miku = GameObject('miku', position=[0, 0, 0], scale=[0.1, 0.1, 0.1])
-            meshRenderer:MeshRenderer = miku.addComponent(MeshRenderer, mesh=mikuMesh)
+            miku = GameObject('miku', position=[0, 0, 0], scale=[0.16, 0.16, 0.16])
+            meshRenderer = miku.addComponent(MeshRenderer, mesh=mikuMesh)
             meshRenderer.load_MTL_Materials(mikuMaterials)
             miku.addComponent(AutoRotation)
 
@@ -37,4 +41,5 @@ if __name__ == '__main__':
                enableHDR=False,
                debug=False,
                winSize=(512, 512),
+               mapSavingInterval=4,
                needOutputMaps=True,)
