@@ -8,7 +8,7 @@ from engine.runtime.components import Camera, MeshRenderer
 from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
-from engine.runtime.components import CameraControl
+from engine.runtime.components import CameraController
 from engine.static import Material, Mesh, Texture, DefaultTextureType, Key, MouseButton
 from utils.path_utils import *
 
@@ -18,27 +18,66 @@ if __name__ == '__main__':
     class AutoRotation(Component):
         def update(self):
             self.transform.rotateLocalY(0.2)
-            
-    class ControlBoat(Component):
-        def update(self):
-            inputManager = self.engine.InputManager
-            direction = self.transform.forward
-            if inputManager.GetKey(Key.W):
-                self.transform.position = self.transform.position + self.transform.forward * 0.1
-                direction = direction + self.transform.forward * 0.1
-            if inputManager.GetKey(Key.S):
-                self.transform.position = self.transform.position - self.transform.forward * 0.1
-                direction = direction - self.transform.forward * 0.1
-            if inputManager.GetKey(Key.A):
-                self.transform.position = self.transform.position - self.transform.right * 0.1
-                direction = direction - self.transform.right * 0.1
-            if inputManager.GetKey(Key.D):
-                self.transform.position = self.transform.position + self.transform.right * 0.1
-                direction = direction + self.transform.right * 0.1
-                
-            self.transform.forward = glm.normalize(direction)
 
+    class ControlBoat(Component):
+        '''Control the boat with W, A, S, D keys. The boat will move forward, backward, left, right.'''
+        
+        deceleration_rate: float = 0.98
+        angular_deceleration_rate: float = 0.95
+        
+        acceleration: float = 0.05
+        angular_acceleration: float = 5
+        max_spd = 0.5
+        max_angular_spd = 90
+        
+        velocity: glm.vec3 = glm.vec3(0)
+        angular_velocity: float = 0
+        
+        _inputManager = None
+        @property
+        def inputManager(self):
+            if self._inputManager is None:
+                self._inputManager = self.engine.InputManager
+            return self._inputManager
+        
+        _runtimeManager = None
+        @property
+        def runtimeManager(self):
+            if self._runtimeManager is None:
+                self._runtimeManager = self.engine.RuntimeManager
+            return self._runtimeManager
+        
+        def update_physics(self):
+            if glm.length(self.velocity) > 0.005:
+                self.velocity *= self.deceleration_rate
+                self.transform.position += (self.transform.forward + self.velocity) * self.runtimeManager.DeltaTime
+            else:
+                self.velocity = glm.vec3(0)
+                
+            if abs(self.angular_velocity) > 0.005:
+                self.angular_velocity *= self.angular_deceleration_rate
+                self.transform.rotateLocalY(self.angular_velocity * self.runtimeManager.DeltaTime)
+            else:
+                self.angular_velocity = 0
+        
+        def fixedUpdate(self):
+            if self.inputManager.GetKey(Key.W):
+                self.velocity += self.transform.forward * self.acceleration
+                
+            if self.inputManager.GetKey(Key.S):
+                self.velocity -= self.transform.forward * self.acceleration
+                
+            if self.inputManager.GetKey(Key.A):
+                self.angular_velocity += self.angular_acceleration
+                
+            if self.inputManager.GetKey(Key.D):
+                self.angular_velocity -= self.angular_acceleration
             
+            self.velocity = glm.clamp(self.velocity, -self.max_spd, self.max_spd)
+            self.angular_velocity = -self.max_angular_spd if self.angular_velocity < -self.max_angular_spd else self.max_angular_spd if self.angular_velocity > self.max_angular_spd else self.angular_velocity
+            
+            self.update_physics()
+
     class Sample(Engine):
         def beforePrepare(self):
             self.boatMesh = Mesh.Load(os.path.join(RESOURCES_DIR, 'boat', 'boat.obj'))
@@ -50,15 +89,15 @@ if __name__ == '__main__':
 
             self.boat = GameObject('Boat', position=[0, 0, 0])
             self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, materials=self.boatMaterial)
-            # self.boat.addComponent(AutoRotation)
-            self.boat.addComponent(ControlBoat)
+            self.boat.addComponent(AutoRotation)
+            #self.boat.addComponent(ControlBoat)
             
             self.camera = GameObject('Camera', position=[4, 4, -3])
             self.camera.addComponent(Camera)
-            self.camera.addComponent(CameraControl, defaultPos=[4, 4, -3], defaultLookAt=[0, 0, 0])
+            self.camera.addComponent(CameraController, defaultPos=[4, 4, -3], defaultLookAt=[0, 0, 0])
 
 
     Sample.Run(enableGammaCorrection=True,
                debug=False,
                winSize=(512, 512),
-               needOutputMaps=False,)
+               needOutputMaps=True,)

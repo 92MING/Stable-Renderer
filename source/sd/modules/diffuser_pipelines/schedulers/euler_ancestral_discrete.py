@@ -129,7 +129,7 @@ def rescale_zero_terminal_snr(betas):
     return betas
 
 
-class EulerAncestralDiscreteScheduler(SchedulerMixin, ConfigMixin):
+class EulerDiscreteScheduler(SchedulerMixin, ConfigMixin):
     """
     Ancestral sampling with Euler method steps.
 
@@ -180,6 +180,7 @@ class EulerAncestralDiscreteScheduler(SchedulerMixin, ConfigMixin):
         timestep_spacing: str = "linspace",
         steps_offset: int = 0,
         rescale_betas_zero_snr: bool = False,
+        enable_ancestral_sampling: bool = True,
     ):
         if trained_betas is not None:
             self.betas = torch.tensor(trained_betas, dtype=torch.float32)
@@ -221,7 +222,7 @@ class EulerAncestralDiscreteScheduler(SchedulerMixin, ConfigMixin):
 
     @property
     def init_noise_sigma(self):
-        # standard deviation of the initial noise distribution
+        '''standard deviation of the initial noise distribution'''
         if self.config.timestep_spacing in ["linspace", "trailing"]:
             return self.sigmas.max()
 
@@ -620,16 +621,19 @@ class EulerAncestralDiscreteScheduler(SchedulerMixin, ConfigMixin):
         sigma_down = (sigma_to**2 - sigma_up**2) ** 0.5
 
         # 2. Convert to an ODE derivative
-        derivative = (sample - pred_original_sample) / sigma
-
-        dt = sigma_down - sigma
-
-        prev_sample = sample + derivative * dt
-
-        device = model_output.device
-        noise = randn_tensor(model_output.shape, dtype=model_output.dtype, device=device, generator=generator)
-
-        prev_sample = prev_sample + noise * sigma_up
+        
+        if self.config.enable_ancestral_sampling:   # Add new random noise only if ancestral sampling is enabled
+            derivative = (sample - pred_original_sample) / sigma
+            dt = sigma_down - sigma
+            prev_sample = sample + derivative * dt
+            device = model_output.device
+            noise = randn_tensor(model_output.shape, dtype=model_output.dtype, device=device, generator=generator)
+            prev_sample = prev_sample + noise * sigma_up
+        else:
+            sigma = self.sigmas[self.step_index]
+            derivative = (sample - pred_original_sample) / sigma
+            dt = self.sigmas[self.step_index + 1] - sigma
+            prev_sample = sample + derivative * dt
 
         # Cast sample back to model compatible dtype
         prev_sample = prev_sample.to(model_output.dtype)

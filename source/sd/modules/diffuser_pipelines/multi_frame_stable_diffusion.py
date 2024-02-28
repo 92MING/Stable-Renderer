@@ -33,7 +33,7 @@ from .. import log_utils as logu
 from ..utils import save_latents
 from .overlap import Overlap
 from .overlap.johnny_overlap import overlap as temp_overlap
-from .two_step_schedulers import TwoStepScheduler
+from .schedulers import TwoStepScheduler
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -977,7 +977,7 @@ class StableDiffusionImg2VideoPipeline(StableDiffusionLongPromptWeightingPipelin
                     latents_frame = self.scheduler.predict_previous_sample(
                         pred_original_sample, noise_pred, t, latents_frame, **extra_step_kwargs
                     )
-
+ 
                     if hasattr(self.scheduler, "_step_index"):
                         self.scheduler._step_index -= 1
 

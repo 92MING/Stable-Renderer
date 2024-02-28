@@ -135,6 +135,14 @@ class Transform(Component):
             angle = glm.radians(angle)
         self._localRot = glm.rotate(self._localRot, angle, axis)
 
+    @Overload
+    def rotate(self, x: float, y: float, z: float, radian=False):
+        '''rotate by euler angles (in local space)'''
+        if not radian:
+            x, y, z = glm.radians(glm.vec3(x, y, z))
+        rot = glm.quat(glm.vec3(x, y, z))
+        self.localRotation = self.localRotation * rot
+
     def rotateLocalX(self, angle:float, radian=False):
         '''rotate around local x axis'''
         self.rotate(glm.vec3(1, 0, 0), angle, radian)

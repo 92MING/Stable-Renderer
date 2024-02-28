@@ -16,6 +16,7 @@ class RuntimeManager(Manager):
                  fixedUpdateMaxFPS=60,
                  ambientLightCol:Color=Color.CLEAR,
                  ambientLightIntensity:float=0.2,
+                 gravity:glm.vec3=glm.vec3(0, -9.8, 0)
                  ):
         super().__init__()
 
@@ -25,6 +26,7 @@ class RuntimeManager(Manager):
         self._deltaTime = 0.0
         self._startTime = 0.0
         self._firstFrame = True
+        self._gravity = gravity
 
         self._ambientLightCol = ambientLightCol
         self._ambientLightIntensity = ambientLightIntensity
@@ -219,11 +221,20 @@ class RuntimeManager(Manager):
 
     @property
     def DeltaTime(self):
+        '''Delta time between this frame and the last frame.'''
         return self._deltaTime
 
     @property
     def FrameCount(self):
         return self._frame_count
+    
+    @property
+    def Gravity(self):
+        return self._gravity
+    
+    @Gravity.setter
+    def Gravity(self, value:glm.vec3):
+        self._gravity = value
     # endregion
 
     def on_frame_begin(self):

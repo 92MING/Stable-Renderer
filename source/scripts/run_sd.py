@@ -15,7 +15,7 @@ from sd.modules.diffuser_pipelines.overlap import Overlap, ResizeOverlap, Schedu
 from sd.modules.diffuser_pipelines.overlap.algorithms import overlap_algorithm_factory
 from sd.modules.diffuser_pipelines.overlap.scheduler import StartEndScheduler
 from sd.modules.diffuser_pipelines.overlap.utils import build_view_normal_map
-from sd.modules.diffuser_pipelines.two_step_schedulers import EulerAncestralDiscreteScheduler
+from sd.modules.diffuser_pipelines.schedulers import EulerDiscreteScheduler
 from PIL import Image
 from typing import List
 from datetime import datetime
@@ -80,8 +80,11 @@ if __name__ == '__main__':
         device=config.device,
         no_half=config.no_half  # Disable fp16 on MacOS
     )
-    scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
+    
+    scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
+    scheduler.config.enable_ancestral_sampling = False
     # scheduler = DDPMScheduler.from_config(pipe.scheduler.config)
+    # pipe.load_lora_weights()
     pipe.scheduler = scheduler
     pipe.to(config.device)
 

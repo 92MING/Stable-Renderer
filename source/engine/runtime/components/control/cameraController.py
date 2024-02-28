@@ -1,7 +1,7 @@
 import glm
 
 from engine.static import Key, MouseButton
-from .camera import Camera
+from ..camera.camera import Camera
 from ...component import Component
 
 from typing import TYPE_CHECKING
@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from engine.runtime.gameObj import GameObject
 
 
-class CameraControl(Component):
+class CameraController(Component):
     '''
     The default camera controlling component(by mouse).
 
@@ -82,4 +82,4 @@ class CameraControl(Component):
                 self.transform.rotateLocalX(deltaY * self.verticalRotSpd)
 
 
-__all__ = ['CameraControl']
+__all__ = ['CameraController']
