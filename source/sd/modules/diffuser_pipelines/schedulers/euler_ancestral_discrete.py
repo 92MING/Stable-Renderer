@@ -622,18 +622,14 @@ class EulerDiscreteScheduler(SchedulerMixin, ConfigMixin):
 
         # 2. Convert to an ODE derivative
         
-        if self.config.enable_ancestral_sampling:   # Add new random noise only if ancestral sampling is enabled
-            derivative = (sample - pred_original_sample) / sigma
-            dt = sigma_down - sigma
-            prev_sample = sample + derivative * dt
+        derivative = (sample - pred_original_sample) / sigma
+        dt = sigma_down - sigma
+        prev_sample = sample + derivative * dt
+        
+        if self.config.enable_ancestral_sampling:   # Add new random noise only if ancestral sampling is enabled            
             device = model_output.device
             noise = randn_tensor(model_output.shape, dtype=model_output.dtype, device=device, generator=generator)
             prev_sample = prev_sample + noise * sigma_up
-        else:
-            sigma = self.sigmas[self.step_index]
-            derivative = (sample - pred_original_sample) / sigma
-            dt = self.sigmas[self.step_index + 1] - sigma
-            prev_sample = sample + derivative * dt
 
         # Cast sample back to model compatible dtype
         prev_sample = prev_sample.to(model_output.dtype)
