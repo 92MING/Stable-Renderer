@@ -3,7 +3,7 @@ source_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(source_dir)
 
 from utils.path_utils import RESOURCES_DIR
-from engine.runtime.components import Camera, MeshRenderer, CameraControl
+from engine.runtime.components import Camera, MeshRenderer, CameraController
 from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
@@ -27,7 +27,7 @@ if __name__ == '__main__':
 
             self.camera = GameObject('Main Cam', position=[4, 4, -3])
             self.camera.addComponent(Camera)
-            self.camera.addComponent(CameraControl, defaultPos=[4, 4, -3], defaultLookAt=[0, 0, 0])
+            self.camera.addComponent(CameraController, defaultPos=[4, 4, -3], defaultLookAt=[0, 0, 0])
 
             self.cube = GameObject('Rect Cube', position=[0, 0, 0], scale=[0.9, 0.9 ,2.6])
             self.cube.addComponent(MeshRenderer, mesh=self.cube_mesh, materials=self.cube_mat)

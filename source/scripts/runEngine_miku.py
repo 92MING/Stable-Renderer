@@ -6,7 +6,7 @@ from engine.runtime.components import Camera, MeshRenderer
 from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
-from engine.runtime.components import CameraControl
+from engine.runtime.components import CameraController
 from engine.static import Mesh, Material, Material_MTL, Key, MouseButton
 from utils.path_utils import *
 
@@ -25,7 +25,7 @@ if __name__ == '__main__':
 
             camera = GameObject('Camera')
             camera.addComponent(Camera)
-            camera.addComponent(CameraControl, defaultPos=[1.3, 2.8, 1.3], defaultLookAt=[0, 2.8, 0])
+            camera.addComponent(CameraController, defaultPos=[1.3, 2.8, 1.3], defaultLookAt=[0, 2.8, 0])
 
             miku = GameObject('miku', position=[0, 0, 0], scale=[0.16, 0.16, 0.16])
             meshRenderer = miku.addComponent(MeshRenderer, mesh=mikuMesh)
