@@ -56,3 +56,10 @@ class TwoStepScheduler(Protocol):
             `torch.FloatTensor`: The predicted previous sample `(x_{t-1})` given the current timestep.
         """
         ...
+
+
+class SchedulerStepContext:
+    pass
+
+
+__all__ = ['TwoStepScheduler', 'SchedulerStepContext']

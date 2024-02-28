@@ -42,7 +42,8 @@ class AverageDistance:
                 y_position_trace: list,
                 **kwargs):
         weights = torch.ones(
-            [len(frame_index_trace), len(frame_index_trace)]
+            [len(frame_index_trace), len(frame_index_trace)],
+            dtype=latent_seq.dtype
         ).to(latent_seq.device)
         average_latent_seq = weights @ latent_seq.squeeze() / weights.sum(dim=0).reshape(-1, 1)
         del weights

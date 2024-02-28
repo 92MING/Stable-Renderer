@@ -11,7 +11,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.utils import BaseOutput, logging
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
-
+from .data_struct import SchedulerStepContext
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -199,6 +199,7 @@ class LCMScheduler(SchedulerMixin, ConfigMixin):
         timestep_spacing: str = "leading",
         timestep_scaling: float = 10.0,
         rescale_betas_zero_snr: bool = False,
+        enable_ancestral_sampling: bool = True,
     ):
         if trained_betas is not None:
             self.betas = torch.tensor(trained_betas, dtype=torch.float32)
@@ -456,6 +457,17 @@ class LCMScheduler(SchedulerMixin, ConfigMixin):
         c_out = scaled_timestep / (scaled_timestep**2 + self.sigma_data**2) ** 0.5
         return c_skip, c_out
 
+    @property
+    def step_context(self):
+        if not hasattr(self, "_step_context"):
+            return None
+        return self._step_context
+    
+    @property
+    def new_step_context(self):
+        self._step_context = SchedulerStepContext()
+        return self._step_context
+    
     def predict_original_sample(self,
                              model_output: torch.FloatTensor,
                              timestep: Union[float, torch.FloatTensor],
@@ -478,7 +490,70 @@ class LCMScheduler(SchedulerMixin, ConfigMixin):
         Returns:
             `torch.FloatTensor`: The predicted original sample `(x_{0})` given the current timestep.
         """
-        ...
+        
+        step_context = self.new_step_context
+        
+        if self.num_inference_steps is None:
+            raise ValueError(
+                "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
+            )
+
+        if self.step_index is None:
+            self._init_step_index(timestep)
+            
+        print(f'-------------{timestep}({self._step_index})---------------')
+
+        # * 1. get previous step value
+        prev_step_index = self.step_index + 1
+        if prev_step_index < len(self.timesteps):
+            prev_timestep = self.timesteps[prev_step_index]
+        else:
+            prev_timestep = timestep
+        
+        step_context.prev_step_index = prev_step_index
+        step_context.prev_timestep = prev_timestep
+
+        # * 2. compute alphas, betas
+        alpha_prod_t = self.alphas_cumprod[timestep]
+        alpha_prod_t_prev = self.alphas_cumprod[prev_timestep] if prev_timestep >= 0 else self.final_alpha_cumprod
+        beta_prod_t = 1 - alpha_prod_t
+        beta_prod_t_prev = 1 - alpha_prod_t_prev
+        
+        step_context.alpha_prod_t = alpha_prod_t
+        step_context.alpha_prod_t_prev = alpha_prod_t_prev
+        step_context.beta_prod_t = beta_prod_t
+        step_context.beta_prod_t_prev = beta_prod_t_prev
+        
+        # * 3. Get scalings for boundary conditions
+        c_skip, c_out = self.get_scalings_for_boundary_condition_discrete(timestep)
+
+        step_context.c_skip = c_skip
+        step_context.c_out = c_out
+        
+        # * 4. Compute the predicted original sample x_0 based on the model parameterization
+        if self.config.prediction_type == "epsilon":  # noise-prediction
+            predicted_original_sample = (sample - beta_prod_t.sqrt() * model_output) / alpha_prod_t.sqrt()
+        elif self.config.prediction_type == "sample":  # x-prediction
+            predicted_original_sample = model_output
+        elif self.config.prediction_type == "v_prediction":  # v-prediction
+            predicted_original_sample = alpha_prod_t.sqrt() * sample - beta_prod_t.sqrt() * model_output
+        else:
+            raise ValueError(
+                f"prediction_type given as {self.config.prediction_type} must be one of `epsilon`, `sample` or"
+                " `v_prediction` for `LCMScheduler`."
+            )
+
+        # * 5. Clip or threshold "predicted x_0"
+        if self.config.thresholding:
+            predicted_original_sample = self._threshold_sample(predicted_original_sample)
+        elif self.config.clip_sample:
+            predicted_original_sample = predicted_original_sample.clamp(
+                -self.config.clip_sample_range, self.config.clip_sample_range
+            )
+            
+        step_context.predicted_original_sample = predicted_original_sample
+        
+        return predicted_original_sample
     
     def predict_previous_sample(self,
                              pred_original_sample: torch.FloatTensor,
@@ -505,7 +580,45 @@ class LCMScheduler(SchedulerMixin, ConfigMixin):
         Returns:
             `torch.FloatTensor`: The predicted previous sample `(x_{t-1})` given the current timestep.
         """
-        ...
+        step_context = self.step_context
+        if not step_context:    # `predict_original_sample` was not called before `predict_previous_sample`
+            step_context = self.new_step_context
+            if self.step_index is None:
+                self._init_step_index(timestep)
+            alpha_prod_t_prev = self.alphas_cumprod[prev_timestep] if prev_timestep >= 0 else self.final_alpha_cumprod
+            beta_prod_t_prev = 1 - alpha_prod_t_prev
+            c_skip, c_out = self.get_scalings_for_boundary_condition_discrete(timestep)
+            
+            step_context.alpha_prod_t_prev = alpha_prod_t_prev
+            step_context.beta_prod_t_prev = beta_prod_t_prev
+            step_context.c_skip = c_skip
+            step_context.c_out = c_out
+        else:
+            c_skip = step_context.c_skip
+            c_out = step_context.c_out
+            alpha_prod_t_prev = step_context.alpha_prod_t_prev
+            beta_prod_t_prev = step_context.beta_prod_t_prev
+            
+        # 6. Denoise model output using boundary conditions
+        denoised = c_out * pred_original_sample + c_skip * sample
+        step_context.denoised = denoised
+
+        # 7. Sample and inject noise z ~ N(0, I) for MultiStep Inference
+        # Noise is not used on the final timestep of the timestep schedule.
+        # This also means that noise is not used for one-step sampling.
+        if not self.config.enable_ancestral_sampling and self.step_index != self.num_inference_steps - 1:
+            noise = randn_tensor(
+                model_output.shape, generator=generator, device=model_output.device, dtype=denoised.dtype
+            )
+            prev_sample = alpha_prod_t_prev.sqrt() * denoised + beta_prod_t_prev.sqrt() * noise
+        else:
+            prev_sample = denoised
+        step_context.prev_sample = prev_sample
+
+        # upon completion increase step index by one
+        self._step_index += 1
+        
+        return prev_sample
     
     def step(
         self,
@@ -535,74 +648,17 @@ class LCMScheduler(SchedulerMixin, ConfigMixin):
                 If return_dict is `True`, [`~schedulers.scheduling_lcm.LCMSchedulerOutput`] is returned, otherwise a
                 tuple is returned where the first element is the sample tensor.
         """
-        if self.num_inference_steps is None:
-            raise ValueError(
-                "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
-            )
-
-        if self.step_index is None:
-            self._init_step_index(timestep)
-
-        # 1. get previous step value
-        prev_step_index = self.step_index + 1
-        if prev_step_index < len(self.timesteps):
-            prev_timestep = self.timesteps[prev_step_index]
-        else:
-            prev_timestep = timestep
-
-        # 2. compute alphas, betas
-        alpha_prod_t = self.alphas_cumprod[timestep]
-        alpha_prod_t_prev = self.alphas_cumprod[prev_timestep] if prev_timestep >= 0 else self.final_alpha_cumprod
-
-        beta_prod_t = 1 - alpha_prod_t
-        beta_prod_t_prev = 1 - alpha_prod_t_prev
-
-        # 3. Get scalings for boundary conditions
-        c_skip, c_out = self.get_scalings_for_boundary_condition_discrete(timestep)
-
-        # 4. Compute the predicted original sample x_0 based on the model parameterization
-        if self.config.prediction_type == "epsilon":  # noise-prediction
-            predicted_original_sample = (sample - beta_prod_t.sqrt() * model_output) / alpha_prod_t.sqrt()
-        elif self.config.prediction_type == "sample":  # x-prediction
-            predicted_original_sample = model_output
-        elif self.config.prediction_type == "v_prediction":  # v-prediction
-            predicted_original_sample = alpha_prod_t.sqrt() * sample - beta_prod_t.sqrt() * model_output
-        else:
-            raise ValueError(
-                f"prediction_type given as {self.config.prediction_type} must be one of `epsilon`, `sample` or"
-                " `v_prediction` for `LCMScheduler`."
-            )
-
-        # 5. Clip or threshold "predicted x_0"
-        if self.config.thresholding:
-            predicted_original_sample = self._threshold_sample(predicted_original_sample)
-        elif self.config.clip_sample:
-            predicted_original_sample = predicted_original_sample.clamp(
-                -self.config.clip_sample_range, self.config.clip_sample_range
-            )
-
-        # 6. Denoise model output using boundary conditions
-        denoised = c_out * predicted_original_sample + c_skip * sample
-
-        # 7. Sample and inject noise z ~ N(0, I) for MultiStep Inference
-        # Noise is not used on the final timestep of the timestep schedule.
-        # This also means that noise is not used for one-step sampling.
-        if self.step_index != self.num_inference_steps - 1:
-            noise = randn_tensor(
-                model_output.shape, generator=generator, device=model_output.device, dtype=denoised.dtype
-            )
-            prev_sample = alpha_prod_t_prev.sqrt() * denoised + beta_prod_t_prev.sqrt() * noise
-        else:
-            prev_sample = denoised
-
-        # upon completion increase step index by one
-        self._step_index += 1
+        predicted_original_sample = self.predict_original_sample(model_output, timestep, sample, generator)
+        prev_sample = self.predict_previous_sample(predicted_original_sample, model_output, timestep, sample, generator)
+        denoised = self.step_context.denoised
 
         if not return_dict:
             return (prev_sample, denoised)
 
-        return LCMSchedulerOutput(prev_sample=prev_sample, denoised=denoised)
-
+        result = LCMSchedulerOutput(prev_sample=prev_sample, denoised=denoised)
+        del self._step_context
+        return result
+    
     # Copied from diffusers.schedulers.scheduling_ddpm.DDPMScheduler.add_noise
     def add_noise(
         self,

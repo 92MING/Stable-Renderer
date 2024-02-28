@@ -15,7 +15,7 @@ from sd.modules.diffuser_pipelines.overlap import Overlap, ResizeOverlap, Schedu
 from sd.modules.diffuser_pipelines.overlap.algorithms import overlap_algorithm_factory
 from sd.modules.diffuser_pipelines.overlap.scheduler import StartEndScheduler
 from sd.modules.diffuser_pipelines.overlap.utils import build_view_normal_map
-from sd.modules.diffuser_pipelines.schedulers import EulerDiscreteScheduler
+from sd.modules.diffuser_pipelines.schedulers import EulerDiscreteScheduler, LCMScheduler
 from PIL import Image
 from typing import List
 from datetime import datetime
@@ -35,9 +35,10 @@ def save_images_as_gif(images: list, output_fname: str = 'output.gif'):
 class Config:
     '''pipeline init configs'''
     
+    # paths
     model_path: str = GetEnv('SD_PATH', 'runwayml/stable-diffusion-v1-5')    # type: ignore
-    
     control_net_model_paths: List[str] = field(default_factory=list)
+    lcm_lora_path: str = GetEnv('LCM_LORA_PATH', 'latent-consistency/lcm-lora-sdv1-5')  # type: ignore
     
     device: str = GetEnv('DEVICE', ('mps' if platform == 'darwin' else 'cuda')) # type: ignore
     
@@ -48,7 +49,8 @@ class Config:
     height: int = GetEnv('DEFAULT_IMG_HEIGHT', 512, int)    # type: ignore
     seed: int = GetEnv('DEFAULT_SEED', 1235, int)   # type: ignore
     no_half: bool = GetEnv('DEFAULT_NO_HALF', False, bool)  # type: ignore
-    strength = 1.0
+    num_inference_steps: int = GetEnv('DEFAULT_NUM_INFERENCE_STEPS', 3, int)  # type: ignore
+    strength: float = 1.0
     
     # data preparation configs
     num_frames: int = GetEnv('DEFAULT_NUM_FRAMES',16, int)  # type: ignore
@@ -81,10 +83,13 @@ if __name__ == '__main__':
         no_half=config.no_half  # Disable fp16 on MacOS
     )
     
-    scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
-    scheduler.config.enable_ancestral_sampling = False
     # scheduler = DDPMScheduler.from_config(pipe.scheduler.config)
-    # pipe.load_lora_weights()
+    
+    # scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config, enable_ancestral_sampling = False)
+    
+    pipe.load_lora_weights(config.lcm_lora_path)
+    scheduler = LCMScheduler.from_config(pipe.scheduler.config, enable_ancestral_sampling = False)
+    
     pipe.scheduler = scheduler
     pipe.to(config.device)
 
@@ -143,6 +148,7 @@ if __name__ == '__main__':
     # view_normal_map = build_view_normal_map(normal_images, torch.tensor([0,0,1]))
 
     # 4. Generate frames
+    start_time = datetime.now()
     output_frame_list = pipe.__call__(
         prompt=config.prompt,
         negative_prompt=config.neg_prompt,
@@ -151,7 +157,7 @@ if __name__ == '__main__':
         control_images=controlnet_images,
         width=config.width,
         height=config.height,
-        num_inference_steps=10,
+        num_inference_steps=config.num_inference_steps,
         strength=config.strength,
         generator=generator,
         guidance_scale=7,
@@ -165,6 +171,8 @@ if __name__ == '__main__':
         # view_normal_map=view_normal_map,
         # callback=utils.view_latents,
     ).images
+    
+    time_usage = datetime.now() - start_time
 
     # 4. Output 
     output_flattened = [img_list[0] for img_list in output_frame_list]
@@ -179,3 +187,5 @@ if __name__ == '__main__':
         masked_images.append(Image.fromarray(img_array))
         
     save_images_as_gif(images=masked_images, output_fname='masked.gif')
+    
+    print(f"Time usage: {time_usage.total_seconds()}s")
