@@ -184,7 +184,7 @@ class CorrespondenceMap:
         
         with open(path, 'rb') as f:
             corr_map: T = pickle.load(f)
-            logu.success(f"[SUCCESS] Correspondence map loaded from {path}")
+            logu.success(f"Correspondence map loaded from {path}")
             return corr_map
 
     def save_cache(self, path: str):
@@ -198,7 +198,7 @@ class CorrespondenceMap:
             path = os.path.join(path, 'corr_map.pkl')
         with open(path, 'wb') as f:
             pickle.dump(self, f)
-        logu.success(f"[SUCCESS] Correspondence map created and cached to {path}")
+        logu.success(f"Correspondence map created and cached to {path}")
     
     def dropout_index(self, probability: float, seed: int):
         """Randomly drop indices in correspondence map with `probability`.

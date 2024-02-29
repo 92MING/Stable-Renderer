@@ -8,7 +8,7 @@ from diffusers import ControlNetModel
 from diffusers.pipelines.text_to_video_synthesis.pipeline_text_to_video_zero import CrossFrameAttnProcessor
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 
-from .multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
+from .multi_frame_stable_diffusion import StableRendererPipeline
 from .. import log_utils as logu
 from utils.global_utils import GetEnv
 
@@ -24,7 +24,7 @@ def load_pipe(
     device=GetEnv('DEVICE','cpu'),
     torch_dtype=torch.float16,
     local_files_only: bool = False,
-) -> StableDiffusionImg2VideoPipeline:
+) -> StableRendererPipeline:
     """
     Load a Stable Diffusion pipeline with some controlnets.
 
@@ -84,7 +84,7 @@ def load_pipe(
         if os.path.exists(model_path):
             model_path = os.path.abspath(model_path)
         assert os.path.isfile(model_path), f"Model path {os.path.abspath(model_path)} is not a file."
-        pipe = StableDiffusionImg2VideoPipeline.from_single_file(
+        pipe = StableRendererPipeline.from_single_file(
             model_path,
             local_files_only=True,
             controlnet=controlnet,
@@ -93,7 +93,7 @@ def load_pipe(
             scheduler_type=scheduler_type,
         )
     else:
-        pipe: StableDiffusionImg2VideoPipeline = StableDiffusionImg2VideoPipeline.from_pretrained(
+        pipe: StableRendererPipeline = StableRendererPipeline.from_pretrained(
             model_path,
             controlnet=controlnet,
             torch_dtype=torch_dtype,

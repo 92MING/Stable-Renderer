@@ -8,7 +8,7 @@ class Frames:
         self._data = data
     
     @property
-    def Data(self):
+    def Data(self)->list:
         return self._data
     
     def __str__(self):

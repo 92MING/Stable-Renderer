@@ -6,7 +6,7 @@ import cv2
 from PIL import Image
 from pathlib import Path
 from sd.modules import utils, config, log_utils as logu
-from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableDiffusionImg2VideoPipeline
+from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableRendererPipeline
 from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
 from sd.modules.diffuser_pipelines.overlap import ResizeOverlap, Scheduler
 
@@ -15,7 +15,7 @@ TEST_DIR = config.test_dir / '2023-11-03_0'
 
 def main():
     # 1. Load pipeline
-    pipe: StableDiffusionImg2VideoPipeline = load_pipe(
+    pipe: StableRendererPipeline = load_pipe(
         model_path=config.sd_model_path,  # Stable Diffusion model path
         control_net_model_paths=[
             "lllyasviel/sd-controlnet-depth",  # Depth model
@@ -93,7 +93,7 @@ def main():
         width=width,
         height=height,
         num_inference_steps=num_inference_steps,
-        strength=0.75,
+        img2img_strength=0.75,
         generator=generator,
         guidance_scale=7,
         controlnet_conditioning_scale=0.9,

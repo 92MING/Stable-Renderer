@@ -72,7 +72,7 @@ if __name__ == '__main__':
                 
             if self.inputManager.GetKey(Key.D):
                 self.angular_velocity -= self.angular_acceleration
-            
+                
             self.velocity = glm.clamp(self.velocity, -self.max_spd, self.max_spd)
             self.angular_velocity = -self.max_angular_spd if self.angular_velocity < -self.max_angular_spd else self.max_angular_spd if self.angular_velocity > self.max_angular_spd else self.angular_velocity
             
@@ -89,8 +89,8 @@ if __name__ == '__main__':
 
             self.boat = GameObject('Boat', position=[0, 0, 0])
             self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, materials=self.boatMaterial)
-            self.boat.addComponent(AutoRotation)
-            #self.boat.addComponent(ControlBoat)
+            #self.boat.addComponent(AutoRotation)
+            self.boat.addComponent(ControlBoat)
             
             self.camera = GameObject('Camera', position=[4, 4, -3])
             self.camera.addComponent(Camera)

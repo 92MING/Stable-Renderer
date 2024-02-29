@@ -1,8 +1,9 @@
-import sys, os
-sys.path.append(os.getcwd())
+import os, sys
+source_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(source_dir)
 
 import os.path
-from engine.runtime.components import Camera, MeshRenderer, CameraControl
+from engine.runtime.components import Camera, MeshRenderer, CameraController
 from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
@@ -27,7 +28,7 @@ if __name__ == '__main__':
 
             self.camera = GameObject('Camera', position=[4, 8, -3])
             self.camera.addComponent(Camera)
-            self.camera.addComponent(CameraControl, defaultPos=[4, 4, -3], defaultLookAt=[0, 0, 0])
+            self.camera.addComponent(CameraController, defaultPos=[4, 4, -3], defaultLookAt=[0, 0, 0])
 
             self.ball = GameObject('ball', position=[0, 0, 0])
             self.ball.addComponent(MeshRenderer, mesh=self.ballMesh, materials=self.ballMaterial)
