@@ -89,8 +89,8 @@ if __name__ == '__main__':
 
             self.boat = GameObject('Boat', position=[0, 0, 0])
             self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, materials=self.boatMaterial)
-            #self.boat.addComponent(AutoRotation)
-            self.boat.addComponent(ControlBoat)
+            self.boat.addComponent(AutoRotation)
+            #self.boat.addComponent(ControlBoat)
             
             self.camera = GameObject('Camera', position=[4, 4, -3])
             self.camera.addComponent(Camera)
