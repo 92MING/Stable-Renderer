@@ -1,6 +1,8 @@
 from utils.global_utils import GetOrCreateGlobalValue, GetGlobalValue
 from uuid import uuid4
-from typing import Dict, TYPE_CHECKING, TypeVar, Optional
+from typing import Dict, TYPE_CHECKING, TypeVar, Optional, Type, Union
+from pathlib import Path
+
 import os
 if TYPE_CHECKING:
     from engine.engine import Engine
@@ -13,20 +15,23 @@ _RESOURCES_CLSES = GetOrCreateGlobalValue('_RESOURCES_CLSES', dict)
 
 class ResourcesObjMeta(type):
 
-    _Format_Clses:dict = None # format: sub cls
+    _Format_Clses:dict  # format: sub cls
 
     def __new__(cls, *args, **kwargs):
         cls_name = args[0]
         if cls_name in _RESOURCES_CLSES:
             return _RESOURCES_CLSES[cls_name]
         cls = super().__new__(cls, *args, **kwargs)
+        
         if cls_name == 'ResourcesObj':
             return cls
-        if cls._Format_Clses is None:
+        
+        if not hasattr(cls, '_Format_Clses'):
             cls._Format_Clses = {}
         else:
             if cls.Format() is not None and cls.Format() not in cls._Format_Clses:
                 cls._Format_Clses[cls.Format()] = cls
+                
         _RESOURCES_CLSES[cls_name] = cls
         return cls
 
@@ -36,23 +41,25 @@ _AllBaseClsInstances: Dict[str, Dict[str, 'ResourcesObj']] = GetOrCreateGlobalVa
 Dict for all instances of base classes, e.g. Mesh, Material, Texture...
 '''
 
-RC = TypeVar('RC', bound='Type[ResourcesObj]')
+RC = TypeVar('RC', bound='ResourcesObj')
 '''Type hint for sub-classes of ResourcesObj'''
 
 class ResourcesObj(metaclass=ResourcesObjMeta):
     '''Class for resources that need to load to GPU before get into the main loop'''
 
     # region cls properties
-    _Format: str = None # format of the data, e.g. "obj" for "Mesh_OBJ"
+    _Format: Optional[str] = None # format of the data, e.g. "obj" for "Mesh_OBJ"
     '''override this property to specify the format of the mesh data, e.g. "obj"'''
     _LoadOrder: int = 0
     '''override this property to specify the order of loading to GPU by ResourcesManager, the smaller the earlier'''
-    _BaseName: str = None
+    _BaseName: Optional[str] = None
     '''Override this to set the base name of the class, e.g. "Mesh" for "Mesh_OBJ"'''
 
-    _internal_id: str = None
+    _internal_id: str
     '''For internal use only, do not override this'''
-
+    _name: str
+    '''name of this obj. Each obj should have a unique name for identification.'''
+    
     @classmethod
     def ClsName(cls):
         return cls.__qualname__
@@ -67,12 +74,12 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
         return baseClsName
 
     @classmethod
-    def FindFormat(cls:RC, format)->RC:
+    def FindFormat(cls:Type[RC], format)->Type[RC]:
         '''Find the sub-class that supports the given format, e.g. Mesh.FindFormat("obj") will return Mesh_OBJ.'''
         return cls._Format_Clses.get(format, None)
 
     @classmethod
-    def Format(cls: RC)->Optional[str]:
+    def Format(cls)->Optional[str]:
         if cls._Format is None:
             return None
         format = cls._Format.lower().strip()
@@ -81,7 +88,7 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
         return format
 
     @classmethod
-    def BaseInstances(cls):
+    def BaseInstances(cls)->Dict[str, 'ResourcesObj']:
         '''
         For internal use only, do not override this
         This contains all the instances of the sub-baseclass, e.g. Mesh._ClassInstances contains all instances of its sub class.
@@ -108,12 +115,14 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
         return cls.BaseInstances().values()
 
     @classmethod
-    def _GetPathAndName(cls, path, name=None):
+    def _GetPathAndName(cls, path: Union[str, Path], name=None):
         '''
         Get proper path & name for cls.Load().
         If name is not given, it will be the file name without extension.
         In that case, if there is already a resource with the same name, a number will be added to the end of the name to avoid name conflict.
         '''
+        if isinstance(path, Path):
+            path = str(path)
         if name is None:
             name = os.path.basename(path).split('.')[0]
             count = 0
@@ -127,11 +136,11 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
         return path, name
     # endregion
 
-    def __new__(cls, name, *args, **kwargs):
+    def __new__(cls: Type[RC], name, *args, **kwargs)->RC:
         if name in cls.BaseInstances():
-            return cls.BaseInstances()[name]
+            return cls.BaseInstances()[name]    # type: ignore
         else:
-            obj = super().__new__(cls)
+            obj = super().__new__(cls)  # type: ignore
             obj._name = name
             obj._internal_id = _random_str()
             cls.BaseInstances()[name] = obj

@@ -13,20 +13,40 @@ layout (std140) uniform Matrices {
 	vec3 cameraDir;
 };
 
-layout (location = 0) out vec4 outColorAndDepth; // (r, g, b, depth)
-layout (location = 1) out vec3 outWorldPos; // global pos
-layout (location = 2) out vec3 outViewNormal;	//normal (in view space)
-layout (location = 3) out vec3 outWorldNormal; // normal (in world space)
-layout (location = 4) out ivec4 outID;  // outID = (objID, material id, uv_Xcoord, uv_Ycoord)
+// depth is output directly from z-buffer
+layout (location = 0) out vec4 outColor; // rgba
+layout (location = 1) out ivec4 outID;  // outID = (objID, material id, uv_Xcoord, uv_Ycoord)
+layout (location = 2) out vec3 outPos; // global pos, output alpha for mask
+layout (location = 3) out vec4 outNormal;	//normal (in view space),  output alpha for mask
+layout (location = 4) out vec4 outNoise; // noise, in latent shape
 
-uniform sampler2D diffuseTex;
+// textures
+uniform sampler2D diffuseTex;	// 0
 uniform int hasDiffuseTex;
-uniform sampler2D normalTex;
+uniform sampler2D normalTex;	// 1
 uniform int hasNormalTex;
+uniform sampler2D specularTex;	// 2
+uniform int hasSpecularTex;
+uniform sampler2D emissionTex;	// 3
+uniform int hasEmissionTex;
+uniform sampler2D occlusionTex;	// 4
+uniform int hasOcclusionTex;
+uniform sampler2D metallicTex;	// 5
+uniform int hasMetallicTex;
+uniform sampler2D roughnessTex;	// 6
+uniform int hasRoughnessTex;
+uniform sampler2D displacementTex;	// 7
+uniform int hasDisplacementTex;	
+uniform sampler2D alphaTex;	// 8
+uniform int hasAlphaTex;
+uniform sampler2D noiseTex;	// 9 (currently only support 1 channel noise texture)
+uniform int hasNoiseTex;
 
+// material
 uniform int objID;
 uniform int materialID;
 
+// from VS
 in vec3 modelPos;
 in vec3 worldPos;
 in vec3 modelNormal;	// not normal from normal map!
@@ -37,29 +57,31 @@ in vec3 modelTangent;
 
 void main() {
 
-	// get color & depth
+	// get color
 	if (hasDiffuseTex == 0)
-		outColorAndDepth = vec4(1.0, 0.0, 1.0, 1.0 - gl_FragCoord.z); // pink color means no texture
-	else{
-		vec3 outColor = texture(diffuseTex, uv).rgb;
-		outColorAndDepth = vec4(outColor, 1.0 - gl_FragCoord.z);
-	}
+		outColor = vec4(1.0, 0.0, 1.0, 1.0); // pink color means no texture
+	else
+		outColor = texture(diffuseTex, uv).rgba;
+	
+	// get noise
+	if (hasNoiseTex == 0)
+		outNoise = vec4(0.0, 0.0, 0.0, 0.0); // no noise texture
+	else
+		outNoise = texture(noiseTex, uv).rgba;
 
 	// get position
-    outWorldPos = worldPos;
+    outPos = worldPos;
 
 	// get normal
 	if (hasNormalTex == 0){  // if no normal texture, use normal from mesh data
-		outViewNormal = normalize(viewNormal) * 0.5 + 0.5;
-		outWorldNormal = worldNormal;
+		outNormal = vec4(normalize(viewNormal) * 0.5 + 0.5, 1.0);
 	}
 	else{
 		vec3 bitangent = cross(modelNormal, modelTangent);
 		mat3 TBN = mat3(modelTangent, bitangent, modelNormal);
 		vec3 real_model_normal = normalize(texture(normalTex, uv).rgb * 2.0 - 1.0);
 		real_model_normal = normalize(TBN * real_model_normal);
-		outViewNormal = texture(normalTex, uv).rgb;
-		outWorldNormal = normalize((inverse(transpose(mat3(model))) * real_model_normal));
+		outNormal = vec4(texture(normalTex, uv).rgb, 1.0);
 	}
 
 	// get id

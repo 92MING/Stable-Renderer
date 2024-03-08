@@ -1,6 +1,6 @@
 import glm
 
-from engine.static import Key, MouseButton
+from engine.static import GLFW_Key, MouseButton
 from ..camera.camera import Camera
 from ...component import Component
 
@@ -62,7 +62,7 @@ class CameraController(Component):
     def update(self):
 
         inputManager = self.engine.InputManager
-        if inputManager.GetKeyDown(Key.R):
+        if inputManager.GetKeyDown(GLFW_Key.R):
             self.reset()
 
         elif inputManager.HasMouseScrolled:

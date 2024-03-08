@@ -7,7 +7,7 @@ from tqdm import tqdm
 from dataclasses import dataclass
 
 from .mesh import Mesh
-from engine.static.enums import PrimitiveType
+from engine.static.enums import PrimitiveDrawingType
 from utils.math_utils import calculate_tangent
 
 @dataclass
@@ -80,11 +80,11 @@ class Mesh_OBJ(Mesh):
                 face_vertices = line.split(' ')[1:]
                 if self.drawMode is None:
                     if len(face_vertices) == 3:
-                        self._drawMode = PrimitiveType.TRIANGLES
+                        self._drawMode = PrimitiveDrawingType.TRIANGLES
                     elif len(face_vertices) == 4:
-                        self._drawMode = PrimitiveType.QUADS
+                        self._drawMode = PrimitiveDrawingType.QUADS
                     elif len(face_vertices) > 4:
-                        self._drawMode = PrimitiveType.POLYGON
+                        self._drawMode = PrimitiveDrawingType.POLYGON
                     else:
                         raise ValueError(f'invalid faces: {line}')
                     self._vertexCountPerFace = len(face_vertices)

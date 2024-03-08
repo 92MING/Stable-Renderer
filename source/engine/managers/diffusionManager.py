@@ -100,7 +100,7 @@ class DiffusionManager(Manager):
         self._mapSavingInterval = value
     # endregion
 
-    # region ouput maps
+    # region output maps
     def _outputNumpyData(self, name:str, data:np.ndarray):
         '''output data in .npy format directly'''
         outputPath = os.path.join(self._outputPath, name)
@@ -108,7 +108,7 @@ class DiffusionManager(Manager):
             os.makedirs(outputPath)
         np.save(os.path.join(outputPath, f'{name}_{self.engine.RuntimeManager.FrameCount}.npy'), data)
         
-    def OutputData(self, name:str, data:np.ndarray):
+    def OutputNumpyData(self, name:str, data:np.ndarray):
         '''
         output data in .npy format directly
         :param name: name of the map and folder. will be created if not exist. will be changed to lower case
@@ -118,7 +118,7 @@ class DiffusionManager(Manager):
         if self._needOutputMaps:
             self._threadPool.submit(self._outputNumpyData, name, data)
         
-    def _outputMap(self, name:str, mapData:np.ndarray, multi255=True, outputFormat='RGB', dataType=np.uint8):
+    def _outputMap(self, name:str, mapData:np.ndarray, multi255=True, outputFormat='RGBA', dataType=np.uint8):
         '''this method will be pass to thread pool for saving maps asynchronously'''
         if multi255:
             mapData = mapData * 255
@@ -129,7 +129,7 @@ class DiffusionManager(Manager):
             os.makedirs(outputPath)
         img.save(os.path.join(outputPath, f'{name}_{self.engine.RuntimeManager.FrameCount}.png'))
 
-    def OutputMap(self, name:str, mapData:np.ndarray, multi255=True, outputFormat='RGB', dataType=np.uint8):
+    def OutputMap(self, name:str, mapData:np.ndarray, multi255=True, outputFormat='RGBA', dataType=np.uint8):
         '''
         output map data to OUTPUT_DIR/runtime_map/name/year-month-day-hour_index.png
         :param name: name of the map and folder. will be created if not exist. will be changed to lower case
@@ -143,14 +143,15 @@ class DiffusionManager(Manager):
             self._threadPool.submit(self._outputMap, name, mapData, multi255, outputFormat, dataType)
 
     def _outputDepthMap(self, mapData:np.ndarray):
-        depth_data_max, depth_data_min = np.max(mapData), np.min(mapData)
+        depth_data_max, depth_data_min = np.max(mapData), np.min(mapData[mapData > 0])
         diff = depth_data_max - depth_data_min
         if diff != 0:
             depth_data_normalized = (mapData - depth_data_min) / diff
         else:
             depth_data_normalized = mapData
-        depth_data_int8 = (depth_data_normalized * 255).astype(np.uint8)
-        depth_img = Image.fromarray(np.squeeze(depth_data_int8), mode='L')
+        gray = (np.clip(depth_data_normalized, 0, 1) * 255).astype(np.uint8)
+        alpha = (depth_data_normalized > 0).astype(np.uint8) * 255
+        depth_img = Image.fromarray(np.stack([gray, gray, gray, alpha], axis=-1), 'RGBA')
         outputPath = os.path.join(self._outputPath, 'depth')
         if not os.path.exists(outputPath):
             os.makedirs(outputPath)

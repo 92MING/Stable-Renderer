@@ -44,9 +44,12 @@ class DefaultTextureType(Enum):
     '''Displacement texture of the material'''
     AlphaTex = DefaultTexture('alphaTex', 'hasAlphaTex', 8)
     '''Alpha texture of the material'''
+    
+    NoiseTex = DefaultTexture('noiseTex', 'hasNoiseTex', 9)
+    '''Noise texture, for AI rendering'''
 
     @classmethod
-    def FindDeafultTexture(cls, texName:str):
+    def FindDefaultTexture(cls, texName:str):
         '''Return DefaultTextureType with given name. Return None if not found.'''
         texName = texName.lower()
         for item in cls:
@@ -153,7 +156,7 @@ class Material(ResourcesObj):
         self._renderOrder = order.value if isinstance(order, RenderOrder) else order
         self._textures:Dict[str, Tuple['Texture', int]] = {} # name: (texture, slot)
         self._variables = {} # name: value
-        self._id = GetOrAddGlobalValue("_MaterialCount", 0)
+        self._id: int = GetOrAddGlobalValue("_MaterialCount", 0)
         SetGlobalValue("_MaterialCount", self._id+1)
 
 
@@ -234,7 +237,7 @@ class Material(ResourcesObj):
         textures = [(name, tex, order) for name, (tex, order) in self._textures.items()]
         textures.sort(key=lambda x: x[2])
         for i, (name, tex, _) in enumerate(textures):
-            textureType = DefaultTextureType.FindDeafultTexture(name)
+            textureType = DefaultTextureType.FindDefaultTexture(name)
             if textureType is not None:
                 # means this is a default texture
                 self._shader.setUniform(textureType.value.shader_check_name, 1)

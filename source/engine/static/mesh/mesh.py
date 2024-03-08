@@ -7,7 +7,7 @@ from typing import List, Final, Union, Type
 
 from utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
 from engine.static.resourcesObj import ResourcesObj
-from engine.static.enums import PrimitiveType
+from engine.static.enums import PrimitiveDrawingType
 
 
 class Mesh(ResourcesObj):
@@ -58,7 +58,7 @@ class Mesh(ResourcesObj):
     '''Vertex Array Object. `None` means not sent to GPU. Otherwise, it is the buffer ID.'''
     _vbo: Union[int, None] = None
     '''Vertex Buffer Object. `None` means not sent to GPU. Otherwise, it is the buffer ID.'''
-    _drawMode: Union[PrimitiveType, None] = None
+    _drawMode: Union[PrimitiveDrawingType, None] = None
     '''The OpenGL drawing mode of the mesh. `None` means unknown. It should be set when `load` is called'''
     _keep_vertices: bool = False
     '''If keep vertices, the vertices data will be kept in memory(after send to GPU). Otherwise, they will be cleared.'''
@@ -292,7 +292,7 @@ class _Mesh_Plane(Mesh):
         super().__init__(self.name, keep_vertices=True)
         self._vao = None
         self._vbo = None
-        self._drawMode = PrimitiveType.TRIANGLE_FAN
+        self._drawMode = PrimitiveDrawingType.TRIANGLE_FAN
         self._vertexCountPerFace = 4
         self._totalFaceCount = 1
         self._has_normals = True
@@ -348,7 +348,7 @@ class _Mesh_Sphere(Mesh):
         self.segment = segment
         self._ebo = None
         self._vertexCountPerFace = 3
-        self._drawMode = PrimitiveType.TRIANGLE_STRIP
+        self._drawMode = PrimitiveDrawingType.TRIANGLE_STRIP
         self._init_vertices(self.segment)
         self._has_normals = True
         self._has_uvs = True
@@ -459,7 +459,7 @@ class _Mesh_Cube(Mesh):
 
     def __init__(self):
         super().__init__(self.name, keep_vertices=True)
-        self._drawMode = PrimitiveType.TRIANGLES
+        self._drawMode = PrimitiveDrawingType.TRIANGLES
         self._totalFaceCount = 12
         self._vertexCountPerFace = 3
         self._ebo = None

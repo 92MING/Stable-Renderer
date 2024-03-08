@@ -37,7 +37,7 @@ class InputManager(Manager):
         self._mouseKeys[btn] = current
     def _keyCallback(self, window, key, scancode, action, mod):
         # for glfw callback
-        key = Key.GetEnum(key)
+        key = GLFW_Key.GetEnum(key)
         if key not in self._keyboardKeys:
             self._keyboardKeys[key] = [None, None]  # (action, modifier)
         action = InputAction.GetEnum(action)
@@ -133,7 +133,7 @@ class InputManager(Manager):
                 return cur[0] == InputAction.HOLD
             else:
                 return cur[0] == InputAction.HOLD and cur[1] == mod
-    def GetKey(self, key: Key, mod: InputModifier = None):
+    def GetKey(self, key: GLFW_Key, mod: InputModifier = None):
         '''Check if key is pressed. If mod is not None, any modifier will be accepted.'''
         if key not in self._keyboardKeys:
             return False
@@ -143,7 +143,7 @@ class InputManager(Manager):
                 return cur[0] != InputAction.RELEASE
             else:
                 return cur[0] != InputAction.RELEASE and cur[1] == mod
-    def GetKeyDown(self, key: Key, mod: InputModifier = None):
+    def GetKeyDown(self, key: GLFW_Key, mod: InputModifier = None):
         '''Check if key is pressed down. If mod is not None, any modifier will be accepted.'''
         if key not in self._keyboardKeys:
             return False
@@ -153,13 +153,13 @@ class InputManager(Manager):
                 return cur[0] == InputAction.PRESS
             else:
                 return cur[0] == InputAction.PRESS and cur[1] == mod
-    def GetKeyUp(self, key: Key):
+    def GetKeyUp(self, key: GLFW_Key):
         '''Check if key is released.'''
         if key not in self._keyboardKeys:
             return False
         else:
             return self._keyboardKeys[key][0] == InputAction.RELEASE
-    def GetKeyHold(self, key: Key, mod: InputModifier = None):
+    def GetKeyHold(self, key: GLFW_Key, mod: InputModifier = None):
         '''Check if key is hold. If mod is not None, any modifier will be accepted.'''
         if key not in self._keyboardKeys:
             return False

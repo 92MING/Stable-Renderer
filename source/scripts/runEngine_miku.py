@@ -7,7 +7,7 @@ from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
 from engine.runtime.components import CameraController
-from engine.static import Mesh, Material, Material_MTL, Key, MouseButton
+from engine.static import Mesh, Material, Material_MTL, GLFW_Key, MouseButton
 from utils.path_utils import *
 
 

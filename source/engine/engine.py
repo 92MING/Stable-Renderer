@@ -75,7 +75,7 @@ class Engine:
                                             saturation=saturation, brightness=brightness, contrast=contrast,)
         self._sceneManager = SceneManager(self._scene)
         self._resourceManager = ResourcesManager()
-        self._sdManager = DiffusionManager(needOutputMaps=needOutputMaps,
+        self._diffusionManager = DiffusionManager(needOutputMaps=needOutputMaps,
                                            maxFrameCacheCount=maxFrameCacheCount,
                                            mapSavingInterval=mapSavingInterval,
                                            threadPoolSize=threadPoolSize,
@@ -141,8 +141,8 @@ class Engine:
     def ResourcesManager(self)->ResourcesManager:
         return self._resourceManager
     @property
-    def SDManager(self)->DiffusionManager:
-        return self._sdManager
+    def DiffusionManager(self)->DiffusionManager:
+        return self._diffusionManager
     # endregion
 
     def CreateOrGet_UBO_BindingPoint(self, name):

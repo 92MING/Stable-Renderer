@@ -9,7 +9,7 @@ from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
 from engine.runtime.components import CameraController
-from engine.static import Material, Mesh, Texture, DefaultTextureType, Key, MouseButton
+from engine.static import Material, Mesh, Texture, DefaultTextureType, GLFW_Key, MouseButton
 from utils.path_utils import *
 
 
@@ -61,16 +61,16 @@ if __name__ == '__main__':
                 self.angular_velocity = 0
         
         def fixedUpdate(self):
-            if self.inputManager.GetKey(Key.W):
+            if self.inputManager.GetKey(GLFW_Key.W):
                 self.velocity += self.transform.forward * self.acceleration
                 
-            if self.inputManager.GetKey(Key.S):
+            if self.inputManager.GetKey(GLFW_Key.S):
                 self.velocity -= self.transform.forward * self.acceleration
                 
-            if self.inputManager.GetKey(Key.A):
+            if self.inputManager.GetKey(GLFW_Key.A):
                 self.angular_velocity += self.angular_acceleration
                 
-            if self.inputManager.GetKey(Key.D):
+            if self.inputManager.GetKey(GLFW_Key.D):
                 self.angular_velocity -= self.angular_acceleration
                 
             self.velocity = glm.clamp(self.velocity, -self.max_spd, self.max_spd)
@@ -82,8 +82,11 @@ if __name__ == '__main__':
         def beforePrepare(self):
             self.boatMesh = Mesh.Load(os.path.join(RESOURCES_DIR, 'boat', 'boat.obj'))
             self.boatMaterial = Material.Default_Opaque_Material()
-            self.boatMaterial.addDefaultTexture(Texture.Load(os.path.join(RESOURCES_DIR, 'boat', 'boatColor.png')), DefaultTextureType.DiffuseTex)
 
+            boat_diffuse_tex = Texture.Load(os.path.join(RESOURCES_DIR, 'boat', 'boatColor.png'))
+            self.boatMaterial.addDefaultTexture(boat_diffuse_tex, DefaultTextureType.DiffuseTex)
+            
+            self.boatMaterial.addDefaultTexture(Texture.CreateNoiseTex(), DefaultTextureType.NoiseTex)
             # uncomment this line to enable normal map
             # self.boatMaterial.addDefaultTexture(Texture.Load(os.path.join(RESOURCES_DIR, 'boat', 'boatNormal.png')), DefaultTextureType.NormalTex)
 
