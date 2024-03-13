@@ -1,5 +1,4 @@
 import os.path
-import OpenGL.GL as gl
 import numpy as np
 import glm
 import multiprocessing
@@ -36,6 +35,7 @@ class FrameData:
 
 
 class DiffusionManager(Manager):
+    
     def __init__(self,
                  needOutputMaps=False,
                  mapMinimizeRatio=64,
@@ -58,7 +58,7 @@ class DiffusionManager(Manager):
             threadPoolSize = multiprocessing.cpu_count()
         self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize) # for saving maps asynchronously
         self._outputPath = get_new_map_output_dir(create_if_not_exists=False)
-
+    
     # region properties
     @property
     def MapMinimizeRatio(self)->int:
@@ -174,6 +174,6 @@ class DiffusionManager(Manager):
             self._threadPool.submit(self._outputDepthMap, mapData)
     # endregion
 
-
+    
 
 __all__ = ['DiffusionManager']

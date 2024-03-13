@@ -3,9 +3,10 @@ import glfw
 import ctypes
 import OpenGL.GL as gl
 import numpy as np
+import pycuda.driver as cuda_driver
+
 from functools import partial
 from typing import Union, Optional, Callable
-
 from utils.cuda_utils import get_cuda_gl_devices
 from utils.data_struct.event import AutoSortTask
 from .manager import Manager
@@ -14,6 +15,7 @@ from ..static.shader import Shader
 from ..static.texture import Texture
 from ..static.enums import *
 from ..static.mesh import Mesh
+
 
 def _bindGTexture(shader: Shader, slot: int, textureID: int, name: str):
     gl.glActiveTexture(gl.GL_TEXTURE0 + slot)  # type: ignore
@@ -67,7 +69,6 @@ class RenderManager(Manager):
         self._renderTasks = AutoSortTask()
         self._deferRenderTasks = AutoSortTask()
         self._postProcessTasks = AutoSortTask()
-        self._init_opengl()  # opengl settings
         
         current_cuda_devices = get_cuda_gl_devices()
         if not target_device:
@@ -76,6 +77,8 @@ class RenderManager(Manager):
             if target_device not in current_cuda_devices:
                 raise ValueError(f"Target device {target_device} is not in the current CUDA devices list: {current_cuda_devices}")
         self._target_device = target_device
+        self._init_cuda()
+        self._init_opengl()
         
         self._init_framebuffers()  # framebuffers for post-processing
         self._init_post_process(enableHDR=enableHDR, enableGammaCorrection=enableGammaCorrection, gamma=gamma, exposure=exposure,
@@ -83,7 +86,17 @@ class RenderManager(Manager):
         self._init_quad()  # quad for post-processing
         self._init_light_buffers()
 
-    # region private
+    def release(self):
+        self._cuda_context.pop()
+    
+    # region cuda
+    def _init_cuda(self):
+        target_device = self.TargetDevice
+        cuda_driver.init()
+        self._cuda_device = cuda_driver.Device(target_device)
+        self._cuda_context = self._cuda_device.make_context()
+    # endregion
+    
     def _init_opengl(self):
         gl.glClearColor(0, 0, 0, 0)
         gl.glEnable(gl.GL_DEPTH_TEST)
@@ -555,6 +568,8 @@ class RenderManager(Manager):
         self._execute_render_task()  # depth test will be enabled in this function
         
         colorData = self._getFBOTexToNumpy(self.colorFBOTex, flipY=True)    # color data must be output
+        #colorData = self.colorFBOTex.update_tensor().cpu().numpy()
+        
         # output data to SD
         if self.engine.DiffusionManager.ShouldOutputFrame:    
             idData = self._getFBOTexToNumpy(self.idFBOTex, flipY=True)

@@ -50,7 +50,28 @@ def get_cuda_gl_devices()->Tuple[CudaErrType, Tuple[int]]:
     err, _, lst = cudart.cudaGLGetDevices(device_count, cudart.cudaGLDeviceList.cudaGLDeviceListAll)
     return err, tuple(set(lst)) # type: ignore
 
-__all__.extend(['get_cuda_device_count', 'get_cuda_gl_devices'])
+@_cuda_func_wrapper
+def set_cuda_device(device: int)->Tuple[CudaErrType, None]:
+    '''set the current device to device'''
+    err, = cudart.cudaSetDevice(device)
+    return (err, None)
+    
+@_cuda_func_wrapper
+def get_cuda_device()->Tuple[CudaErrType, int]:
+    '''Returns which device is currently being used'''
+    err, device = cudart.cudaGetDevice()
+    return (err, device)
+
+@_cuda_func_wrapper
+def cuda_init_device(device: int,
+                     deviceFlags: int = 0,
+                     flags: int = 0,
+                     )->Tuple[CudaErrType, None]:
+    '''initialize the device'''
+    err, = cudart.cudaInitDevice(device, deviceFlags, flags)
+    return (err, None)
+
+__all__.extend(['get_cuda_device', 'set_cuda_device', 'cuda_init_device', 'get_cuda_device_count', 'get_cuda_gl_devices'])
 # endregion
 
 # region OpenGL related

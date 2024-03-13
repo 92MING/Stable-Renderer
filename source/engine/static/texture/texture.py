@@ -6,7 +6,8 @@ import OpenGL.GL as gl
 import OpenGL.error
 import numpy as np
 import torch
-import cupy
+import pycuda.gl
+import pycuda.driver
 import glm
 import cuda.cudart as cudart
 
@@ -355,29 +356,38 @@ class Texture(ResourcesObj):
         self._height = image.height
         self._width = image.width
         image.close()
-
-    # from https://github.com/pytorch/pytorch/issues/107112
-    def _to_tensor(self) -> Tensor:
-        return
+        
+    def _init_tensor(self):
         if self._tensor is not None:    
             return self._tensor
         
-        self._cuda_resource_ptr = cuda_register_gl_image(self, gl.GL_TEXTURE_2D)
-        cuda_map_resources(self)
-        arr_pt = cuda_get_mapped_array(self)
-        # codes above should be correct, since i print out array info by `cuda_get_array_info` and it's correct
+        self._tensor = torch.zeros((self.height, self.width, self.channel_count), 
+                             dtype=self.data_type.value.torch_dtype, 
+                             device=f"cuda:{self.engine.RenderManager.TargetDevice}")
         
-        mem = cupy.cuda.UnownedMemory(arr_pt.getPtr(), self.nbytes, owner=self)
-        memptr = cupy.cuda.MemoryPointer(mem, offset=0)
+        self._cuda_buffer = pycuda.gl.RegisteredImage(int(self.textureID), 
+                                                int(gl.GL_TEXTURE_2D), 
+                                                pycuda.gl.graphics_map_flags.NONE)
+        mapping = self._cuda_buffer.map()
+        array = mapping.array(0, 0)
+        self._tensor_copier = pycuda.driver.Memcpy2D()
+        self._tensor_copier.set_src_array(array)
+        self._tensor_copier.set_dst_device(self._tensor.data_ptr())
+        self._tensor_copier.width_in_bytes = self._tensor_copier.src_pitch = self._tensor_copier.dst_pitch = self.nbytes // self.height
+        self._tensor_copier.height = self.height
+        mapping.unmap()
         
-        shape = (self.height, self.width, self.channel_count)
-        arr = cupy.ndarray(shape, 
-                           dtype=self.data_type.value.cupy_dtype, 
-                           memptr=memptr)
-        # arr.device.id=-2 here, idk why
+    # from https://github.com/pytorch/pytorch/issues/107112
+    def update_tensor(self)->Tensor:
+        assert not self._cleared, 'This texture has been cleared.'
+        assert self._share_to_torch, 'This texture is not shared to torch.'
+        assert self._texID, 'This texture is not yet sent to GPU.'
         
-        self._tensor = torch.as_tensor(arr, device=f"cuda:{self.engine.RenderManager.TargetDevice}")
-        # err in the above line
+        mapping = self._cuda_buffer.map()
+        self._tensor_copier(aligned=False)
+        torch.cuda.synchronize()
+        mapping.unmap()
+        
         return self._tensor
     
     def sendToGPU(self):
@@ -398,6 +408,11 @@ class Texture(ResourcesObj):
 
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._texID)
             
+        data = self.data
+        if not data:
+            data = np.zeros((self.height, self.width, self.format.channel_count), 
+                            dtype=self.data_type.value.numpy_dtype).tobytes()
+            
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 
                         0, 
                         self.internal_format.value.gl_internal_format,
@@ -406,7 +421,7 @@ class Texture(ResourcesObj):
                         0, 
                         self.format.value.gl_format, 
                         self.data_type.value.gl_data_type,
-                        self.data)  # data can be None, its ok
+                        data)  # data can be None, its ok
 
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, self.s_wrap.value)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, self.t_wrap.value)
@@ -421,7 +436,7 @@ class Texture(ResourcesObj):
             gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
             
         if self.share_to_torch:
-            self._to_tensor()
+            self._init_tensor()
             
     def clear(self):
         '''

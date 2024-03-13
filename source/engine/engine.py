@@ -109,13 +109,14 @@ class Engine:
                                             brightness=brightness, 
                                             contrast=contrast,
                                             target_device=target_device)
-        self._sceneManager = SceneManager(self._scene)
-        self._resourceManager = ResourcesManager()
         self._diffusionManager = DiffusionManager(needOutputMaps=needOutputMaps,
                                            maxFrameCacheCount=maxFrameCacheCount,
                                            mapSavingInterval=mapSavingInterval,
                                            threadPoolSize=threadPoolSize,
                                            mapMinimizeRatio=mapMinimizeRatio)
+        self._sceneManager = SceneManager(self._scene)
+        self._resourceManager = ResourcesManager()
+        
         # endregion
         
         self._stage = EngineStage.NOT_YET_START
