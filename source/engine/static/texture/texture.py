@@ -6,8 +6,8 @@ import OpenGL.GL as gl
 import OpenGL.error
 import numpy as np
 import torch
+import cupy
 import glm
-import cuda.cuda as cuda
 import cuda.cudart as cudart
 
 from torch import Tensor
@@ -19,9 +19,10 @@ from OpenGL.GL.EXT.texture_filter_anisotropic import GL_TEXTURE_MAX_ANISOTROPY_E
 from ..resourcesObj import ResourcesObj
 from ..enums import *
 from ..color import Color
-from utils.decorator import Overload
+from utils.decorators import Overload
+from utils.cuda_utils import *
 
-from typing import TYPE_CHECKING, Union, Optional, Final, Literal, Type
+from typing import TYPE_CHECKING, Union, Optional, Final, Literal
 if TYPE_CHECKING:
     from ..shader import Shader
 
@@ -90,27 +91,31 @@ class Texture(ResourcesObj):
         self._internalFormat = internalFormat or self.format.default_internal_format
         self._data_type = data_type or self._internalFormat.value.default_data_type
         
+        if share_to_torch and not self.data_type.value.tensor_supported:
+            raise Exception(f'The data type {self.data_type} does not support tensor. Cannot share to torch.')
+        self._share_to_torch = share_to_torch
+        self._cuda_resource_ptr: Optional[cudart.cudaGraphicsResource_t] = None
         self._tensor: Optional[Tensor] = None
-        if share_to_torch:
-            self.share_to_torch()
-        
-    # region properties
-    def share_to_torch(self):
-        '''
-        Share the data to pytorch. Make sure the texture size and data are given.
-        After this method, a tensor will be created which has the same address pointing to the texture data in opengl.
-        '''
-        if self._tensor is not None:
-            return
-        if not self.width or not self.height:
-            raise Exception('Cannot share to torch if the texture size is not given.')
-
         
     @property
     def textureID(self)->Optional[int]:
         '''The texture id for this texture in OpenGL. It could be None if the texture is not loaded.'''
         assert not self._cleared, 'This texture has been cleared.'
         return self._texID
+    
+    @property
+    def tensor(self)->Optional[Tensor]:
+        '''The tensor of the texture. It could be None if the texture is not shared to torch.'''
+        assert not self._cleared, 'This texture has been cleared.'
+        assert self._share_to_torch, 'This texture is not shared to torch.'
+        assert self._texID, 'This texture is not yet sent to GPU.'
+        return self._tensor
+    
+    @property
+    def share_to_torch(self)->bool:
+        '''If true, the texture will be shared to torch by using cuda.'''
+        assert not self._cleared, 'This texture has been cleared.'
+        return self._share_to_torch
 
     @property
     def data(self)->Optional[bytes]:
@@ -119,17 +124,51 @@ class Texture(ResourcesObj):
         return self._data
 
     @property
-    def width(self)->Optional[int]:
+    def width(self)->int:
         '''The width of the texture.'''
         assert not self._cleared, 'This texture has been cleared.'
+        assert self._width is not None, 'Width is not set for this texture.'
         return self._width
 
     @property
-    def height(self)->Optional[int]:
+    def height(self)->int:
         '''The height of the texture.'''
         assert not self._cleared, 'This texture has been cleared.'
+        assert self._height is not None, 'Height is not set for this texture.'
         return self._height
-
+    
+    @property
+    def nbytes(self)->int:
+        '''The number of bytes of the texture.'''
+        return self.width * self.height * self.format.channel_count
+    
+    @property
+    def cell_nbytes(self)->int:
+        '''return the number of bytes of a cell this texture.'''
+        match self.data_type:
+            case TextureDataType.UNSIGNED_BYTE:
+                return self.format.channel_count * 1
+            case TextureDataType.BYTE:
+                return self.format.channel_count * 1
+            
+            case TextureDataType.UNSIGNED_SHORT:
+                return self.format.channel_count * 2
+            case TextureDataType.SHORT:
+                return self.format.channel_count * 2
+            
+            case TextureDataType.UNSIGNED_INT:
+                return self.format.channel_count * 4
+            case TextureDataType.INT:
+                return self.format.channel_count * 4
+            
+            case TextureDataType.FLOAT:
+                return self.format.channel_count * 4
+            case TextureDataType.HALF:
+                return self.format.channel_count * 2
+            
+            case _:
+                return self.data_type.value.nbytes
+        
     @property
     def format(self)->TextureFormat:
         '''
@@ -317,7 +356,30 @@ class Texture(ResourcesObj):
         self._width = image.width
         image.close()
 
-
+    # from https://github.com/pytorch/pytorch/issues/107112
+    def _to_tensor(self) -> Tensor:
+        return
+        if self._tensor is not None:    
+            return self._tensor
+        
+        self._cuda_resource_ptr = cuda_register_gl_image(self, gl.GL_TEXTURE_2D)
+        cuda_map_resources(self)
+        arr_pt = cuda_get_mapped_array(self)
+        # codes above should be correct, since i print out array info by `cuda_get_array_info` and it's correct
+        
+        mem = cupy.cuda.UnownedMemory(arr_pt.getPtr(), self.nbytes, owner=self)
+        memptr = cupy.cuda.MemoryPointer(mem, offset=0)
+        
+        shape = (self.height, self.width, self.channel_count)
+        arr = cupy.ndarray(shape, 
+                           dtype=self.data_type.value.cupy_dtype, 
+                           memptr=memptr)
+        # arr.device.id=-2 here, idk why
+        
+        self._tensor = torch.as_tensor(arr, device=f"cuda:{self.engine.RenderManager.TargetDevice}")
+        # err in the above line
+        return self._tensor
+    
     def sendToGPU(self):
         '''
         Create texture in GPU and send data.
@@ -327,11 +389,15 @@ class Texture(ResourcesObj):
             It means you are creating an empty texture(usually for FBO).
         '''
         assert not self._cleared, 'This texture has been cleared.'
+        assert self._width is not None and self._height is not None, 'Invalid texture size, got width: {}, height: {}'.format(self._width, self._height)
+        
         if self._texID is not None:
             return # already loaded
+
         self._texID = gl.glGenTextures(1)
 
         gl.glBindTexture(gl.GL_TEXTURE_2D, self._texID)
+            
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 
                         0, 
                         self.internal_format.value.gl_internal_format,
@@ -340,7 +406,7 @@ class Texture(ResourcesObj):
                         0, 
                         self.format.value.gl_format, 
                         self.data_type.value.gl_data_type,
-                        self.data)
+                        self.data)  # data can be None, its ok
 
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, self.s_wrap.value)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, self.t_wrap.value)
@@ -353,7 +419,9 @@ class Texture(ResourcesObj):
         if (self.mag_filter in (TextureFilter.LINEAR_MIPMAP_LINEAR, TextureFilter.NEAREST_MIPMAP_NEAREST) or
             self.min_filter in (TextureFilter.LINEAR_MIPMAP_LINEAR, TextureFilter.NEAREST_MIPMAP_NEAREST)):
             gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
-           
+            
+        if self.share_to_torch:
+            self._to_tensor()
             
     def clear(self):
         '''

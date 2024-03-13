@@ -57,7 +57,7 @@ class DiffusionManager(Manager):
         if not threadPoolSize:
             threadPoolSize = multiprocessing.cpu_count()
         self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize) # for saving maps asynchronously
-        self._outputPath = get_map_output_dir(create_if_not_exists=False)
+        self._outputPath = get_new_map_output_dir(create_if_not_exists=False)
 
     # region properties
     @property
@@ -118,10 +118,22 @@ class DiffusionManager(Manager):
         if self._needOutputMaps:
             self._threadPool.submit(self._outputNumpyData, name, data)
         
-    def _outputMap(self, name:str, mapData:np.ndarray, multi255=True, outputFormat='RGBA', dataType=np.uint8):
+    def _outputMap(self, name:str, mapData:np.ndarray, multi255=True, dataType=np.uint8):
         '''this method will be pass to thread pool for saving maps asynchronously'''
+        outputFormat = "RGBA"
         if multi255:
             mapData = mapData * 255
+        
+        if len(mapData.shape) == 2:
+            mapData = np.expand_dims(mapData, axis=2)
+            mapData = np.repeat(mapData, repeats=3, axis=2)
+        elif mapData.shape[2] == 1:
+            mapData = np.repeat(mapData, repeats=3, axis=2)
+        
+        if mapData.shape[2] == 3:   # add alpha channel
+            alpha = np.ones((mapData.shape[0], mapData.shape[1], 1), dtype=dataType) * 255
+            mapData = np.concatenate([mapData, alpha], axis=2)
+        
         img = Image.fromarray(mapData.astype(dataType), outputFormat)
         name = name.lower()
         outputPath = os.path.join(self._outputPath, name)
@@ -129,18 +141,17 @@ class DiffusionManager(Manager):
             os.makedirs(outputPath)
         img.save(os.path.join(outputPath, f'{name}_{self.engine.RuntimeManager.FrameCount}.png'))
 
-    def OutputMap(self, name:str, mapData:np.ndarray, multi255=True, outputFormat='RGBA', dataType=np.uint8):
+    def OutputMap(self, name:str, mapData:np.ndarray, multi255=True, dataType=np.uint8):
         '''
         output map data to OUTPUT_DIR/runtime_map/name/year-month-day-hour_index.png
         :param name: name of the map and folder. will be created if not exist. will be changed to lower case
         :param mapData: map data to output
         :param multi255: if multiply 255 to map data
-        :param outputFormat: output format of the map
         :param dataType: data type of the map
         :return:
         '''
         if self._needOutputMaps:
-            self._threadPool.submit(self._outputMap, name, mapData, multi255, outputFormat, dataType)
+            self._threadPool.submit(self._outputMap, name, mapData, multi255, dataType)
 
     def _outputDepthMap(self, mapData:np.ndarray):
         depth_data_max, depth_data_min = np.max(mapData), np.min(mapData[mapData > 0])

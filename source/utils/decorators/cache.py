@@ -4,7 +4,7 @@
 from weakref import WeakKeyDictionary, WeakValueDictionary, ref
 from functools import lru_cache, wraps
 from typing import Literal, overload, Callable, Union
-from .classproperty import class_property
+from .class_decorators import class_property
 
 class _IdKey:
     def __init__(self, value):

@@ -2,20 +2,27 @@
 A modified module from https://github.com/robertkist/py_dds by Robert Kist
 '''
 __author__ = "Robert Kist"
-from enum import Enum
+
 import struct
 import math
+import OpenGL.GL as gl
+
 from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
 from typing import List, Dict, Optional, Callable, Any, Union, Type, Tuple, Literal
 from OpenGL.GL.EXT.texture_compression_s3tc import *
 from OpenGL.GL.EXT.texture_sRGB import *
-import OpenGL.GL as gl
+
+
 
 class DDSException(Exception):
     """a class for throwing DDSImage specific exceptions"""
 
+
 class DDSFormat(Enum):
     """supported DDS formats, including DX9 and DX10 formats"""
+    
     DXT1 = "DXT1"  # includes DXT1a, DXT1c
     DXT3 = "DXT3"  # includes DXT2, DXT3
     DXT5 = "DXT5"  # includes DXT3, DXT4
@@ -24,6 +31,7 @@ class DDSFormat(Enum):
     DXGI_FORMAT_BC1_UNORM_SRGB = "DXGI_FORMAT_BC1_UNORM_SRGB"
     DXGI_FORMAT_BC2_UNORM_SRGB = "DXGI_FORMAT_BC2_UNORM_SRGB"
     DXGI_FORMAT_BC3_UNORM_SRGB = "DXGI_FORMAT_BC3_UNORM_SRGB"
+    
     def getOpenGLformat(self):
         """returns the OpenGL texture format for the DDSFormat"""
         if self == DDSFormat.DXT1:
@@ -42,11 +50,13 @@ class DDSFormat(Enum):
             return GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT
         elif self == DDSFormat.DXGI_FORMAT_BC3_UNORM_SRGB:
             return GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
+        
     def rgbFormat(self)->Literal['RGB', 'RGBA']:
         """returns the OpenGL texture format for the DDSFormat"""
         if self == DDSFormat.UNCOMPRESSED24:
             return 'RGB'
         return 'RGBA'
+    
     def bytes_per_pixel(self):
         """returns the number of bytes per pixel for the DDSFormat"""
         if self == DDSFormat.DXT1:
@@ -203,7 +213,7 @@ class _BC3Alpha:
 class DDSImage:
     """A class for reading compressed and uncompressed .DDS images"""
 
-    def __init__(self, filename: str) -> None:
+    def __init__(self, filename: Union[str, Path]) -> None:
         """constructor"""
         self.__data: bytes = b''  # file buffer - holds entire dds file
         self.__format: Optional[DDSFormat] = None  # image format
@@ -269,23 +279,29 @@ class DDSImage:
             raise DDSException("unsupported bit depth")
         return DDSFormat.UNCOMPRESSED32 if bit_count == 32 else DDSFormat.UNCOMPRESSED24
 
-    def __load(self, filename: str) -> None:
+    def __load(self, filename: Union[str, Path]) -> None:
         """loads the DDS file from the given file path"""
+        
         with open(filename, 'rb') as fp:
             self.__data = fp.read()
+        
         # check if proper DDS file format
         if not (self.__data[0:3] == b"DDS" and self.__data[4] == 124 and self.__data[76] == 32):
             raise DDSException("not a valid DDS image")
+        
         # read DDS header values
         dds_flags: int = struct.unpack_from("<I", self.__data, 8)[0]
         height: int = struct.unpack_from("<I", self.__data, 12)[0]
         width: int = struct.unpack_from("<I", self.__data, 16)[0]
         mip_count: int = struct.unpack_from("<I", self.__data, 28)[0]
         pixel_format_flags: int = struct.unpack_from("<I", self.__data, 80)[0]
+        
         if bool(dds_flags & 0x800000):
             raise DDSException("cube maps are not supported")
+        
         self.__format = self.__set_format(pixel_format_flags)
         self.__mip_count = mip_count if mip_count > 0 else 1
+        
         # load mip maps
         if self.__format in [DDSFormat.UNCOMPRESSED32, DDSFormat.UNCOMPRESSED24]:
             self.__get_uncompressed_mip_maps_and_color_info(width, height)
@@ -390,5 +406,7 @@ class DDSImage:
             self.__draw_compressed(set_pixel_callback, data, width, height, _DXTCompression.BC2)
         elif self.__format in [DDSFormat.DXT5, DDSFormat.DXGI_FORMAT_BC3_UNORM_SRGB]:
             self.__draw_compressed(set_pixel_callback, data, width, height, _DXTCompression.BC3)
+
+
 
 __all__ = ['DDSImage', 'DDSException', 'DDSFormat']

@@ -1,5 +1,5 @@
 // this is a debug vs for direct output to the screen
-#version 330 core
+#version 430 core
 
 in vec2 vertexUV;
 

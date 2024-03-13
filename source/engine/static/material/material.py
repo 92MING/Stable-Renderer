@@ -2,7 +2,7 @@
 from engine.static.enums import RenderOrder
 from engine.static.resourcesObj import ResourcesObj
 from engine.static.texture import Texture
-from engine.static.shader import Shader, Supported_Shader_Value_Types
+from engine.static.shader import Shader, SupportedShaderValueTypes
 from typing import Union, get_args, Dict, Tuple, TypeVar, Type
 from enum import Enum
 from dataclasses import dataclass
@@ -225,9 +225,9 @@ class Material(ResourcesObj):
     # endregion
 
     # region variables
-    def setVariable(self, name:str, value:Supported_Shader_Value_Types):
-        if not valueTypeCheck(value, Supported_Shader_Value_Types):
-            raise TypeError(f'Unsupported value type {type(value)} for material variable {name}. Supported types are {get_args(Supported_Shader_Value_Types)}')
+    def setVariable(self, name:str, value:SupportedShaderValueTypes):
+        if not valueTypeCheck(value, SupportedShaderValueTypes):
+            raise TypeError(f'Unsupported value type {type(value)} for material variable {name}. Supported types are {get_args(SupportedShaderValueTypes)}')
         self._variables[name] = value
     # endregion
 

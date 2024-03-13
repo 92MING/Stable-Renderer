@@ -1,51 +1,58 @@
 # -*- coding: utf-8 -*-
-'''事件类，用于实现事件机制。比PYQT原生Signal輕量，不需要QObject。當QObject被刪除後，invoke event時，對應的監聽方法在運行到RuntimeError的時候，會自動刪除。'''
-# region imports
+'''事件类，用于实现事件机制。當QObject被刪除後，invoke event時，對應的監聽方法在運行到RuntimeError的時候，會自動刪除。'''
+
+if __name__ == '__main__':
+    import os, sys
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+    __package__ = 'utils.data_struct'   
+
 import heapq, functools
 from types import FunctionType, MethodType
-from typing import ForwardRef, get_origin, get_args, Union, Iterable, Literal
+from typing import ForwardRef, get_origin, get_args, Union, Iterable, Literal, Callable
 from inspect import getfullargspec, signature, getmro
 from enum import Enum
+from functools import partial
 from collections.abc import Callable
+from PyQt6.QtCore import QObject, pyqtSignal as Signal
+
 from utils.base_clses.cross_module_enum import CrossModuleEnum
 from utils.type_utils import valueTypeCheck, subClassCheck
-try:
-    # Default option
-    from PySide2.QtCore import QObject, Signal
-except ModuleNotFoundError:
-    # Compatability with Python 3.10
-    print("[INFO] PySide2 not found, attempting PySide6")
-    from PySide6.QtCore import QObject, Signal
-# endregion
+
 
 # region helper functions
 def _SignalWrapper(*args):
     class SignalWrapperCls(QObject):
         signal = Signal(*args)
     return SignalWrapperCls()
+
 def _allArgsNotUnion(args):
     for arg in args:
         if get_origin(arg) is not None and get_origin(arg) == Union:
             return False
     return True
+
 def _getHasUnionInput(possibleInputs:list):
     for possibleInput in possibleInputs:
         if not _allArgsNotUnion(possibleInput):
             return possibleInput
     return None
+
 def _allPossibleInputsOk(possibleInputs):
     for possibleInput in possibleInputs:
         if not _allArgsNotUnion(possibleInput):
             return False
     return True
+
 def _getMroClsNames(cls):
     return [cls.__qualname__ for cls in getmro(cls)]
+
 def _mroDistance(cls, targetType):
     origin = get_origin(targetType)
     if origin is not None:
         targetType = origin
     mroClsNames = _getMroClsNames(cls)
     return mroClsNames.index(targetType.__qualname__)
+
 def _totalMroDistance(values, targetTypes, acceptNone):
     totalDistance = 0
     for i, value in enumerate(values):
@@ -53,6 +60,7 @@ def _totalMroDistance(values, targetTypes, acceptNone):
             continue
         totalDistance += _mroDistance(type(value), targetTypes[i])
     return totalDistance
+
 def _findMostSuitableInputType(possibleInputs, values, acceptNone):
     suitableInputs = []
     for possibleInput in possibleInputs:
@@ -70,12 +78,17 @@ def _findMostSuitableInputType(possibleInputs, values, acceptNone):
     return suitableInputs[mostSuitableDistances.index(mostSuitableDistance)]
 # endregion
 
+
+
 class ListenerNotFoundError(Exception):
     pass
+
 class NoneTypeNotSupportedError(Exception):
     pass
 
+
 class Event:
+    
     def _init_params(self, *args, useQtSignal=False, acceptNone=False, noCheck=False):
         args = list(args)
         for i, arg in enumerate(args):
@@ -97,7 +110,8 @@ class Event:
         self._noCheck = noCheck
         self._hasEmitted = False  # to prevent sometimes Signal emit twice with unknown reason
         self._noneIndexes = set()  # record the index of None in args. Since Signal is hard to emit None, we need to mark down the index of None and replace when _invoke
-    def _init_pyqt_signal(self, *args, acceptNone=False):
+    
+    def _init_pyqt_signal(self, *args, acceptNone:bool=False):
         signalArgs = []
         for arg in args:
             if subClassCheck(arg, CrossModuleEnum):
@@ -117,14 +131,14 @@ class Event:
         possibleInputs = [signalArgs]
         while not _allPossibleInputsOk(possibleInputs):
             possibleInput = _getHasUnionInput(possibleInputs)
-            possibleInputs.remove(possibleInput)
-            for i, arg in enumerate(possibleInput):
+            possibleInputs.remove(possibleInput)    # type: ignore
+            for i, arg in enumerate(possibleInput):    # type: ignore
                 if get_origin(arg) is not None and get_origin(arg) == Union:
                     for argType in get_args(arg):  # for each type in Union
                         argTypeOrigin = get_origin(argType)
                         if argTypeOrigin is not None and argTypeOrigin != Union:
                             argType = argTypeOrigin
-                        newPossibleInput = list(possibleInput)
+                        newPossibleInput = list(possibleInput)    # type: ignore
                         newPossibleInput[i] = argType
                         possibleInputs.append(newPossibleInput.copy())
                     break
@@ -138,11 +152,12 @@ class Event:
                 self._qtSignal.signal.__getitem__(possibleInput).connect(self._invoke)
         if acceptNone:
             self._possibleInputs.append([type(None)] * len(signalArgs))
+    
     def __init__(self, *args, useQtSignal=False, acceptNone=False, noCheck=False):
         '''
         :param args: 事件的参数类型（1個或多個），可以是 类型 或 类型名稱 。支持所有utils.TypeUtils.simpleTypeCheck的類型。
         :param useQtSignal: 是否使用Qt的Signal作為事件機制。一般在QT需要跨線程時使用。如果使用此參數，則需要明確定義所有可能的參數類型,
-                    e.g: A繼承B, 如果A和B都可能作為參數類型，則需要Event(Union[A, B], useQtSignal=True), 否則QT的Siganl會
+                    e.g: A繼承B, 如果A和B都可能作為參數類型，則需要Event(Union[A, B], useQtSignal=True), 否則QT的Signal會
                     導致類型坍塌為基類。
         :param acceptNone: 是否接受None作為參數。如果args中有None，則acceptNone會強制設置為True(僅限useQtSignal模式)。
         :param noCheck: addListener/invoke 時不檢查參數數量/類型是否正確
@@ -150,51 +165,115 @@ class Event:
         self._init_params(*args, useQtSignal=useQtSignal, acceptNone=acceptNone, noCheck=noCheck)
         if useQtSignal:
             self._init_pyqt_signal(*args, acceptNone=acceptNone)
-
+        self._add_listener_decorator = self._get_event_decorator(False)
+        self._add_temp_listener_decorator = self._get_event_decorator(True)
+        
     def __iadd__(self, other):
         self.addListener(other)
         return self
+    
     def __isub__(self, other):
         self.removeListener(other)
         return self
+    
     def __len__(self):
+        '''return the total count of events & temp events'''
         return len(self._events) + len(self._tempEvents)
+    
     def destroy(self):
         self._events.clear()
         self._tempEvents.clear()
-        self._args = None
-        self._events = None
-        self._tempEvents = None
         if self._useQtSignal:
             try:
                 self._qtSignal.disconnect()
             except RuntimeError:
                 pass
             self._qtSignal.deleteLater()
-            self._qtSignal = None
+        setattr(self, '_qtSignal', None)
+        setattr(self, '_events', None)
+        setattr(self, '_tempEvents', None)
+        setattr(self, '_args', None)
+        setattr(self, '_possibleInputs', None)
+        setattr(self, '_noneIndexes', None)
+        setattr(self, '_hasEmitted', None)
+        setattr(self, '_ignoreErr', None)
+        setattr(self, '_acceptNone', None)
+        setattr(self, '_useQtSignal', None)
+        setattr(self, '_noCheck', None)
+        setattr(self, '_add_listener_decorator', None)
+        setattr(self, '_add_temp_listener_decorator', None)
         del self
 
+    def _get_event_decorator(self_event: 'Event', temp_listener:bool):   # type: ignore
+        
+        class _event_decorator:
+            
+            def __init__(self, fn):
+                self.fn = fn
+                self._need_init_ins_method = False
+                if isinstance(fn, FunctionType):
+                    if '.' not in fn.__qualname__:
+                        self_event.addListener(self.fn) if not temp_listener else self_event.addTempListener(self.fn)
+                    else: # class method
+                        self._need_init_ins_method = True
+            
+            def __set_name__(self, owner, name):
+                setattr(owner, name, self.fn)
+                if self._need_init_ins_method:
+                    origin_init = owner.__init__ if hasattr(owner, '__init__') else lambda *args, **kwargs: None
+                    def new_init(*args, **kwargs):
+                        origin_init(*args, **kwargs)
+                        self_event.addListener(partial(getattr(owner, name), args[0])) if not temp_listener else self_event.addTempListener(partial(getattr(owner, name), args[0]))
+                    owner.__init__ = new_init
+                    origin_del = owner.__del__ if hasattr(owner, '__del__') else lambda *args, **kwargs: None
+                    def new_del(*args, **kwargs):
+                        self_event.removeListener(partial(getattr(owner, name), args[0]), throwError=False) if not temp_listener else self_event.removeTempListener(partial(getattr(owner, name), args[0]), throwError=False)
+                        origin_del(*args, **kwargs)
+                    owner.__del__ = new_del
+                else:
+                    self_event.addListener(getattr(owner, name)) if not temp_listener else self_event.addTempListener(getattr(owner, name))
+            
+            def __call__(self, *args, **kwargs):
+                '''call the origin function'''
+                return self.fn(*args, **kwargs)
+        
+        return _event_decorator
+    
+    @property
+    def register(self)->Callable:
+        return self._add_listener_decorator
+    
+    @property
+    def temp_register(self)->Callable:
+        return self._add_temp_listener_decorator
+    
     @property
     def args(self):
         return self._args
+    
     @property
     def argCount(self):
         return len(self._args)
+    
     @property
     def events(self)->tuple:
         '''return a tuple of events'''
         return tuple(self._events)
+    
     @property
     def argLength(self)->int:
         '''return the length of args'''
         return len(self.args)
+    
     @property
     def tempEvents(self)->tuple:
         '''return a tuple of temp events'''
         return tuple(self._tempEvents)
+    
     @property
     def acceptNone(self)->bool:
         return self._acceptNone
+    
     @property
     def useQtSignal(self)->bool:
         return self._useQtSignal
@@ -219,13 +298,13 @@ class Event:
                             raise Exception("Listener's arg must be type or type name")
                     argLength = len(args)
                 else:
-                    argLength = listener.__code__.co_argcount - 1
+                    argLength = listener.__code__.co_argcount - 1    # type: ignore
             else:
-                argLength = listener.__code__.co_argcount - 1
+                argLength = listener.__code__.co_argcount - 1    # type: ignore
         elif isinstance(listener, functools.partial):
             diff = 1 if isinstance(listener.func, MethodType) else 0
             if hasattr(listener.func, '__code__'):
-                argLength = listener.func.__code__.co_argcount - len(listener.args) - len(listener.keywords) - diff
+                argLength = listener.func.__code__.co_argcount - len(listener.args) - len(listener.keywords) - diff    # type: ignore
             else:
                 return # really can't get arg length
         elif isinstance(listener, Callable):
@@ -243,17 +322,20 @@ class Event:
         else:
             if self.argLength < (argLength - defaultsCount):
                 raise Exception(f"Listener's arg length not match, self.argLength= {self.argLength}, but possible range is {argLength - defaultsCount}+")
+    
     def _removeDestroyedListener(self, listener):
         try:
             self._events.remove(listener)
         except KeyError:
             pass
+    
     def _removeDestroyedTempListener(self, listener):
         try:
             self._tempEvents.remove(listener)
         except KeyError:
             pass
-    def addListener(self, listener:Union[callable, Iterable[callable]]):
+        
+    def addListener(self, listener:Union[Callable, Iterable[Callable]]):
         '''add a listener to event'''
         if isinstance(listener, Iterable):
             for l in listener:
@@ -265,8 +347,9 @@ class Event:
                     listener.__self__.destroyed.connect(functools.partial(self._removeDestroyedListener, listener))
             self._events.add(listener)
         else:
-            raise TypeError("Listener must be callable, or iterable of callable")
-    def addTempListener(self, listener:Union[callable, Iterable[callable]]):
+            raise TypeError("Listener must be Callable, or iterable of Callable")
+        
+    def addTempListener(self, listener:Union[Callable, Iterable[Callable]]):
         '''add a temp listener to event'''
         if isinstance(listener, Iterable):
             for l in listener:
@@ -405,11 +488,12 @@ class DelayEvent(Event):
 class Tasks(Event):
     '''
     Tasks is a subclass of Event, which will clear all tasks after invoke.
-    Type of tasks must be callable.
+    Type of tasks must be Callable.
     When create, the init params will be the input types of tasks.
     '''
     def _init_pyqt_signal(self, *args, acceptNone=False):
         signalArgs = []
+        
         for arg in args:
             if subClassCheck(arg, CrossModuleEnum):
                 signalArgs.append(Enum)
@@ -425,6 +509,7 @@ class Tasks(Event):
                     signalArgs.append(object)
             else:
                 signalArgs.append(object)
+                
         possibleInputs = [signalArgs]
         while not _allPossibleInputsOk(possibleInputs):
             possibleInput = _getHasUnionInput(possibleInputs)
@@ -456,18 +541,21 @@ class Tasks(Event):
                 self.addTempListener(task)
         else:
             self.addTempListener(tasks)
+
     def removeTasks(self, tasks:Union[Callable, Iterable[Callable]]):
         if isinstance(tasks, Iterable):
             for task in tasks:
                 self.removeTempListener(task)
         else:
             self.removeTempListener(tasks)
+            
     def addForeverTasks(self, tasks:Union[Callable, Iterable[Callable]]):
         if isinstance(tasks, Iterable):
             for task in tasks:
                 self.addListener(task)
         else:
             self.addListener(tasks)
+            
     def removeForeverTasks(self, tasks:Union[Callable, Iterable[Callable]]):
         if isinstance(tasks, Iterable):
             for task in tasks:
@@ -500,8 +588,17 @@ class Tasks(Event):
                 self._qtSignal.signal.__getitem__(mostSuitableInput).emit(*args)
             self._noneIndexes.clear()
 
+    @property
+    def register(self)->Callable:
+        return self._add_temp_listener_decorator    # `Tasks` add temp listener by default
+
+    @property
+    def register_forever(self)->Callable:
+        return self._add_listener_decorator # `Tasks` add forever listener by default
+
 class AutoSortTask(Tasks):
     '''Tasks will be cleared after execute. Tasks will be sorted by order.'''
+    
     def _init_pyqt_signal(self, *args, acceptNone=False):
         signalArgs = []
         for arg in args:
@@ -543,6 +640,7 @@ class AutoSortTask(Tasks):
                 self._qtSignal.signal.__getitem__(possibleInput).connect(self._execute)
         if acceptNone:
             self._possibleInputs.append([type(None)] * len(signalArgs))
+            
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._tempEvents = [] # for heapq
@@ -581,14 +679,16 @@ class AutoSortTask(Tasks):
     def _TaskWrapper(cls, func, order):
         return cls.TaskWrapper(func, order)
 
-    def addListener(self, listener:Union[callable, Iterable[callable]], order:int=0):
+    def addListener(self, listener:Union[Callable, Iterable[Callable]], order:int=0):
         self._checkListener(listener)
         if listener not in self._events:
             heapq.heappush(self._events, self._TaskWrapper(listener, order))
-    def addTempListener(self, listener:Union[callable, Iterable[callable]], order:int=0):
+            
+    def addTempListener(self, listener:Union[Callable, Iterable[Callable]], order:int=0):
         self._checkListener(listener)
         if listener not in self._tempEvents:
             heapq.heappush(self._tempEvents, self._TaskWrapper(listener, order))
+            
     def removeListener(self, listener, throwError:bool=False):
         if isinstance(listener, Iterable):
             for l in listener:
@@ -600,6 +700,7 @@ class AutoSortTask(Tasks):
                     return
             if throwError:
                 raise ListenerNotFoundError(f"listener {listener} not found")
+            
     def removeTempListener(self, listener, throwError:bool=False):
         if isinstance(listener, Iterable):
             for l in listener:
@@ -614,6 +715,7 @@ class AutoSortTask(Tasks):
 
     def addTask(self, task:Callable, order:int=0):
         self.addTempListener(task, order)
+        
     def addTasks(self, tasks:Union[Callable, Iterable[Callable]], orders:Union[int, Iterable[int]]=0):
         if not isinstance(tasks, Iterable):
             tasks = [tasks]
@@ -621,6 +723,7 @@ class AutoSortTask(Tasks):
             orders = [orders] * len(tasks)
         for task, order in zip(tasks, orders):
             self.addTask(task, order)
+    
     def addForeverTasks(self, tasks:Union[Callable, Iterable[Callable]], orders:Union[int, Iterable[int]]=0):
         if not isinstance(tasks, Iterable):
             tasks = [tasks]
@@ -628,6 +731,7 @@ class AutoSortTask(Tasks):
             orders = [orders] * len(tasks)
         for task, order in zip(tasks, orders):
             self.addForeverTask(task, order)
+            
     def addForeverTask(self, task:Callable, order:int=0):
         self.addListener(task, order)
 
@@ -656,6 +760,7 @@ class AutoSortTask(Tasks):
                 else:
                     raise e
         self._tempEvents.clear()
+        
     def execute(self, *args, ignoreErr=True):
         if not self._noCheck:
             self._check_invoke_params(*args)

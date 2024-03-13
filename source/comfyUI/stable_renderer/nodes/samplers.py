@@ -24,6 +24,7 @@ class StableRenderSampler(StableRendererNodeBase):
                  end_at_step: INT(0, 10000)=10000,
                  return_with_leftover_noise: bool=False,
                  denoise=1.0)->LATENT:
+        
         force_full_denoise = not return_with_leftover_noise
         disable_noise = not add_noise
         return common_ksampler(model=model, 

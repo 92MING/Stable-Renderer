@@ -1,6 +1,9 @@
 // default VS for late shading
-#version 330 core
-layout (std140) uniform Matrices {
+#version 430 core
+#define MAX_LIGHTS_NUM 256  // this constant will be edit by python script
+#define RUNTIME_UBO_BINDING 0
+
+layout (std140, binding=RUNTIME_UBO_BINDING) uniform Runtime {
 	mat4 model;
 	mat4 view;
 	mat4 projection;
@@ -10,6 +13,8 @@ layout (std140) uniform Matrices {
 	mat4 MV_IT; // inverse transpose of MV
 	vec3 cameraPos;
 	vec3 cameraDir;
+	vec2 cameraNearFar;	// x=near, y=far
+	float cameraFov;
 };
 layout (location = 0) in vec3 pos;
 layout (location = 1) in vec3 normal;

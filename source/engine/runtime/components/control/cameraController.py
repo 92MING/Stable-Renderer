@@ -1,6 +1,6 @@
 import glm
 
-from engine.static import GLFW_Key, MouseButton
+from engine.static.enums import GLFW_Key, MouseButton
 from ..camera.camera import Camera
 from ...component import Component
 

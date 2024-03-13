@@ -4,6 +4,7 @@
 import torch
 import numpy as np
 import OpenGL.GL as gl
+import cupy
 
 from typing import Optional
 from enum import Enum
@@ -198,13 +199,96 @@ class TextureFilter(Enum):
 
 @dataclass
 class TextureDataTypeItem:
+    '''Enum value for `TextureDataType`'''
+    
     gl_data_type : GL_Constant
     '''OpenGL data type enum'''
     numpy_dtype : type
     '''numpy data type'''
-    torch_dtype : Optional[torch.dtype]
-    '''torch data type. When `None`, it means the data type is not directly supported by torch, it has to be converted to another type before sending to GPU.'''    
-
+    
+    @property
+    def nbytes(self)->int:
+        '''return the number of bytes for the data type'''
+        return np.dtype(self.numpy_dtype).itemsize
+    
+    @property
+    def tensor_supported(self)->bool:
+        '''whether the data type is supported by torch tensor directly'''
+        return self.torch_dtype is not None
+    
+    @property
+    def torch_dtype(self)->Optional[torch.dtype]:
+        '''
+        The torch dtype for turning into tensor directly.
+        
+        Please be aware that not some data types are not directly supported by torch, 
+        it will turn into another dtype with the same bit width.
+        
+        For types not supported by torch, it will return None.
+        '''
+        match self.numpy_dtype:
+            case np.uint8:
+                return torch.uint8
+            case np.int8:
+                return torch.int8
+            
+            case np.uint16:
+                return torch.int16  # torch does not support uint16
+            case np.int16:
+                return torch.int16
+            case np.float16:
+                return torch.float16
+            
+            case np.uint32:
+                return torch.int32  # torch does not support uint32
+            case np.int32:
+                return torch.int32
+            case np.float32:
+                return torch.float32
+            
+            case np.uint64:
+                return torch.int64
+            case np.int64:
+                return torch.int64
+            case np.float64:
+                return torch.float64
+            
+            case _:
+                return None
+    
+    @property
+    def cupy_dtype(self):
+        '''return the related dtype in cupy'''
+        match self.numpy_dtype:
+            case np.uint8:
+                return cupy.uint8
+            case np.int8:
+                return cupy.int8
+            
+            case np.uint16:
+                return cupy.uint16
+            case np.int16:  
+                return cupy.int16
+            case np.float16:
+                return cupy.float16
+            
+            case np.uint32:
+                return cupy.uint32
+            case np.int32:
+                return cupy.int32
+            case np.float32:
+                return cupy.float32
+            
+            case np.uint64:
+                return cupy.uint64
+            case np.int64:
+                return cupy.int64
+            case np.float64:
+                return cupy.float64
+            
+            case _:
+                raise ValueError(f'No matching cupy dtype for {self.numpy_dtype}')
+    
 class TextureDataType(Enum):
     '''
     Acceptable data type for sending texture to GPU.
@@ -214,63 +298,63 @@ class TextureDataType(Enum):
     '''
     
     # integers
-    UNSIGNED_BYTE = TextureDataTypeItem(gl.GL_UNSIGNED_BYTE, np.uint8, torch.uint8)
+    UNSIGNED_BYTE = TextureDataTypeItem(gl.GL_UNSIGNED_BYTE, np.uint8)
     '''8 bits unsigned integer'''
-    BYTE = TextureDataTypeItem(gl.GL_BYTE, np.int8, torch.int8)
+    BYTE = TextureDataTypeItem(gl.GL_BYTE, np.int8)
     '''8 bits (signed) integer'''
     
-    UNSIGNED_SHORT = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT, np.uint16, None)
+    UNSIGNED_SHORT = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT, np.uint16)
     '''16 bits unsigned integer'''
-    SHORT = TextureDataTypeItem(gl.GL_SHORT, np.int16, torch.int16)
+    SHORT = TextureDataTypeItem(gl.GL_SHORT, np.int16)
     '''16 bits (signed) integer'''
     
-    UNSIGNED_INT = TextureDataTypeItem(gl.GL_UNSIGNED_INT, np.uint32, None)
+    UNSIGNED_INT = TextureDataTypeItem(gl.GL_UNSIGNED_INT, np.uint32)
     '''32 bits unsigned integer'''
-    INT = TextureDataTypeItem(gl.GL_INT, np.int32, torch.int32) 
+    INT = TextureDataTypeItem(gl.GL_INT, np.int32)
     '''32 bits (signed) integer'''
     
     # floating point
-    HALF = TextureDataTypeItem(gl.GL_HALF_FLOAT, np.float16, torch.float16)
+    HALF = TextureDataTypeItem(gl.GL_HALF_FLOAT, np.float16)
     '''float 16'''
-    FLOAT = TextureDataTypeItem(gl.GL_FLOAT, np.float32, torch.float32)
+    FLOAT = TextureDataTypeItem(gl.GL_FLOAT, np.float32)
     '''float 32'''
 
     # special data arrangement
-    UNSIGNED_BYTE_332 = TextureDataTypeItem(gl.GL_UNSIGNED_BYTE_3_3_2, np.uint8, torch.uint8)
-    UNSIGNED_BYTE_233 = TextureDataTypeItem(gl.GL_UNSIGNED_BYTE_2_3_3_REV, np.uint8, torch.uint8)
+    UNSIGNED_BYTE_332 = TextureDataTypeItem(gl.GL_UNSIGNED_BYTE_3_3_2, np.uint8)
+    UNSIGNED_BYTE_233 = TextureDataTypeItem(gl.GL_UNSIGNED_BYTE_2_3_3_REV, np.uint8)
     
-    UNSIGNED_SHORT_565 = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT_5_6_5, np.uint16, None)
+    UNSIGNED_SHORT_565 = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT_5_6_5, np.uint16)
     '''Color saving order: BGR, 5 bits for blue, 6 bits for green, 5 bits for red.'''
-    UNSIGNED_SHORT_565_REV = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT_5_6_5_REV, np.uint16, None)
+    UNSIGNED_SHORT_565_REV = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT_5_6_5_REV, np.uint16)
     '''Color saving order: RGB, 5 bits for red, 6 bits for green, 5 bits for blue.'''
     
-    UNSIGNED_SHORT_4444 = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT_4_4_4_4, np.uint16, None)
+    UNSIGNED_SHORT_4444 = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT_4_4_4_4, np.uint16)
     '''Color saving order: RGBA, 4 bits for red, 4 bits for green, 4 bits for blue, 4 bits for alpha.'''
-    UNSIGNED_SHORT_4444_REV = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT_4_4_4_4_REV, np.uint16, None)
+    UNSIGNED_SHORT_4444_REV = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT_4_4_4_4_REV, np.uint16)
     '''Color saving order: ARGB, 4 bits for alpha, 4 bits for red, 4 bits for green, 4 bits for blue.'''
     
-    UNSIGNED_SHORT_5551 = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT_5_5_5_1, np.uint16, None)
+    UNSIGNED_SHORT_5551 = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT_5_5_5_1, np.uint16)
     '''Color saving order: RGBA, 5 bits for red, 5 bits for green, 5 bits for blue, 1 bit for alpha.'''
-    UNSIGNED_SHORT_1555_REV = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT_1_5_5_5_REV, np.uint16, None)
+    UNSIGNED_SHORT_1555_REV = TextureDataTypeItem(gl.GL_UNSIGNED_SHORT_1_5_5_5_REV, np.uint16)
     '''Color saving order: ARGB, 1 bit for alpha, 5 bits for red, 5 bits for green, 5 bits for blue.'''
     
-    UNSIGNED_INT_8888 = TextureDataTypeItem(gl.GL_UNSIGNED_INT_8_8_8_8, np.uint32, None)
+    UNSIGNED_INT_8888 = TextureDataTypeItem(gl.GL_UNSIGNED_INT_8_8_8_8, np.uint32)
     '''Color saving order: RGBA, 8 bits for red, 8 bits for green, 8 bits for blue, 8 bits for alpha.'''
-    UNSIGNED_INT_8888_REV = TextureDataTypeItem(gl.GL_UNSIGNED_INT_8_8_8_8_REV, np.uint32, None)
+    UNSIGNED_INT_8888_REV = TextureDataTypeItem(gl.GL_UNSIGNED_INT_8_8_8_8_REV, np.uint32)
     '''Color saving order: ARGB, 8 bits for alpha, 8 bits for red, 8 bits for green, 8 bits for blue.'''
     
-    UNSIGNED_INT_10_10_10_2 = TextureDataTypeItem(gl.GL_UNSIGNED_INT_10_10_10_2, np.uint32, None)
+    UNSIGNED_INT_10_10_10_2 = TextureDataTypeItem(gl.GL_UNSIGNED_INT_10_10_10_2, np.uint32)
     '''Color saving order: RGBA, 10 bits for red, 10 bits for green, 10 bits for blue, 2 bits for alpha.'''
-    UNSIGNED_INT_2_10_10_10_REV = TextureDataTypeItem(gl.GL_UNSIGNED_INT_2_10_10_10_REV, np.uint32, None)
+    UNSIGNED_INT_2_10_10_10_REV = TextureDataTypeItem(gl.GL_UNSIGNED_INT_2_10_10_10_REV, np.uint32)
     '''Color saving order: ARGB, 2 bits for alpha, 10 bits for red, 10 bits for green, 10 bits for blue.'''
     
-    UNSIGNED_INT_24_8 = TextureDataTypeItem(gl.GL_UNSIGNED_INT_24_8, np.uint32, None)
+    UNSIGNED_INT_24_8 = TextureDataTypeItem(gl.GL_UNSIGNED_INT_24_8, np.uint32)
     '''24 bits for depth, 8 bits for stencil.'''
-    UNSIGNED_INT_10F_11F_11F_REV = TextureDataTypeItem(gl.GL_UNSIGNED_INT_10F_11F_11F_REV, np.uint32, None)
+    UNSIGNED_INT_10F_11F_11F_REV = TextureDataTypeItem(gl.GL_UNSIGNED_INT_10F_11F_11F_REV, np.uint32)
     '''11 bits for red, 11 bits for green, 10 bits for blue, and the data is floating point.'''
-    UNSIGNED_INT_5_9_9_9_REV = TextureDataTypeItem(gl.GL_UNSIGNED_INT_5_9_9_9_REV, np.uint32, None)
+    UNSIGNED_INT_5_9_9_9_REV = TextureDataTypeItem(gl.GL_UNSIGNED_INT_5_9_9_9_REV, np.uint32)
     '''9 bits for red, 9 bits for green, 9 bits for blue, and the data is floating point.'''
-    FLOAT_32_UNSIGNED_INT_24_8_REV = TextureDataTypeItem(gl.GL_FLOAT_32_UNSIGNED_INT_24_8_REV, np.float32, torch.float32)
+    FLOAT_32_UNSIGNED_INT_24_8_REV = TextureDataTypeItem(gl.GL_FLOAT_32_UNSIGNED_INT_24_8_REV, np.uint64)    # uint64 for same size only
     '''
     The first value is a 32-bit floating-point depth value. The second breaks the 32-bit integer value into 24-bits of unused space, followed by 8 bits of stencil.
     This can only be used with `GL_DEPTH32F_STENCIL8`
@@ -308,7 +392,7 @@ class TextureInternalFormat(Enum):
     RGB = TextureInternalFormatItem(gl.GL_RGB, TextureDataType.UNSIGNED_BYTE)
     RGBA = TextureInternalFormatItem(gl.GL_RGBA, TextureDataType.UNSIGNED_BYTE)
     
-    DEPTH = TextureInternalFormatItem(gl.GL_DEPTH_COMPONENT, TextureDataType.UNSIGNED_INT)
+    DEPTH = TextureInternalFormatItem(gl.GL_DEPTH_COMPONENT, TextureDataType.FLOAT)
     DEPTH_STENCIL = TextureInternalFormatItem(gl.GL_DEPTH_STENCIL, TextureDataType.UNSIGNED_INT_24_8)
     DEPTH_16 = TextureInternalFormatItem(gl.GL_DEPTH_COMPONENT16, TextureDataType.UNSIGNED_SHORT)
     DEPTH_24 = TextureInternalFormatItem(gl.GL_DEPTH_COMPONENT24, TextureDataType.UNSIGNED_INT)

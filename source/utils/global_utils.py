@@ -5,19 +5,23 @@ If ".env" exist, this module will load it and set the environment variables.
 '''
 
 import sys, os
+from typing import Dict, Any, Callable
+
 
 _needInit = True
 _moduleName = __name__.split('.')[-1]
+_globalValues: Dict[str, Any] = {}
+
 for module in sys.modules.keys():
     if module == __name__:
         break
-    modulname = module.split('.')[-1] if '.' in module else module
-    if modulname == _moduleName:
-        _globalValues = sys.modules[module]._globalValues
+    modulename = module.split('.')[-1] if '.' in module else module
+    if modulename == _moduleName:
+        _globalValues: Dict[str, Any] = sys.modules[module]._globalValues
         _needInit = False
         break
+    
 if _needInit:
-    _globalValues = {}
     from dotenv import load_dotenv
     path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env'))
     if os.path.exists(path):
@@ -50,37 +54,46 @@ def GetEnv(key: str, default: Optional[T] = None, type: Type[T] = str)->Optional
 
 def SetGlobalValue(key: str, value: object):
     _globalValues[key] = value
+
 def GetGlobalValue(key: str, default=None):
     '''return default if key not found.'''
     try:
         return _globalValues[key]
     except KeyError:
         return default
+
 def RemoveGlobalValue(key: str):
     try:
         _globalValues.pop(key)
     except KeyError:
         pass
+
 def HasGlobalValue(key: str):
     return key in _globalValues
+
 def ClearGlobalValue():
     _globalValues.clear()
+
 def GetGlobalValueKeys():
     return tuple(_globalValues.keys())
+
 def GetGlobalValueValues():
     return tuple(_globalValues.values())
+
 def GetGlobalValueItems():
     return tuple(_globalValues.items())
+
 def GetGlobalValueDict():
     '''Return a copy of global value dict.'''
     return _globalValues.copy()
+
 def GetOrAddGlobalValue(key: str, defaultValue:object):
     if key in _globalValues:
         return _globalValues[key]
     else:
         _globalValues[key] = defaultValue
         return defaultValue
-def GetOrCreateGlobalValue(key: str, creator:callable, *args, **kwargs):
+def GetOrCreateGlobalValue(key: str, creator:Callable, *args, **kwargs):
     if key in _globalValues:
         return _globalValues[key]
     else:

@@ -19,7 +19,7 @@ if __name__ == '__main__':
     
     class Sample(Engine):
         def beforePrepare(self):
-            mikuPath = os.path.join(RESOURCES_DIR, 'miku')
+            mikuPath = os.path.join(EXAMPLE_3D_MODEL_DIR, 'miku')
             mikuMesh = Mesh.Load(os.path.join(mikuPath, 'miku.obj'))
             mikuMaterials = Material_MTL.Load(os.path.join(mikuPath, 'miku.mtl')) # dict of materials
 

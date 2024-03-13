@@ -6,7 +6,7 @@ Note: `setter` is not supported for class property, due to the limitation of pyt
 
 from collections.abc import Callable
 from functools import update_wrapper
-from typing import Type, overload, Optional, TypeVar, Union
+from typing import Type, Optional, TypeVar
 
 ClsT = TypeVar('ClsT')
 RetT = TypeVar('RetT')
@@ -23,16 +23,16 @@ class class_property(property): # still inherit from property(but it works nothi
         def __init__(self, k):
             self.k = k
         @class_property
-        def a(cls:Type[Self]):
+        def a(cls):
             return cls(k=1)
     
     print(A.a.k)  # 1
     ''' 
-    def __init__(self, fget:Callable[[Type[ClsT]], RetT]):
+    def __init__(self, fget:Callable[[ClsT], RetT]):
         self.getter = fget  # type: ignore
         update_wrapper(self, fget)  # type: ignore
     
-    def __get__(self, _:None, owner:Type[ClsT])->RetT:  # type: ignore
+    def __get__(self, _:None, owner: ClsT)->RetT:  # type: ignore
         return self.getter(owner)   # type: ignore
 
 class abstract_class_property(class_property):
@@ -65,14 +65,9 @@ class class_or_ins_property(property): # still inherit from property(but it work
     ```
     '''
     
-    def __init__(self, fget:Callable[[Union[Type[ClsT], ClsT]], RetT]):
+    def __init__(self, fget:Callable[[ClsT], RetT]):
         self.getter = fget  # type: ignore
         update_wrapper(self, fget)  # type: ignore
-    
-    @overload
-    def __get__(self, instance:ClsT, owner:Type[ClsT])->RetT: ...   # type: ignore
-    @overload
-    def __get__(self, _:None, owner:Type[ClsT])->RetT: ...  # type: ignore
     
     def __get__(self, instance:Optional[ClsT], owner:Type[ClsT])->RetT: # type: ignore
         if instance is None:
@@ -90,3 +85,21 @@ class class_or_ins_method(classmethod):
 
 
 __all__ = ['class_property', 'abstract_class_property', 'class_or_ins_method', 'class_or_ins_property']
+
+
+def prevent_re_init(cls: ClsT)->ClsT:
+    '''
+    Prevent re-init of a created instance.
+    This decorator is useful when you want to make sure that the instance is only created once, e.g. singleton.
+    '''
+    
+    origin_init = cls.__init__
+    def new_init(self, *args, **kwargs):
+        if hasattr(self, '__inited__') and getattr(self, '__inited__'):
+            return  # do nothing
+        origin_init(self, *args, **kwargs)
+        setattr(self, '__inited__', True)
+    cls.__init__ = new_init
+    return cls
+
+__all__.extend(['prevent_re_init'])

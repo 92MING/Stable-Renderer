@@ -6,6 +6,7 @@ import numpy as np
 from functools import partial
 from typing import Union, Optional, Callable
 
+from utils.cuda_utils import get_cuda_gl_devices
 from utils.data_struct.event import AutoSortTask
 from .manager import Manager
 from .runtimeManager import RuntimeManager
@@ -37,7 +38,7 @@ def _wrapDeferRenderTask(render_manager:'RenderManager', shader, task):
     _bindGTexture(shader, 0, render_manager.colorFBOTex.textureID, "gColor")  # type: ignore
     _bindGTexture(shader, 1, render_manager.idFBOTex.textureID, "gID")  # type: ignore
     _bindGTexture(shader, 2, render_manager.posFBOTex.textureID, "gPos")  # type: ignore
-    _bindGTexture(shader, 3, render_manager.normalFBOTex.textureID, "gNormal")  # type: ignore
+    _bindGTexture(shader, 3, render_manager.normal_and_depth_FBOTex.textureID, "gNormal")  # type: ignore
     _bindGTexture(shader, 4, render_manager.noiseFBOTex.textureID, "gNoise")  # type: ignore
     task() if task is not None else render_manager._draw_quad()
 
@@ -59,13 +60,23 @@ class RenderManager(Manager):
                  exposure=1.0,
                  saturation=1.0,
                  brightness=1.0,
-                 contrast=1.0,):
+                 contrast=1.0,
+                 target_device: Optional[int] = None):
         super().__init__()
         self.engine._renderManager = self # special case, because renderManager is created before engine's assignment
         self._renderTasks = AutoSortTask()
         self._deferRenderTasks = AutoSortTask()
         self._postProcessTasks = AutoSortTask()
         self._init_opengl()  # opengl settings
+        
+        current_cuda_devices = get_cuda_gl_devices()
+        if not target_device:
+            target_device = current_cuda_devices[0]
+        else:
+            if target_device not in current_cuda_devices:
+                raise ValueError(f"Target device {target_device} is not in the current CUDA devices list: {current_cuda_devices}")
+        self._target_device = target_device
+        
         self._init_framebuffers()  # framebuffers for post-processing
         self._init_post_process(enableHDR=enableHDR, enableGammaCorrection=enableGammaCorrection, gamma=gamma, exposure=exposure,
                                 saturation=saturation, brightness=brightness, contrast=contrast)
@@ -95,7 +106,7 @@ class RenderManager(Manager):
                                    t_wrap=TextureWrap.CLAMP_TO_EDGE, 
                                    min_filter=TextureFilter.NEAREST, 
                                    mag_filter=TextureFilter.NEAREST, 
-                                   internalFormat=TextureInternalFormat.RGBA16F, 
+                                   internalFormat=TextureInternalFormat.RGBA16F, # alpha for masking
                                    data_type=TextureDataType.HALF,
                                    share_to_torch=True)
         '''texture for saving every pixels' color in each frame'''
@@ -123,13 +134,13 @@ class RenderManager(Manager):
                                 t_wrap=TextureWrap.CLAMP_TO_EDGE,
                                 min_filter=TextureFilter.NEAREST,
                                 mag_filter=TextureFilter.NEAREST,
-                                internalFormat=TextureInternalFormat.RGB16F,
-                                data_type=TextureDataType.HALF,
+                                internalFormat=TextureInternalFormat.RGB32F,    # use 32 here since cudaGraphicsGLRegisterImage doesn't support RGB16F
+                                data_type=TextureDataType.FLOAT,
                                 share_to_torch=True)
         '''texture for saving every frame's position in each pixel'''
         self.posFBOTex.sendToGPU()
         
-        self.normalFBOTex = Texture(name='__NORMAL_FBO__',
+        self.normal_and_depth_FBOTex = Texture(name='__NORMAL_FBO__',
                                     width=winWidth,
                                     height=winHeight,
                                     format=TextureFormat.RGBA,
@@ -137,11 +148,11 @@ class RenderManager(Manager):
                                     t_wrap=TextureWrap.CLAMP_TO_EDGE,
                                     min_filter=TextureFilter.NEAREST,
                                     mag_filter=TextureFilter.NEAREST,
-                                    internalFormat=TextureInternalFormat.RGBA16F,    # output alpha for masking
+                                    internalFormat=TextureInternalFormat.RGBA16F,    # alpha channel for saving depth
                                     data_type=TextureDataType.HALF,
                                     share_to_torch=True)
         '''texture for saving every pixel's normal in each frame'''
-        self.normalFBOTex.sendToGPU()
+        self.normal_and_depth_FBOTex.sendToGPU()
         
         self.noiseFBOTex = Texture(name='__NOISE_FBO__',
                                    width=winWidth,
@@ -151,7 +162,7 @@ class RenderManager(Manager):
                                    t_wrap=TextureWrap.REPEAT,
                                    min_filter=TextureFilter.NEAREST,
                                    mag_filter=TextureFilter.NEAREST,
-                                   internalFormat=TextureInternalFormat.RGBA16F,
+                                   internalFormat=TextureInternalFormat.RGBA16F,    # 4 channel to make the shape same as a random latent
                                    data_type=TextureDataType.HALF,
                                    share_to_torch=True)
         '''Noise texture(which has the same size of model's latent) for further use in AI rendering'''
@@ -161,22 +172,15 @@ class RenderManager(Manager):
                                     width=winWidth,
                                     height=winHeight,
                                     format=TextureFormat.DEPTH,
-                                    s_wrap=TextureWrap.CLAMP_TO_EDGE,
-                                    t_wrap=TextureWrap.CLAMP_TO_EDGE,
-                                    min_filter=TextureFilter.NEAREST,
-                                    mag_filter=TextureFilter.NEAREST,
-                                    internalFormat=TextureInternalFormat.DEPTH_16,
-                                    data_type=TextureDataType.UNSIGNED_SHORT,
-                                    share_to_torch=True)
-        '''texture for saving every pixel's depth in each frame'''
+                                    share_to_torch=False)   # depth tex is just for depth test
         self.depthFBOTex.sendToGPU()
-
+        
         self._gBuffer = gl.glGenFramebuffers(1)
         self.BindFrameBuffer(self._gBuffer)
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self.colorFBOTex.textureID, 0)
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT1, gl.GL_TEXTURE_2D, self.idFBOTex.textureID, 0)
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT2, gl.GL_TEXTURE_2D, self.posFBOTex.textureID, 0)
-        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT3, gl.GL_TEXTURE_2D, self.normalFBOTex.textureID, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT3, gl.GL_TEXTURE_2D, self.normal_and_depth_FBOTex.textureID, 0)
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT4, gl.GL_TEXTURE_2D, self.noiseFBOTex.textureID, 0)
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_DEPTH_ATTACHMENT, gl.GL_TEXTURE_2D, self.depthFBOTex.textureID, 0)
         gl.glDrawBuffers(5, [gl.GL_COLOR_ATTACHMENT0, gl.GL_COLOR_ATTACHMENT1, gl.GL_COLOR_ATTACHMENT2, gl.GL_COLOR_ATTACHMENT3, gl.GL_COLOR_ATTACHMENT4])
@@ -343,11 +347,15 @@ class RenderManager(Manager):
         data = data.reshape((self.engine.WindowManager.WindowSize[1], self.engine.WindowManager.WindowSize[0], tex.channel_count))
         if flipY:
             data = data[::-1, :, :]  # flip array upside down
-        print(tex.name, tex.format, data.size)
         return data
     # endregion
 
     # region opengl
+    @property
+    def TargetDevice(self)->int:
+        '''return the target GPU for running the engine'''
+        return self._target_device
+    
     @property
     def CurrentFrameBuffer(self):
         return gl.glGetIntegerv(gl.GL_FRAMEBUFFER_BINDING)
@@ -551,28 +559,28 @@ class RenderManager(Manager):
         if self.engine.DiffusionManager.ShouldOutputFrame:    
             idData = self._getFBOTexToNumpy(self.idFBOTex, flipY=True)
             posData = self._getFBOTexToNumpy(self.posFBOTex, flipY=True)
-            normalData = self._getFBOTexToNumpy(self.normalFBOTex, flipY=True)
+            normal_and_depth_data = self._getFBOTexToNumpy(self.normal_and_depth_FBOTex, flipY=True)
+            # depth data is in the alpha channel of `normal_and_depth_data`
+            normalData = normal_and_depth_data[:, :, :3]
+            depthData = normal_and_depth_data[:, :, 3]
             noiseData = self._getFBOTexToNumpy(self.noiseFBOTex, flipY=True)
-            depthData = self._getFBOTexToNumpy(self.depthFBOTex, flipY=True)
             
-            sdManager = self.engine.DiffusionManager
-            sdManager.OutputMap('color', colorData)
-            sdManager.OutputMap('normal', normalData)
-            sdManager.OutputNumpyData('id', idData)
-            sdManager.OutputNumpyData('pos', posData)
-            sdManager.OutputNumpyData('noise', noiseData)
-            sdManager.OutputDepthMap(depthData)
-        print('output end')
-        exit()
-        # Code run normally until here, pending fixes for idData
+            diffuseManager = self.engine.DiffusionManager
+            diffuseManager.OutputMap('color', colorData)
+            diffuseManager.OutputMap('normal', normalData)
+            diffuseManager.OutputNumpyData('id', idData)
+            diffuseManager.OutputNumpyData('pos', posData)
+            diffuseManager.OutputNumpyData('noise', noiseData)
+            diffuseManager.OutputDepthMap(depthData)
+        
         # get data back from SD
         # TODO: load the color data back to self._gBuffer_color_and_depth_texture texture, i.e. colorData = ...
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.colorFBOTex.textureID)
         gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, 
                            self.engine.WindowManager.WindowWidth, 
                            self.engine.WindowManager.WindowHeight, 
-                           gl.GL_RGBA, 
-                           gl.GL_FLOAT, 
+                           self.colorFBOTex.format.value.gl_format,
+                           self.colorFBOTex.data_type.value.gl_data_type,
                            colorData.tobytes())
         # TODO: update color pixel datas, i.e. pixelDict[id] = (oldColor *a + newColor *b), newColor = inverse light intensity of the pixel color
         # TODO: replace corresponding color pixel datas with color data from color dict

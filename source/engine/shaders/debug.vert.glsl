@@ -1,6 +1,6 @@
 // this is a debug vs for direct output to the screen
-#version 330 core
-layout (std140) uniform Matrices {
+#version 430 core
+layout (std140) uniform Runtime {
 	mat4 model;
 	mat4 view;
 	mat4 projection;

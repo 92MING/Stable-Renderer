@@ -1,4 +1,4 @@
-#version 330 core
+#version 430 core
 
 uniform sampler2D gColor; // color and depth (r, g, b, depth) in g-buffer
 uniform sampler2D gPos; // global position in g-buffer

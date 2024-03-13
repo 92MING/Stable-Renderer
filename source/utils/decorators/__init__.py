@@ -1,5 +1,5 @@
 from .overload import *
 
-from .classproperty import *
+from .class_decorators import *
 
 from .cache import *

@@ -1,6 +1,6 @@
 # TODO: not yet done
 
-from engine.static import Color
+from engine.static.color import Color
 from typing import Literal
 import OpenGL.GL as gl
 import glm

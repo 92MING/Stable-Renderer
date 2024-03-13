@@ -2,16 +2,25 @@ import glm
 import glfw
 import OpenGL.GL as gl
 
+from typing import Final
+
 from .manager import Manager
 from ..runtime.gameObj import GameObject
 from ..static import Color
 
+RuntimeUBOName = "Runtime"
+EngineUBOName = "Engine"
+LightUBOName = "Light"
 
 class RuntimeManager(Manager):
     '''Manager of GameObjs, Components, etc.'''
 
     FrameEndFuncOrder = 999  # run at the end of each frame, since it need to count the frame time
 
+    RuntimeUBOName: Final[str] = RuntimeUBOName
+    EngineUBOName: Final[str]  = EngineUBOName
+    LightUBOName: Final[str] = LightUBOName
+    
     def __init__(self,
                  fixedUpdateMaxFPS=60,
                  ambientLightCol:Color=Color.CLEAR,
@@ -34,7 +43,7 @@ class RuntimeManager(Manager):
         self._init_matrix_UBO()
 
     # region UBO:Matrix
-    def _init_matrix_UBO(self):
+    def _init_matrix_UBO(self): # TODO: change to use `ShaderUBOBuffer` for more flexibility
         self._UBO_modelMatrix = glm.mat4(1.0)
         self._UBO_viewMatrix = glm.mat4(1.0)
         self._UBO_projectionMatrix = glm.mat4(1.0)
@@ -44,29 +53,59 @@ class RuntimeManager(Manager):
         self._UBO_MV_IT = glm.mat4(1.0)
         self._UBO_cam_pos = glm.vec3(0.0, 0.0, 0.0) # world camera position
         self._UBO_cam_dir = glm.vec3(0.0, 0.0, 0.0) # world camera direction
+        self._UBO_cam_nearFar = glm.vec2(0.1, 100.0) # near and far plane
+        self._UBO_cam_fov = 45.0 # field of view
+        
+        total_size = 7 * glm.sizeof(glm.mat4) + 2 * glm.sizeof(glm.vec3) + glm.sizeof(glm.vec2) + glm.sizeof(glm.float32)
 
         self._matrixUBO = gl.glGenBuffers(1)
         gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self._matrixUBO)
-        gl.glBufferData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + 2 * glm.sizeof(glm.vec3), None, gl.GL_DYNAMIC_DRAW)
-        gl.glBindBufferBase(gl.GL_UNIFORM_BUFFER, self.MatrixUBO_BindingPoint, self._matrixUBO)
+        gl.glBufferData(gl.GL_UNIFORM_BUFFER, total_size, None, gl.GL_DYNAMIC_DRAW)
+        gl.glBindBufferBase(gl.GL_UNIFORM_BUFFER, self.RuntimeUBOBindingPoint, self._matrixUBO)
 
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 0, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_modelMatrix))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 1 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_viewMatrix))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 2 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_projectionMatrix))
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 3 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))  # MVP
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 4 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))  # MVP_IT
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 5 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV))  # MV
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 6 * glm.sizeof(glm.mat4), glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV_IT))  # MV_IT
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_pos))  # camera world position
-        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + glm.sizeof(glm.vec3), glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_dir))  # camera world forward direction
+        offset = 0
+        
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, offset, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_modelMatrix))
+        offset += glm.sizeof(glm.mat4)
+        
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, offset, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_viewMatrix))
+        offset += glm.sizeof(glm.mat4)
+        
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, offset, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_projectionMatrix))
+        offset += glm.sizeof(glm.mat4)
+        
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, offset, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP))  # MVP
+        offset += glm.sizeof(glm.mat4)
+        
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, offset, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MVP_IT))  # MVP_IT
+        offset += glm.sizeof(glm.mat4)
+        
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, offset, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV))  # MV
+        offset += glm.sizeof(glm.mat4)
+        
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, offset, glm.sizeof(glm.mat4), glm.value_ptr(self._UBO_MV_IT))  # MV_IT
+        offset += glm.sizeof(glm.mat4)
+        
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, offset, glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_pos))  # camera world position
+        offset += glm.sizeof(glm.vec3)
+        
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, offset, glm.sizeof(glm.vec3), glm.value_ptr(self._UBO_cam_dir))  # camera world forward direction
+        offset += glm.sizeof(glm.vec3)
+        
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, offset, glm.sizeof(glm.vec2), glm.value_ptr(self._UBO_cam_nearFar))  # near and far plane
+        offset += glm.sizeof(glm.vec2)
+        
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, offset, glm.sizeof(glm.float32), glm.value_ptr(glm.vec1(self._UBO_cam_fov)))  # field of view
+        offset += glm.sizeof(glm.float32)
 
+        
     @property
     def MatrixUBO(self):
         return self._matrixUBO
 
     @property
-    def MatrixUBO_BindingPoint(self):
-        return self.engine.CreateOrGet_UBO_BindingPoint("MatrixUBO")
+    def RuntimeUBOBindingPoint(self):
+        return self.engine.CreateOrGet_UBO_BindingPoint(RuntimeUBOName)
 
     @property
     def UBO_ModelMatrix(self):
@@ -88,6 +127,32 @@ class RuntimeManager(Manager):
     def UBO_CamDir(self):
         return self._UBO_cam_dir
 
+    @property
+    def UBO_CamNear(self):
+        return self._UBO_cam_nearFar.x
+    
+    @property
+    def UBO_CamFar(self):
+        return self._UBO_cam_nearFar.y
+    
+    def UpdateUBO_CamInfo(self, camPos: glm.vec3, camDir: glm.vec3, near: float, far: float, fov: float):
+        self.UpdateUBO_CamPos(camPos)
+        self.UpdateUBO_CamDir(camDir)
+        self.UpdateUBO_CamNearFar(near, far)
+        self.UpdateUBO_CamFov(fov)
+        
+    def UpdateUBO_CamNearFar(self, near: float, far: float):
+        self._UBO_cam_nearFar = glm.vec2(near, far)
+        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + 2 * glm.sizeof(glm.vec3),
+                           glm.sizeof(glm.vec2), glm.value_ptr(self._UBO_cam_nearFar))
+        
+    def UpdateUBO_CamFov(self, fov: float):
+        self._UBO_cam_fov = fov
+        gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
+        gl.glBufferSubData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + 2 * glm.sizeof(glm.vec3) + glm.sizeof(glm.vec2),
+                           glm.sizeof(glm.float32), glm.value_ptr(glm.vec1(self._UBO_cam_fov)))
+    
     def UpdateUBO_CamPos(self, camPos: glm.vec3):
         self._UBO_cam_pos = camPos
         gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self.MatrixUBO)
@@ -153,7 +218,7 @@ class RuntimeManager(Manager):
         self._engineUBO = gl.glGenBuffers(1)
         gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self._engineUBO)
         gl.glBufferData(gl.GL_UNIFORM_BUFFER, glm.sizeof(glm.ivec2), None, gl.GL_DYNAMIC_DRAW)
-        gl.glBindBufferBase(gl.GL_UNIFORM_BUFFER, self.EngineUBO_BindingPoint, self._engineUBO)
+        gl.glBindBufferBase(gl.GL_UNIFORM_BUFFER, self.EngineUBOBindingPoint, self._engineUBO)
 
     def Update_UBO_ScreenSize(self):
         gl.glBindBuffer(gl.GL_UNIFORM_BUFFER, self._engineUBO)
@@ -165,8 +230,8 @@ class RuntimeManager(Manager):
         return self._engineUBO
 
     @property
-    def EngineUBO_BindingPoint(self):
-        return self.engine.CreateOrGet_UBO_BindingPoint('EngineUBO')
+    def EngineUBOBindingPoint(self):
+        return self.engine.CreateOrGet_UBO_BindingPoint(EngineUBOName)
     # endregion
 
     # region UBO: Light
@@ -178,15 +243,15 @@ class RuntimeManager(Manager):
         for subLightType in Light.AllLightSubTypes():
             pass
         gl.glBufferData(gl.GL_UNIFORM_BUFFER, 7 * glm.sizeof(glm.mat4) + 2 * glm.sizeof(glm.vec3), None, gl.GL_DYNAMIC_DRAW)
-        gl.glBindBufferBase(gl.GL_UNIFORM_BUFFER, self.MatrixUBO_BindingPoint, self._lightUBO)
+        gl.glBindBufferBase(gl.GL_UNIFORM_BUFFER, self.RuntimeUBOBindingPoint, self._lightUBO)
 
     @property
     def LightUBO(self):
         return self._lightUBO
 
     @property
-    def LightUBO_BindingPoint(self):
-        return self.engine.CreateOrGet_UBO_BindingPoint('LightUBO')
+    def LightUBOBindingPoint(self):
+        return self.engine.CreateOrGet_UBO_BindingPoint(LightUBOName)
     # endregion
 
     # region Properties

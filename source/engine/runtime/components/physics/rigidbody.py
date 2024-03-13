@@ -4,7 +4,7 @@ if TYPE_CHECKING:
     from engine.managers import RuntimeManager
     from ...gameObj import GameObject
     
-from utils.decorator import Overload
+from utils.decorators import Overload
 from ...component import Component
 
 

@@ -3,7 +3,7 @@ from typing import Optional, Union, Sequence, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..gameObj import GameObject
 
-from utils.decorator import Overload
+from utils.decorators import Overload
 from ..component import Component
 
 class Transform(Component):

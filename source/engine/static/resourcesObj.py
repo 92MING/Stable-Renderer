@@ -115,6 +115,15 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
         return cls.BaseInstances().values()
 
     @classmethod
+    def _GetDefaultName(cls):
+        new_name = f"Unnamed_{cls.__qualname__}"
+        count = 1
+        while new_name in cls.AllInstances():
+            new_name = f"Unnamed_{cls.__qualname__}_{count}"
+            count += 1
+        return new_name
+                
+    @classmethod
     def _GetPathAndName(cls, path: Union[str, Path], name=None):
         '''
         Get proper path & name for cls.Load().

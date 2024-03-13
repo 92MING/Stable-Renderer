@@ -1,10 +1,14 @@
-from typing import Set
+from typing import Set, TYPE_CHECKING
 import glm
 
 from ...component import Component
 from ..transform import Transform
 from engine.static.color import Color
 from engine.static.enums import ProjectionType
+
+if TYPE_CHECKING:
+    from engine.managers import RuntimeManager
+
 
 class Camera(Component):
 
@@ -96,18 +100,27 @@ class Camera(Component):
 
     def lateUpdate(self):
         if self.isMainCamera:
+            runtimeManager: 'RuntimeManager' = self.engine.RuntimeManager
+            
             if self.engine.WindowManager.BgColor != self.bgColor:
                 self.engine.WindowManager.BgColor = self.bgColor
+                
             worldPos, worldForward = self.transform.position, self.transform.forward
             viewMatrix, projectionMatrix = self.viewMatrix, self.projectionMatrix
+            
             if self.engine.RuntimeManager.UpdateUBO_ViewMatrix != viewMatrix:
                 self.engine.RuntimeManager.UpdateUBO_ViewMatrix(viewMatrix)
+            
             if self.engine.RuntimeManager.UpdateUBO_ProjMatrix != projectionMatrix:
                 self.engine.RuntimeManager.UpdateUBO_ProjMatrix(projectionMatrix)
-            if self.engine.RuntimeManager.UpdateUBO_CamPos != worldPos:
-                self.engine.RuntimeManager.UpdateUBO_CamPos(worldPos)
-            if self.engine.RuntimeManager.UpdateUBO_CamDir != worldForward:
-                self.engine.RuntimeManager.UpdateUBO_CamDir(worldForward)
+            
+            runtimeManager.UpdateUBO_CamInfo(
+                worldPos,
+                worldForward,
+                self.near_plane,
+                self.far_plane,
+                self.fov,
+            )
 
 
 __all__ = ['Camera']

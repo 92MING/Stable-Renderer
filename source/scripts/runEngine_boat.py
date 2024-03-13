@@ -9,8 +9,8 @@ from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
 from engine.runtime.components import CameraController
-from engine.static import Material, Mesh, Texture, DefaultTextureType, GLFW_Key, MouseButton
-from utils.path_utils import *
+from engine.static import Material, Mesh, Texture, DefaultTextureType, GLFW_Key
+from utils.path_utils import EXAMPLE_3D_MODEL_DIR
 
 
 if __name__ == '__main__':
@@ -80,20 +80,19 @@ if __name__ == '__main__':
 
     class Sample(Engine):
         def beforePrepare(self):
-            self.boatMesh = Mesh.Load(os.path.join(RESOURCES_DIR, 'boat', 'boat.obj'))
+
+            self.boatMesh = Mesh.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'boat', 'boat.obj'))
             self.boatMaterial = Material.Default_Opaque_Material()
 
-            boat_diffuse_tex = Texture.Load(os.path.join(RESOURCES_DIR, 'boat', 'boatColor.png'))
+            boat_diffuse_tex = Texture.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'boat', 'boatColor.png'))
             self.boatMaterial.addDefaultTexture(boat_diffuse_tex, DefaultTextureType.DiffuseTex)
-            
+            self.boatMaterial.addDefaultTexture(Texture.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'boat', 'boatNormal.png')), DefaultTextureType.NormalTex)
             self.boatMaterial.addDefaultTexture(Texture.CreateNoiseTex(), DefaultTextureType.NoiseTex)
-            # uncomment this line to enable normal map
-            # self.boatMaterial.addDefaultTexture(Texture.Load(os.path.join(RESOURCES_DIR, 'boat', 'boatNormal.png')), DefaultTextureType.NormalTex)
-
+            
             self.boat = GameObject('Boat', position=[0, 0, 0])
             self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, materials=self.boatMaterial)
-            #self.boat.addComponent(AutoRotation)
-            self.boat.addComponent(ControlBoat)
+            self.boat.addComponent(AutoRotation)
+            #self.boat.addComponent(ControlBoat)
             
             self.camera = GameObject('Camera', position=[4, 4, -3])
             self.camera.addComponent(Camera)
@@ -103,4 +102,4 @@ if __name__ == '__main__':
     Sample.Run(enableGammaCorrection=True,
                debug=False,
                winSize=(512, 512),
-               needOutputMaps=True,)
+               needOutputMaps=False,)

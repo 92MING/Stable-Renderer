@@ -19,7 +19,7 @@ from datetime import datetime
 from utils.image_utils import save_images_as_gif
 from utils.global_utils import GetEnv
 from utils.debug_utils import DefaultLogger
-from utils.path_utils import GIF_OUTPUT_DIR, MAP_OUTPUT_DIR, RESOURCES_DIR
+from utils.path_utils import GIF_OUTPUT_DIR, MAP_OUTPUT_DIR, RESOURCES_DIR, EXAMPLE_MAP_OUTPUT_DIR
 
 
 @dataclass
@@ -127,7 +127,7 @@ class RunPipeConfig:
     # endregion
     
     # region IO
-    frames_dir: Optional[str] = GetEnv('DEFAULT_FRAME_INPUT', os.path.join(RESOURCES_DIR, "example-map-outputs/boat"))    # type: ignore
+    frames_dir: Optional[str] = GetEnv('DEFAULT_FRAME_INPUT', os.path.join(EXAMPLE_MAP_OUTPUT_DIR, "boat"))    # type: ignore
     '''Path to the directory containing the frames. Default is `../resources/example-map-outputs/boat`.
     If set to None, will try to get the latest output from `MAP_OUTPUT_DIR`.'''
     save_gif: bool = GetEnv('SAVE_GIF', True, bool)  # type: ignore
