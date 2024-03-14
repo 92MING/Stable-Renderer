@@ -373,7 +373,10 @@ class Texture(ResourcesObj):
         self._tensor_copier = pycuda.driver.Memcpy2D()
         self._tensor_copier.set_src_array(array)
         self._tensor_copier.set_dst_device(self._tensor.data_ptr())
-        self._tensor_copier.width_in_bytes = self._tensor_copier.src_pitch = self._tensor_copier.dst_pitch = self.nbytes // self.height
+        
+        width_in_bytes = self.nbytes // self.height * int(self.cell_nbytes ** 0.5)
+        self._tensor_copier.width_in_bytes = width_in_bytes
+        self._tensor_copier.src_pitch = width_in_bytes
         self._tensor_copier.height = self.height
         mapping.unmap()
         

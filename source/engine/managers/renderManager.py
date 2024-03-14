@@ -350,14 +350,17 @@ class RenderManager(Manager):
         self._renderTasks._tempEvents.clear()
 
     def _getFBOTexToNumpy(self, tex: Texture, flipY=True) -> np.ndarray:
-        texID = tex.textureID
-        gl.glBindTexture(gl.GL_TEXTURE_2D, texID)
-        data = gl.glGetTexImage(gl.GL_TEXTURE_2D,
-                                0, 
-                                tex.format.value.gl_format, 
-                                tex.data_type.value.gl_data_type)
-        data = np.frombuffer(data, dtype=tex.data_type.value.numpy_dtype)
-        data = data.reshape((self.engine.WindowManager.WindowSize[1], self.engine.WindowManager.WindowSize[0], tex.channel_count))
+        if not tex.share_to_torch:
+            texID = tex.textureID
+            gl.glBindTexture(gl.GL_TEXTURE_2D, texID)
+            data = gl.glGetTexImage(gl.GL_TEXTURE_2D,
+                                    0, 
+                                    tex.format.value.gl_format, 
+                                    tex.data_type.value.gl_data_type)
+            data = np.frombuffer(data, dtype=tex.data_type.value.numpy_dtype)
+            data = data.reshape((self.engine.WindowManager.WindowSize[1], self.engine.WindowManager.WindowSize[0], tex.channel_count))
+        else:
+            data = tex.update_tensor().cpu().numpy()
         if flipY:
             data = data[::-1, :, :]  # flip array upside down
         return data
@@ -561,16 +564,16 @@ class RenderManager(Manager):
 
     def on_frame_run(self):
         # normal render
-        
         self.BindFrameBuffer(self._gBuffer)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT) # type: ignore
         self._execute_render_task()  # depth test will be enabled in this function
         
         colorData = self._getFBOTexToNumpy(self.colorFBOTex, flipY=True)    # color data must be output
-        #colorData = self.colorFBOTex.update_tensor().cpu().numpy()
         
         # output data to SD
+        
+        # output map data for debug
         if self.engine.DiffusionManager.ShouldOutputFrame:    
             idData = self._getFBOTexToNumpy(self.idFBOTex, flipY=True)
             posData = self._getFBOTexToNumpy(self.posFBOTex, flipY=True)
