@@ -10,7 +10,7 @@ from typing import ClassVar, Optional, Sequence, Literal, Any, Tuple
 from enum import Enum
 from collections import OrderedDict
 
-from comfyUI.stable_renderer.utils.decorators import classproperty
+from utils.decorators import classproperty
 from comfyUI.stable_renderer.utils.comfy_base_types import *
 from comfyUI.stable_renderer.utils.comfy_base_types import UIType
 
