@@ -6,6 +6,7 @@ import OpenGL.GL as gl
 import OpenGL.error
 import numpy as np
 import torch
+import pycuda
 import pycuda.gl
 import pycuda.driver
 import glm
@@ -97,20 +98,13 @@ class Texture(ResourcesObj):
         self._share_to_torch = share_to_torch
         self._cuda_resource_ptr: Optional[cudart.cudaGraphicsResource_t] = None
         self._tensor: Optional[Tensor] = None
+        self._support_gl_share_to_torch = True
         
     @property
     def textureID(self)->Optional[int]:
         '''The texture id for this texture in OpenGL. It could be None if the texture is not loaded.'''
         assert not self._cleared, 'This texture has been cleared.'
         return self._texID
-    
-    @property
-    def tensor(self)->Optional[Tensor]:
-        '''The tensor of the texture. It could be None if the texture is not shared to torch.'''
-        assert not self._cleared, 'This texture has been cleared.'
-        assert self._share_to_torch, 'This texture is not shared to torch.'
-        assert self._texID, 'This texture is not yet sent to GPU.'
-        return self._tensor
     
     @property
     def share_to_torch(self)->bool:
@@ -356,42 +350,78 @@ class Texture(ResourcesObj):
         self._height = image.height
         self._width = image.width
         image.close()
-        
+    
+    @property
+    def support_gl_share_to_torch(self):
+        '''Whether the hardware support copying data from OpenGL to pytorch tensor directly.'''
+        return self._support_gl_share_to_torch
+
     def _init_tensor(self):
-        if self._tensor is not None:    
-            return self._tensor
-        
-        self._tensor = torch.zeros((self.height, self.width, self.channel_count), 
-                             dtype=self.data_type.value.torch_dtype, 
-                             device=f"cuda:{self.engine.RenderManager.TargetDevice}")
-        
-        self._cuda_buffer = pycuda.gl.RegisteredImage(int(self.textureID), 
-                                                int(gl.GL_TEXTURE_2D), 
-                                                pycuda.gl.graphics_map_flags.NONE)
-        mapping = self._cuda_buffer.map()
-        array = mapping.array(0, 0)
-        self._tensor_copier = pycuda.driver.Memcpy2D()
-        self._tensor_copier.set_src_array(array)
-        self._tensor_copier.set_dst_device(self._tensor.data_ptr())
-        
-        width_in_bytes = self.nbytes // self.height * int(self.cell_nbytes ** 0.5)
-        self._tensor_copier.width_in_bytes = width_in_bytes
-        self._tensor_copier.src_pitch = width_in_bytes
-        self._tensor_copier.height = self.height
-        mapping.unmap()
-        
-    # from https://github.com/pytorch/pytorch/issues/107112
-    def update_tensor(self)->Tensor:
+        '''The tensor of the texture. It could be None if the texture is not shared to torch.'''
         assert not self._cleared, 'This texture has been cleared.'
         assert self._share_to_torch, 'This texture is not shared to torch.'
+        assert self._texID is not None, 'This texture is not yet sent to GPU.'
+        
+        if self._tensor is not None:    
+            pass
+        
+        self._tensor = torch.zeros((self.height, self.width, self.channel_count), 
+                                dtype=self.data_type.value.torch_dtype, 
+                                device=f"cuda:{self.engine.RenderManager.TargetDevice}")
+        try:
+            self._cuda_buffer = pycuda.gl.RegisteredImage(int(self.textureID), 
+                                                    int(gl.GL_TEXTURE_2D), 
+                                                    pycuda.gl.graphics_map_flags.NONE)
+        except pycuda._driver.Error:
+            print('Warning: failed to register image. The hardware does not support gl share to torch. Data will be copied from CPU on each frame.')
+            self._support_gl_share_to_torch = False
+        
+        if self.support_gl_share_to_torch:
+            mapping = self._cuda_buffer.map()
+            array = mapping.array(0, 0)
+            self._tensor_copier = pycuda.driver.Memcpy2D()  # type: ignore
+            self._tensor_copier.set_src_array(array)
+            self._tensor_copier.set_dst_device(self._tensor.data_ptr())
+            self._tensor_copier.width_in_bytes = self._tensor_copier.src_pitch = self._tensor_copier.dst_pitch = self.nbytes // self.height
+            self._tensor_copier.height = self.height
+            mapping.unmap()
+    
+    def numpy_data(self, flipY: bool=False)->np.ndarray:
+        '''copy the data of this texture from OpenGL, and return as a numpy array'''
+        self.bind()
+        data = gl.glGetTexImage(gl.GL_TEXTURE_2D, 0, self.format.value.gl_format, self.data_type.value.gl_data_type)
+        data = np.frombuffer(data, dtype=self.data_type.value.numpy_dtype)
+        data = data.reshape((self.height, self.width, self.channel_count))
+        if flipY:
+            data = data[::-1, :, :]  # flip array upside down
+        return data
+    
+    # from https://github.com/pytorch/pytorch/issues/107112
+    def tensor(self, update:bool=True)->Tensor:
+        '''
+        Return the data of this texture in tensor.
+        
+        Note: If the hardware doesn't support register gl texture in cuda(so we cannot copy data from GPU to GPU directly), 
+              this method will firstly get the data from GPU to CPU, and then copy it to GPU(which means it will be slow).
+              
+        Args:
+            - update: If true, the tensor will be updated from GPU. If false, the tensor will be returned directly if it has been updated.
+        '''
+        assert not self._cleared, 'This texture has been cleared.'
         assert self._texID, 'This texture is not yet sent to GPU.'
         
-        mapping = self._cuda_buffer.map()
-        self._tensor_copier(aligned=False)
-        torch.cuda.synchronize()
-        mapping.unmap()
+        if not update and self._tensor is not None:
+            return self._tensor
         
-        return self._tensor
+        if self._share_to_torch and self.support_gl_share_to_torch:
+            mapping = self._cuda_buffer.map()
+            self._tensor_copier(aligned=False)  # this will update self._tensor
+            torch.cuda.synchronize()
+            mapping.unmap()
+        else:
+            numpy_data = self.numpy_data()
+            self._tensor = torch.from_numpy(numpy_data).to(f"cuda:{self.engine.RenderManager.TargetDevice}")
+        return self._tensor # type: ignore
     
     def sendToGPU(self):
         '''

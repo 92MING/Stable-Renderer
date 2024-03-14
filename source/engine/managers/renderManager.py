@@ -7,7 +7,7 @@ import pycuda.driver as cuda_driver
 
 from functools import partial
 from typing import Union, Optional, Callable
-from utils.cuda_utils import get_cuda_gl_devices
+from utils.cuda_utils import *
 from utils.data_struct.event import AutoSortTask
 from .manager import Manager
 from .runtimeManager import RuntimeManager
@@ -70,12 +70,8 @@ class RenderManager(Manager):
         self._deferRenderTasks = AutoSortTask()
         self._postProcessTasks = AutoSortTask()
         
-        current_cuda_devices = get_cuda_gl_devices()
         if not target_device:
-            target_device = current_cuda_devices[0]
-        else:
-            if target_device not in current_cuda_devices:
-                raise ValueError(f"Target device {target_device} is not in the current CUDA devices list: {current_cuda_devices}")
+            target_device = get_cuda_device()
         self._target_device = target_device
         self._init_cuda()
         self._init_opengl()
@@ -349,21 +345,6 @@ class RenderManager(Manager):
                 print(f"Render Task ({order}, {func}) Error. Msg: {e}. Skipped.")
         self._renderTasks._tempEvents.clear()
 
-    def _getFBOTexToNumpy(self, tex: Texture, flipY=True) -> np.ndarray:
-        if not tex.share_to_torch:
-            texID = tex.textureID
-            gl.glBindTexture(gl.GL_TEXTURE_2D, texID)
-            data = gl.glGetTexImage(gl.GL_TEXTURE_2D,
-                                    0, 
-                                    tex.format.value.gl_format, 
-                                    tex.data_type.value.gl_data_type)
-            data = np.frombuffer(data, dtype=tex.data_type.value.numpy_dtype)
-            data = data.reshape((self.engine.WindowManager.WindowSize[1], self.engine.WindowManager.WindowSize[0], tex.channel_count))
-        else:
-            data = tex.update_tensor().cpu().numpy()
-        if flipY:
-            data = data[::-1, :, :]  # flip array upside down
-        return data
     # endregion
 
     # region opengl
@@ -569,19 +550,22 @@ class RenderManager(Manager):
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT) # type: ignore
         self._execute_render_task()  # depth test will be enabled in this function
         
-        colorData = self._getFBOTexToNumpy(self.colorFBOTex, flipY=True)    # color data must be output
+        colorData = self.colorFBOTex.numpy_data(flipY=True)
+        #colorData = self.colorFBOTex.update_tensor().cpu().numpy()
         
         # output data to SD
         
         # output map data for debug
         if self.engine.DiffusionManager.ShouldOutputFrame:    
-            idData = self._getFBOTexToNumpy(self.idFBOTex, flipY=True)
-            posData = self._getFBOTexToNumpy(self.posFBOTex, flipY=True)
-            normal_and_depth_data = self._getFBOTexToNumpy(self.normal_and_depth_FBOTex, flipY=True)
+            idData = self.idFBOTex.numpy_data(flipY=True)
+            posData = self.posFBOTex.numpy_data(True)
+            
+            normal_and_depth_data = self.normal_and_depth_FBOTex.numpy_data(flipY=True)
             # depth data is in the alpha channel of `normal_and_depth_data`
+            
             normalData = normal_and_depth_data[:, :, :3]
             depthData = normal_and_depth_data[:, :, 3]
-            noiseData = self._getFBOTexToNumpy(self.noiseFBOTex, flipY=True)
+            noiseData = self.noiseFBOTex.numpy_data(flipY=True)
             
             diffuseManager = self.engine.DiffusionManager
             diffuseManager.OutputMap('color', colorData)

@@ -6,32 +6,7 @@ import multiprocessing
 from .manager import Manager
 from utils.path_utils import *
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from PIL import Image
-
-
-@dataclass
-class FrameData:
-    '''
-    Map data of 1 single frame.
-    Note that img data is upside down since OpenGL is bottom-left origin while OpenCV is top-left origin.
-    '''
-    frameIndex: int
-    idData: np.ndarray
-    colorData: np.ndarray
-    posData: np.ndarray
-    normalData: np.ndarray
-    depthData: np.ndarray
-
-    def getPixelData(self, x, y):
-        y = self.colorData.shape[0] - y - 1
-        return {
-            'id': self.idData[y, x], # [objID, xCoord, yCoord]
-            'color': self.colorData[y, x], # [r, g, b]
-            'pos': self.posData[y, x], # [x, y, z]
-            'normal': self.normalData[y, x], # [x, y, z]
-            'depth': self.depthData[y, x], # [z]
-        }
 
 
 class DiffusionManager(Manager):
@@ -58,6 +33,20 @@ class DiffusionManager(Manager):
             threadPoolSize = multiprocessing.cpu_count()
         self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize) # for saving maps asynchronously
         self._outputPath = get_new_map_output_dir(create_if_not_exists=False)
+
+        self._init_comfyUI()
+    
+    # region comfyUI
+    def _init_comfyUI(self):
+        from comfyUI.main import execute_prestartup_script
+        execute_prestartup_script()
+        
+        if self.engine.RunningMode == 'game':   # game mode will not start web server
+            from comfyUI.execution import PromptExecutor
+        else:
+            raise NotImplementedError
+    
+    # endregion
     
     # region properties
     @property

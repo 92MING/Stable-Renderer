@@ -4,7 +4,6 @@
 import torch
 import numpy as np
 import OpenGL.GL as gl
-import cupy
 
 from typing import Optional
 from enum import Enum

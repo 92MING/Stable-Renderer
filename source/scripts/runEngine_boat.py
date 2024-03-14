@@ -1,3 +1,6 @@
+import torch
+torch.cuda.current_device()
+
 import os, sys
 source_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(source_dir)
