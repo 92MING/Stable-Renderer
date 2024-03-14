@@ -99,7 +99,7 @@ _register_gl_image_map = {
 
 @_cuda_func_wrapper
 def cuda_register_gl_image(image: Union[int, 'Texture'],
-                           target: Union[Literal['texture2D', 'textureCube', 'texture2DArray'], GLConst], 
+                           target: Union[Literal['texture2D', 'textureCube', 'texture2DArray'], GLConst] = 'texture2D',
                            flags:  Union[int, GLRegisterFlag, Sequence[GLRegisterFlag]] = GLRegisterFlag.NONE,
                            )->Tuple[CudaErrType, cudart.cudaGraphicsResource_t]:
     '''return the pointer to the resource'''

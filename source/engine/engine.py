@@ -5,7 +5,7 @@ import OpenGL.GLU as glu
 
 from colorama import Fore, Style
 from enum import Enum
-from typing import Optional
+from typing import Optional, Literal
 
 from utils.global_utils import *
 from utils.decorators import class_or_ins_property, prevent_re_init 
@@ -84,12 +84,14 @@ class Engine:
                  maxFrameCacheCount=24,
                  mapSavingInterval=12,
                  threadPoolSize=6,
-                 target_device: Optional[int]=None,):
+                 target_device: Optional[int]=None,
+                 running_mode: Literal['game', 'editor']='game'):
 
         self.AcceptedPrint('Engine is initializing...')
         self._UBO_Binding_Points = {}
         self._debug = debug
         self._scene = scene
+        self._running_mode: Literal['game', 'editor'] = running_mode.lower()
         if winTitle is not None:
             title = winTitle
         elif self._scene is not None:
@@ -120,6 +122,11 @@ class Engine:
         # endregion
         
         self._stage = EngineStage.NOT_YET_START
+        
+    @property
+    def RunningMode(self)->Literal['game', 'editor']:
+        '''Running mode of the engine. It can be 'game' or 'editor'. Default is 'game'.'''
+        return self._running_mode
 
     @property
     def Stage(self)->EngineStage:

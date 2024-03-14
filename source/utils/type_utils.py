@@ -8,7 +8,7 @@ from typing import (Any, Sequence, Union, ForwardRef, get_args as tp_get_args, g
                     Iterable, Mapping, Literal, TypeAlias, Tuple, _SpecialForm, Type)
 from types import UnionType
 from inspect import getmro, signature
-from typeguard import check_type as tg_check_type
+from typeguard import check_type as tg_check_type, TypeCheckError
 from functools import cache
 from pathlib import Path
 from .path_utils import SOURCE_DIR
@@ -103,15 +103,15 @@ def valueTypeCheck(value:Any, types: Union[str, TypeAlias, Sequence[Union[TypeAl
                         and all(valueTypeCheck(k, get_args(types)[0]) for k in value.keys()))
             else:
                 try:
-                    tg_check_type('', value, types)
+                    tg_check_type(value, types)
                     return True
-                except TypeError:
+                except (TypeError, TypeCheckError):
                     return False
         else:
             try:
-                tg_check_type('', value, types)
+                tg_check_type(value, types)
                 return True
-            except TypeError:
+            except (TypeError, TypeCheckError):
                 return False
 
 @cache  
