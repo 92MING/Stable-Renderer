@@ -4,6 +4,7 @@
 from .cross_module_class import CrossModuleClassMeta
 from functools import partial
 from types import FunctionType
+
 class SingletonMeta(CrossModuleClassMeta):
     def __init__(cls, *args, **kwargs):
         super().__init__(*args, **kwargs)

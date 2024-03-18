@@ -122,7 +122,7 @@ def singleton(cross_module_singleton: bool=True)->Callable[[ClsT], ClsT]:   # ty
     This is helpful when the import relationship is complex.
     '''
 
-_singleton_cls_dict = GetOrCreateGlobalValue('__singleton_cls_dict__', dict)
+_cross_module_cls_dict = GetOrCreateGlobalValue('__CROSS_MODULE_CLASS_DICT__', dict)
 
 def _singleton(cls: ClsT, cross_module_singleton:bool=False)->ClsT:
     '''
@@ -132,8 +132,8 @@ def _singleton(cls: ClsT, cross_module_singleton:bool=False)->ClsT:
     '''
     if cross_module_singleton:
         cls_name = cls.__qualname__
-        if cls_name in _singleton_cls_dict:
-            return _singleton_cls_dict[cls_name]()
+        if cls_name in _cross_module_cls_dict:
+            return _cross_module_cls_dict[cls_name].__instance__
     
     origin_new = cls.__new__
     def new_new(this_cls, *args, **kwargs):
@@ -146,14 +146,14 @@ def _singleton(cls: ClsT, cross_module_singleton:bool=False)->ClsT:
     
     origin_init = cls.__init__
     def new_init(self, *args, **kwargs):
-        if hasattr(self, '__instance__') and getattr(self, '__instance__') is not None:
+        if hasattr(self.__class__, '__instance__') and getattr(self.__class__, '__instance__') is not None:
             return  # do nothing
-        setattr(self, '__instance__', self)
+        setattr(self.__class__, '__instance__', self)
         origin_init(self, *args, **kwargs)
     cls.__init__ = new_init
     
     if cross_module_singleton:
-        _singleton_cls_dict[cls_name] = cls
+        _cross_module_cls_dict[cls_name] = cls
     
     return cls
 
