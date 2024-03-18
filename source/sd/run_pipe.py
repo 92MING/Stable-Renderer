@@ -271,6 +271,14 @@ def run_pipe(config: RunPipeConfig = None):
 
     # 2. Load pipeline
     if config.specific_timesteps:
+        if config.use_lcm_lora is False:
+            raise ValueError(
+                "specific_timesteps is provided but use_lcm_lora is False. Please enable use_lcm_lora in config."
+            )
+        if config.num_inference_steps > 0:
+            DefaultLogger.warning(
+                "Both specific_timesteps and num_inference_steps are provided. num_inference_steps will be ignored."
+            )
         config.num_inference_steps = len(config.specific_timesteps)
     
     pipe: StableRendererPipeline = load_pipe(

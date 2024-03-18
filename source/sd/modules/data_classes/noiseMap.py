@@ -10,6 +10,5 @@ class NoiseMap:
                  correspondence_map: 'CorrespondenceMap'):
         self.correspondence_map = correspondence_map
         self._noise_map = dict()
-        for 
+        pass
     
-    def generate
