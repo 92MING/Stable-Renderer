@@ -5,7 +5,7 @@ from typing import Literal
 import OpenGL.GL as gl
 import glm
 
-from utils.global_utils import GetGlobalValue, HasGlobalValue, GetOrAddGlobalValue
+from common_utils.global_utils import GetGlobalValue, HasGlobalValue, GetOrAddGlobalValue
 from ...component import Component, ComponentMeta
 
 _LightSubTypes = GetOrAddGlobalValue('_LightSubTypes', {}) # class name -> class

@@ -5,19 +5,46 @@ import threading
 import heapq
 import traceback
 import inspect
-from typing import List, Literal, NamedTuple, Optional
-
 import torch
+import uuid
+
+from typing import (List, Literal, NamedTuple, Optional, TYPE_CHECKING, Tuple,
+                    Set, Dict, Union, Any, Type)
+
 import nodes
-
 import comfy.model_management
+from common_utils.decorators import singleton
+from comfyUI.types import *
 
-def get_input_data(inputs, class_def, unique_id, outputs={}, prompt={}, extra_data={}):
+if TYPE_CHECKING:
+    from comfyUI.server import PromptServer
+
+
+def _get_input_data(inputs: NodeInputs, 
+                    class_def: Type[ComfyUINode], 
+                    unique_id: str, 
+                    outputs={}, 
+                    prompt={}, 
+                    extra_data={}):
+    '''
+    Pack inputs form value/nodes into a dict for the node to use.
+    
+    Args:
+        - inputs: it can be:
+            * [from_node_id, from_node_output_slot_index]
+            * a value
+        - class_def: the class of the node
+        - unique_id: the id of this node
+        
+    '''
     valid_inputs = class_def.INPUT_TYPES()
+    lazy_inputs = class_def.LAZY_INPUTS if hasattr(class_def, "LAZY_INPUTS") else []
+    
     input_data_all = {}
     for x in inputs:
         input_data = inputs[x]
-        if isinstance(input_data, list):
+        
+        if isinstance(input_data, list):    # [from_node_id, from_node_output_slot_index]
             input_unique_id = input_data[0]
             output_index = input_data[1]
             if input_unique_id not in outputs:
@@ -25,7 +52,8 @@ def get_input_data(inputs, class_def, unique_id, outputs={}, prompt={}, extra_da
                 continue
             obj = outputs[input_unique_id][output_index]
             input_data_all[x] = obj
-        else:
+            
+        else:   # a value
             if ("required" in valid_inputs and x in valid_inputs["required"]) or ("optional" in valid_inputs and x in valid_inputs["optional"]):
                 input_data_all[x] = [input_data]
 
@@ -41,17 +69,20 @@ def get_input_data(inputs, class_def, unique_id, outputs={}, prompt={}, extra_da
                 input_data_all[x] = [unique_id]
     return input_data_all
 
-def map_node_over_list(obj, input_data_all, func, allow_interrupt=False):
+def _map_node_over_list(node: Union[ComfyUINode, Type[ComfyUINode]], 
+                       input_data_all, 
+                       func: str,   # the target function name of the node
+                       allow_interrupt=False):
     # check if node wants the lists
     input_is_list = False
-    if hasattr(obj, "INPUT_IS_LIST"):
-        input_is_list = obj.INPUT_IS_LIST
+    if hasattr(node, "INPUT_IS_LIST"):
+        input_is_list = node.INPUT_IS_LIST
 
     if len(input_data_all) == 0:
         max_len_input = 0
     else:
         max_len_input = max([len(x) for x in input_data_all.values()])
-     
+    
     # get a slice of inputs, repeat last input when list isn't long enough
     def slice_dict(d, i):
         d_new = dict()
@@ -63,53 +94,19 @@ def map_node_over_list(obj, input_data_all, func, allow_interrupt=False):
     if input_is_list:
         if allow_interrupt:
             nodes.before_node_execution()
-        results.append(getattr(obj, func)(**input_data_all))
+        results.append(getattr(node, func)(**input_data_all))
     elif max_len_input == 0:
         if allow_interrupt:
             nodes.before_node_execution()
-        results.append(getattr(obj, func)())
+        results.append(getattr(node, func)())
     else:
         for i in range(max_len_input):
             if allow_interrupt:
                 nodes.before_node_execution()
-            results.append(getattr(obj, func)(**slice_dict(input_data_all, i)))
+            results.append(getattr(node, func)(**slice_dict(input_data_all, i)))
     return results
 
-def get_output_data(obj, input_data_all):
-    
-    results = []
-    uis = []
-    return_values = map_node_over_list(obj, input_data_all, obj.FUNCTION, allow_interrupt=True)
-
-    for r in return_values:
-        if isinstance(r, dict):
-            if 'ui' in r:
-                uis.append(r['ui'])
-            if 'result' in r:
-                results.append(r['result'])
-        else:
-            results.append(r)
-    
-    output = []
-    if len(results) > 0:
-        # check which outputs need concatenating
-        output_is_list = [False] * len(results[0])
-        if hasattr(obj, "OUTPUT_IS_LIST"):
-            output_is_list = obj.OUTPUT_IS_LIST
-
-        # merge node execution results
-        for i, is_list in zip(range(len(results[0])), output_is_list):
-            if is_list:
-                output.append([x for o in results for x in o[i]])
-            else:
-                output.append([o[i] for o in results])
-
-    ui = dict()    
-    if len(uis) > 0:
-        ui = {k: [y for x in uis for y in x[k]] for k in uis[0].keys()}
-    return output, ui
-
-def format_value(x):
+def _format_value(x):
     if x is None:
         return None
     elif isinstance(x, (int, float, bool, str)):
@@ -117,175 +114,272 @@ def format_value(x):
     else:
         return str(x)
 
-def recursive_execute(server, prompt, outputs, current_item, extra_data, executed, prompt_id, outputs_ui, object_storage):
-    unique_id = current_item
-    inputs = prompt[unique_id]['inputs']
-    class_type = prompt[unique_id]['class_type']
-    class_def = nodes.NODE_CLASS_MAPPINGS[class_type]
-    if unique_id in outputs:
-        return (True, None, None)
 
-    for x in inputs:
-        input_data = inputs[x]
-
-        if isinstance(input_data, list):
-            input_unique_id = input_data[0]
-            output_index = input_data[1]
-            if input_unique_id not in outputs:
-                result = recursive_execute(server, prompt, outputs, input_unique_id, extra_data, executed, prompt_id, outputs_ui, object_storage)
-                if result[0] is not True:
-                    # Another node failed further upstream
-                    return result
-
-    input_data_all = None
-    try:
-        input_data_all = get_input_data(inputs, class_def, unique_id, outputs, prompt, extra_data)
-        if server.client_id is not None:
-            server.last_node_id = unique_id
-            server.send_sync("executing", { "node": unique_id, "prompt_id": prompt_id }, server.client_id)
-
-        obj = object_storage.get((unique_id, class_type), None)
-        if obj is None:
-            obj = class_def()
-            object_storage[(unique_id, class_type)] = obj
-
-        output_data, output_ui = get_output_data(obj, input_data_all)
-        outputs[unique_id] = output_data
-        if len(output_ui) > 0:
-            outputs_ui[unique_id] = output_ui
-            if server.client_id is not None:
-                server.send_sync("executed", { "node": unique_id, "output": output_ui, "prompt_id": prompt_id }, server.client_id)
-    except comfy.model_management.InterruptProcessingException as iex:
-        logging.info("Processing interrupted")
-
-        # skip formatting inputs/outputs
-        error_details = {
-            "node_id": unique_id,
-        }
-
-        return (False, error_details, iex)
-    except Exception as ex:
-        typ, _, tb = sys.exc_info()
-        exception_type = full_type_name(typ)
-        input_data_formatted = {}
-        if input_data_all is not None:
-            input_data_formatted = {}
-            for name, inputs in input_data_all.items():
-                input_data_formatted[name] = [format_value(x) for x in inputs]
-
-        output_data_formatted = {}
-        for node_id, node_outputs in outputs.items():
-            output_data_formatted[node_id] = [[format_value(x) for x in l] for l in node_outputs]
-
-        logging.error("!!! Exception during processing !!!")
-        logging.error(traceback.format_exc())
-
-        error_details = {
-            "node_id": unique_id,
-            "exception_message": str(ex),
-            "exception_type": exception_type,
-            "traceback": traceback.format_tb(tb),
-            "current_inputs": input_data_formatted,
-            "current_outputs": output_data_formatted
-        }
-        return (False, error_details, ex)
-
-    executed.add(unique_id)
-
-    return (True, None, None)
-
-def recursive_will_execute(prompt, outputs, current_item, memo={}):
-    unique_id = current_item
-
-    if unique_id in memo:
-        return memo[unique_id]
-
-    inputs = prompt[unique_id]['inputs']
-    will_execute = []
-    if unique_id in outputs:
-        return []
-
-    for x in inputs:
-        input_data = inputs[x]
-        if isinstance(input_data, list):
-            input_unique_id = input_data[0]
-            output_index = input_data[1]
-            if input_unique_id not in outputs:
-                will_execute += recursive_will_execute(prompt, outputs, input_unique_id, memo)
-
-    memo[unique_id] = will_execute + [unique_id]
-    return memo[unique_id]
-
-def recursive_output_delete_if_changed(prompt, old_prompt, outputs, current_item):
-    unique_id = current_item
-    inputs = prompt[unique_id]['inputs']
-    class_type = prompt[unique_id]['class_type']
-    class_def = nodes.NODE_CLASS_MAPPINGS[class_type]
-
-    is_changed_old = ''
-    is_changed = ''
-    to_delete = False
-    if hasattr(class_def, 'IS_CHANGED'):
-        if unique_id in old_prompt and 'is_changed' in old_prompt[unique_id]:
-            is_changed_old = old_prompt[unique_id]['is_changed']
-        if 'is_changed' not in prompt[unique_id]:
-            input_data_all = get_input_data(inputs, class_def, unique_id, outputs)
-            if input_data_all is not None:
-                try:
-                    #is_changed = class_def.IS_CHANGED(**input_data_all)
-                    is_changed = map_node_over_list(class_def, input_data_all, "IS_CHANGED")
-                    prompt[unique_id]['is_changed'] = is_changed
-                except:
-                    to_delete = True
-        else:
-            is_changed = prompt[unique_id]['is_changed']
-
-    if unique_id not in outputs:
-        return True
-
-    if not to_delete:
-        if is_changed != is_changed_old:
-            to_delete = True
-        elif unique_id not in old_prompt:
-            to_delete = True
-        elif inputs == old_prompt[unique_id]['inputs']:
-            for x in inputs:
-                input_data = inputs[x]
-
-                if isinstance(input_data, list):
-                    input_unique_id = input_data[0]
-                    output_index = input_data[1]
-                    if input_unique_id in outputs:
-                        to_delete = recursive_output_delete_if_changed(prompt, old_prompt, outputs, input_unique_id)
-                    else:
-                        to_delete = True
-                    if to_delete:
-                        break
-        else:
-            to_delete = True
-
-    if to_delete:
-        d = outputs.pop(unique_id)
-        del d
-    return to_delete
-
+@singleton(cross_module_singleton=True)
 class PromptExecutor:
-    def __init__(self, server):
+    
+    server: Optional['PromptServer']
+    '''The server that this executor is associated with. If None, the executor'''
+    node_pool: NodePool
+    '''
+    Pool of all created nodes
+    {node_id: node_instance, ...}
+    '''
+    old_prompt: Prompt
+    '''old prompt'''
+    outputs_ui: NodeOutputs_UI
+    '''outputs for UI'''
+    outputs: NodeOutputs
+    '''outputs for the prompt'''
+    status_messages: StatusMsg
+    '''status messages'''
+    success: bool
+    '''whether the execution is successful or not'''
+    
+    def __init__(self, server: Optional['PromptServer']=None):
         self.server = server
         self.reset()
 
-    def reset(self):
-        self.outputs = {}
-        self.object_storage = {}
-        self.outputs_ui = {}
-        self.status_messages = []
-        self.success = True
-        self.old_prompt = {}
+    def _get_output_data(self, node: ComfyUINode, input_data_all)->Tuple[List[Any], Dict[str, Any]]:
+        '''
+        Get the output data of the given node.
+        
+        Return:
+            - outputs (list of list of values, e.g. [[val1, val2], [val3, val4], ...])
+            - ui values (values to be shown on UI, e.g. {key: [val1, val2, ...], ...})
+        '''
+        results = []
+        uis = {}
+        return_values = _map_node_over_list(node, 
+                                            input_data_all, 
+                                            node.FUNCTION, 
+                                            allow_interrupt=True)
 
-    def add_message(self, event, data, broadcast: bool):
+        for r in return_values:
+            if isinstance(r, dict):
+                if 'ui' in r:
+                    uis.update(r['ui'])
+                if 'result' in r:
+                    results.append(r['result'])
+            else:
+                results.append(r)
+        
+        output = []
+        if len(results) > 0:
+            # check which outputs need concatenating
+            if hasattr(node, "OUTPUT_IS_LIST"):
+                output_is_list = node.OUTPUT_IS_LIST
+            else:
+                output_is_list = [False] * len(results[0])
+
+            # merge node execution results
+            for i, is_list in zip(range(len(results[0])), output_is_list):
+                if is_list:
+                    output.append([x for o in results for x in o[i]])
+                else:
+                    output.append([o[i] for o in results])
+
+        return output, uis
+
+    def _recursive_will_execute(self, prompt: Prompt, current_node_id, memo={}):
+        outputs = self.outputs
+        unique_id = current_node_id
+
+        if unique_id in memo:
+            return memo[unique_id]
+
+        inputs = prompt[unique_id]['inputs']
+        will_execute = []
+        if unique_id in outputs:
+            return []
+
+        for x in inputs:
+            input_data = inputs[x]
+            if isinstance(input_data, list):
+                input_unique_id = input_data[0]
+                output_index = input_data[1]
+                if input_unique_id not in outputs:
+                    will_execute += self._recursive_will_execute(prompt, input_unique_id, memo)
+
+        memo[unique_id] = will_execute + [unique_id]
+        return memo[unique_id]
+        
+    def _recursive_execute(self,
+                        prompt: Prompt, 
+                        current_node_id: str, 
+                        extra_data, 
+                        executed: Set[str],   # set of node ids that have been executed 
+                        prompt_id: str,   # just a random string by uuid4
+                        ):
+        unique_id = current_node_id
+        inputs = prompt[unique_id]['inputs']
+        class_type = prompt[unique_id]['class_type']
+        class_def = nodes.NODE_CLASS_MAPPINGS[class_type]
+        
+        if unique_id in self.outputs:
+            return (True, None, None)
+        
+        for x in inputs:
+            input_data = inputs[x]
+
+            if isinstance(input_data, list):
+                input_unique_id = input_data[0]
+                output_index = input_data[1]
+                if input_unique_id not in self.outputs:
+                    result = self._recursive_execute(prompt, 
+                                                    input_unique_id, 
+                                                    extra_data, 
+                                                    executed,
+                                                    prompt_id)
+                    if result[0] is not True:
+                        # Another node failed further upstream
+                        return result
+
+        input_data_all = None
+        try:
+            input_data_all = _get_input_data(inputs,
+                                            class_def, 
+                                            unique_id,
+                                            self.outputs, 
+                                            prompt, 
+                                            extra_data)
+            if self.server:
+                if self.server.client_id is not None:
+                    self.server.last_node_id = unique_id
+                    self.server.send_sync("executing",
+                                        { "node": unique_id, "prompt_id": prompt_id }, 
+                                        self.server.client_id)
+
+            node = self.get_node(unique_id, class_type)
+
+            output_data, output_ui = self._get_output_data(node, input_data_all)
+            self.outputs[unique_id] = output_data
+            if len(output_ui) > 0:
+                self.outputs_ui[unique_id] = output_ui
+                if self.server:
+                    if self.server.client_id is not None:
+                        self.server.send_sync("executed", 
+                                            { "node": unique_id, "output": output_ui, "prompt_id": prompt_id }, 
+                                            self.server.client_id)
+        
+        except comfy.model_management.InterruptProcessingException as iex:
+            logging.info("Processing interrupted")
+
+            # skip formatting inputs/outputs
+            error_details = {
+                "node_id": unique_id,
+            }
+
+            return (False, error_details, iex)
+        except Exception as ex:
+            typ, _, tb = sys.exc_info()
+            exception_type = _get_full_type_name(typ)
+            input_data_formatted = {}
+            if input_data_all is not None:
+                input_data_formatted = {}
+                for name, inputs in input_data_all.items():
+                    input_data_formatted[name] = [_format_value(x) for x in inputs]
+
+            output_data_formatted = {}
+            for node_id, node_outputs in self.outputs.items():
+                output_data_formatted[node_id] = [[_format_value(x) for x in l] for l in node_outputs]
+
+            logging.error("!!! Exception during processing !!!")
+            logging.error(traceback.format_exc())
+
+            error_details = {
+                "node_id": unique_id,
+                "exception_message": str(ex),
+                "exception_type": exception_type,
+                "traceback": traceback.format_tb(tb),
+                "current_inputs": input_data_formatted,
+                "current_outputs": output_data_formatted
+            }
+            return (False, error_details, ex)
+
+        executed.add(unique_id)
+
+        return (True, None, None)
+
+    def _recursive_output_delete_if_changed(self, 
+                                            prompt: Prompt, 
+                                            current_node_id: str):
+        old_prompt = self.old_prompt
+        outputs = self.outputs
+        unique_id = current_node_id
+        inputs = prompt[unique_id]['inputs']
+        class_type = prompt[unique_id]['class_type']
+        class_def = nodes.NODE_CLASS_MAPPINGS[class_type]
+
+        is_changed_old = ''
+        is_changed = ''
+        to_delete = False
+        if hasattr(class_def, 'IS_CHANGED'):
+            if unique_id in old_prompt and 'is_changed' in old_prompt[unique_id]:
+                is_changed_old = old_prompt[unique_id]['is_changed']
+            if 'is_changed' not in prompt[unique_id]:
+                input_data_all = _get_input_data(inputs, class_def, unique_id, outputs)
+                if input_data_all is not None:
+                    try:
+                        #is_changed = class_def.IS_CHANGED(**input_data_all)
+                        is_changed = _map_node_over_list(class_def, input_data_all, "IS_CHANGED")
+                        prompt[unique_id]['is_changed'] = is_changed
+                    except:
+                        to_delete = True
+            else:
+                is_changed = prompt[unique_id]['is_changed']
+
+        if unique_id not in outputs:
+            return True
+
+        if not to_delete:
+            if is_changed != is_changed_old:
+                to_delete = True
+            elif unique_id not in old_prompt:
+                to_delete = True
+            elif inputs == old_prompt[unique_id]['inputs']:
+                for x in inputs:
+                    input_data = inputs[x]
+
+                    if isinstance(input_data, list):
+                        input_unique_id = input_data[0]
+                        output_index = input_data[1]
+                        if input_unique_id in outputs:
+                            to_delete = self._recursive_output_delete_if_changed(prompt, input_unique_id)
+                        else:
+                            to_delete = True
+                        if to_delete:
+                            break
+            else:
+                to_delete = True
+
+        if to_delete:
+            d = outputs.pop(unique_id)
+            del d
+        return to_delete
+
+
+    def reset(self):
+        self.node_pool = NodePool()
+        
+        self.outputs_ui = {}
+        self.outputs = {}
+        
+        self.status_messages = []
+        
+        self.success = True
+        
+        self.old_prompt = Prompt()
+        
+    def get_node(self, node_id:str, class_type_name: str)->ComfyUINode:
+        '''Return the target node from the pool, or create a new one if not found.'''
+        return self.node_pool.get_node(node_id, class_type_name)
+    
+    def add_message(self, event, data: dict, broadcast: bool):
         self.status_messages.append((event, data))
-        if self.server.client_id is not None or broadcast:
-            self.server.send_sync(event, data, self.server.client_id)
+        if self.server:
+            if self.server.client_id is not None or broadcast:
+                self.server.send_sync(event, data, self.server.client_id)
 
     def handle_execution_error(self, prompt_id, prompt, current_outputs, executed, error, ex):
         node_id = error["node_id"]
@@ -328,13 +422,21 @@ class PromptExecutor:
             d = self.outputs.pop(o)
             del d
 
-    def execute(self, prompt, prompt_id, extra_data={}, execute_outputs=[]):
+    def execute(self, 
+                prompt: Prompt, 
+                prompt_id: Optional[str]=None, # random string by uuid4 
+                extra_data={}, 
+                execute_outputs=[]):
+        if prompt_id is None:
+            prompt_id = str(uuid.uuid4())
+        
         nodes.interrupt_processing(False)
 
-        if "client_id" in extra_data:
-            self.server.client_id = extra_data["client_id"]
-        else:
-            self.server.client_id = None
+        if self.server:
+            if "client_id" in extra_data:
+                self.server.client_id = extra_data["client_id"]
+            else:
+                self.server.client_id = None
 
         self.status_messages = []
         self.add_message("execution_start", { "prompt_id": prompt_id}, broadcast=False)
@@ -349,7 +451,7 @@ class PromptExecutor:
                 d = self.outputs.pop(o)
                 del d
             to_delete = []
-            for o in self.object_storage:
+            for o in self.node_pool:
                 if o[0] not in prompt:
                     to_delete += [o]
                 else:
@@ -357,11 +459,11 @@ class PromptExecutor:
                     if o[1] != p['class_type']:
                         to_delete += [o]
             for o in to_delete:
-                d = self.object_storage.pop(o)
+                d = self.node_pool.pop(o)
                 del d
 
-            for x in prompt:
-                recursive_output_delete_if_changed(prompt, self.old_prompt, self.outputs, x)
+            for node_id in prompt:
+                self._recursive_output_delete_if_changed(prompt, node_id)
 
             current_outputs = set(self.outputs.keys())
             for x in list(self.outputs_ui.keys()):
@@ -370,9 +472,7 @@ class PromptExecutor:
                     del d
 
             comfy.model_management.cleanup_models()
-            self.add_message("execution_cached",
-                          { "nodes": list(current_outputs) , "prompt_id": prompt_id},
-                          broadcast=False)
+            self.add_message("execution_cached", { "nodes": list(current_outputs) , "prompt_id": prompt_id}, broadcast=False)
             executed = set()
             output_node_id = None
             to_execute = []
@@ -383,28 +483,27 @@ class PromptExecutor:
             while len(to_execute) > 0:
                 #always execute the output that depends on the least amount of unexecuted nodes first
                 memo = {}
-                to_execute = sorted(list(map(lambda a: (len(recursive_will_execute(prompt, self.outputs, a[-1], memo)), a[-1]), to_execute)))
+                to_execute = sorted(list(map(lambda a: (len(self._recursive_will_execute(prompt, a[-1], memo)), a[-1]), to_execute)))
                 output_node_id = to_execute.pop(0)[-1]
 
                 # This call shouldn't raise anything if there's an error deep in
                 # the actual SD code, instead it will report the node where the
                 # error was raised
-                self.success, error, ex = recursive_execute(self.server, 
-                                                            prompt, 
-                                                            self.outputs, 
-                                                            output_node_id, 
-                                                            extra_data, 
-                                                            executed, 
-                                                            prompt_id, 
-                                                            self.outputs_ui, 
-                                                            self.object_storage)
+                self.success, error, ex = self._recursive_execute(prompt,  
+                                                                output_node_id, 
+                                                                extra_data, 
+                                                                executed, 
+                                                                prompt_id,)
                 if self.success is not True:
                     self.handle_execution_error(prompt_id, prompt, current_outputs, executed, error, ex)
                     break
 
             for x in executed:
                 self.old_prompt[x] = copy.deepcopy(prompt[x])
-            self.server.last_node_id = None
+                
+            if self.server:
+                self.server.last_node_id = None
+            
             if comfy.model_management.DISABLE_SMART_MEMORY:
                 comfy.model_management.unload_all_models()
 
@@ -488,7 +587,7 @@ def validate_inputs(prompt, item, validated):
             except Exception as ex:
                 typ, _, tb = sys.exc_info()
                 valid = False
-                exception_type = full_type_name(typ)
+                exception_type = _get_full_type_name(typ)
                 reasons = [{
                     "type": "exception_during_inner_validation",
                     "message": "Exception when validating inner node",
@@ -586,14 +685,14 @@ def validate_inputs(prompt, item, validated):
                         continue
 
     if len(validate_function_inputs) > 0:
-        input_data_all = get_input_data(inputs, obj_class, unique_id)
+        input_data_all = _get_input_data(inputs, obj_class, unique_id)
         input_filtered = {}
         for x in input_data_all:
             if x in validate_function_inputs:
                 input_filtered[x] = input_data_all[x]
 
         #ret = obj_class.VALIDATE_INPUTS(**input_filtered)
-        ret = map_node_over_list(obj_class, input_filtered, "VALIDATE_INPUTS")
+        ret = _map_node_over_list(obj_class, input_filtered, "VALIDATE_INPUTS")
         for x in input_filtered:
             for i, r in enumerate(ret):
                 if r is not True:
@@ -622,13 +721,13 @@ def validate_inputs(prompt, item, validated):
     validated[unique_id] = ret
     return ret
 
-def full_type_name(klass):
+def _get_full_type_name(klass):
     module = klass.__module__
     if module == 'builtins':
         return klass.__qualname__
     return module + '.' + klass.__qualname__
 
-def validate_prompt(prompt):
+def validate_prompt(prompt: Prompt):
     outputs = set()
     for x in prompt:
         class_ = nodes.NODE_CLASS_MAPPINGS[prompt[x]['class_type']]
@@ -658,7 +757,7 @@ def validate_prompt(prompt):
         except Exception as ex:
             typ, _, tb = sys.exc_info()
             valid = False
-            exception_type = full_type_name(typ)
+            exception_type = _get_full_type_name(typ)
             reasons = [{
                 "type": "exception_during_validation",
                 "message": "Exception when validating node",
@@ -720,7 +819,7 @@ def validate_prompt(prompt):
 MAXIMUM_HISTORY_SIZE = 10000
 
 class PromptQueue:
-    def __init__(self, server):
+    def __init__(self, server: 'PromptServer'):
         self.server = server
         self.mutex = threading.RLock()
         self.not_empty = threading.Condition(self.mutex)
@@ -731,7 +830,7 @@ class PromptQueue:
         self.flags = {}
         server.prompt_queue = self
 
-    def put(self, item):
+    def put(self, item: QueueTask):
         with self.mutex:
             heapq.heappush(self.queue, item)
             self.server.queue_updated()
@@ -753,10 +852,12 @@ class PromptQueue:
     class ExecutionStatus(NamedTuple):
         status_str: Literal['success', 'error']
         completed: bool
-        messages: List[str]
+        messages: StatusMsg
 
-    def task_done(self, item_id, outputs,
-                  status: Optional['PromptQueue.ExecutionStatus']):
+    def task_done(self, 
+                  item_id, 
+                  outputs,
+                  status: Union['PromptQueue.ExecutionStatus', None]):
         with self.mutex:
             prompt = self.currently_running.pop(item_id)
             if len(self.history) > MAXIMUM_HISTORY_SIZE:
@@ -765,7 +866,7 @@ class PromptQueue:
             status_dict: Optional[dict] = None
             if status is not None:
                 status_dict = copy.deepcopy(status._asdict())
-
+                    
             self.history[prompt[1]] = {
                 "prompt": prompt,
                 "outputs": copy.deepcopy(outputs),

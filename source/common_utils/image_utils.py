@@ -1,14 +1,16 @@
 import os
+
 from datetime import datetime
 from PIL.Image import Image
-from typing import Sequence
+from typing import Sequence, Union
+from pathlib import Path
 
 from .debug_utils import DefaultLogger
 from .path_utils import GIF_OUTPUT_DIR
 
 def save_images_as_gif(images: Sequence[Image],
                        output_fname: str = 'output.gif', 
-                       gif_output_dir: str = GIF_OUTPUT_DIR,
+                       gif_output_dir: Union[str, Path] = GIF_OUTPUT_DIR,
                        add_time_to_name: bool = True):
     '''
     Saves a list of images as a gif file

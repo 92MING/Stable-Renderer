@@ -17,9 +17,10 @@
         VERSION: 0.4,
 
         CANVAS_GRID_SIZE: 10,
-
+        
         NODE_TITLE_HEIGHT: 30,
         NODE_TITLE_TEXT_Y: 20,
+        NODE_CIRCLE_DIAMETER: 8,
         NODE_SLOT_HEIGHT: 20,
         NODE_WIDGET_HEIGHT: 20,
         NODE_WIDTH: 140,
@@ -160,7 +161,7 @@
                 throw "Cannot register a simple object, it must be a class with a prototype";
             }
             base_class.type = type;
-
+            
             if (LiteGraph.debug) {
                 console.log("Node registered: " + type);
             }
@@ -622,8 +623,8 @@
          * @return {Boolean} true if they can be connected
          */
         isValidConnection: function(type_a, type_b) {
-			if (type_a=="" || type_a==="*") type_a = 0;
-			if (type_b=="" || type_b==="*") type_b = 0;
+			if (type_a=="" || type_a==="*" || type_a==="ANY") type_a = 0;
+			if (type_b=="" || type_b==="*" || type_b==="ANY") type_b = 0;
             if (
                 !type_a //generic output
                 || !type_b // generic input
@@ -2684,6 +2685,14 @@
 
     LGraphNode.prototype.getTitle = function() {
         return this.title || this.constructor.title;
+    };
+    
+    /**
+     * get the description string
+     * @method getDesc
+     */
+    LGraphNode.prototype.getDesc = function() {
+        return this.constructor.description || ""
     };
 
     /**
@@ -5639,7 +5648,7 @@ LGraphNode.prototype.executeAction = function(action)
 
 		LiteGraph.pointerListenerAdd(canvas,"down", this._mousedown_callback, true); //down do not need to store the binded
         canvas.addEventListener("mousewheel", this._mousewheel_callback, false);
-
+        
         LiteGraph.pointerListenerAdd(canvas,"up", this._mouseup_callback, true); // CHECK: ??? binded or not
 		LiteGraph.pointerListenerAdd(canvas,"move", this._mousemove_callback);
         
@@ -6447,6 +6456,39 @@ LGraphNode.prototype.executeAction = function(action)
 
                     if (node.onMouseEnter) {
                         node.onMouseEnter(e);
+                    }
+                }
+
+                // check hover on `?` button
+                var desc = node.getDesc?node.getDesc():null;
+                if (desc && !node.flags.collapsed) {
+                    var circleDia = LiteGraph.NODE_CIRCLE_DIAMETER;
+                    var title_height = LiteGraph.NODE_TITLE_HEIGHT;
+                    var circleX = node.pos[0] + node.size[0] - circleDia * 3; 
+                    var circleY = node.pos[1] - title_height + circleDia;
+                    if (e.canvasX > circleX && e.canvasX < circleX + circleDia*1.5 && e.canvasY > circleY && e.canvasY < circleY + circleDia*1.5) {
+                        // draw the description
+                        var html = "<div class='dialog-title'>" + node.getTitle() + "</div>";
+                        var desc_lines = desc.split("\n");
+                        for (var i = 0; i < desc_lines.length; i++) {
+                            if (desc_lines[i] == "") continue;
+                            if (desc_lines[i].trim() == ""){
+								html += "<div class='name'></div><div></div>";
+							} 
+							else{
+	                            html += "<div class='name'>" + desc_lines[i] + "</div>";
+	                        }
+						}
+                        html = "<div style='display: block'>" + html + "</div>";
+                        var dialog = this.createDialog(
+                            html, 
+                            {
+                                position: [e.clientX, e.clientY],
+                                width: 300,
+                            });
+                        dialog.addEventListener("mouseleave", function() {
+                            dialog.close();
+                        });
                     }
                 }
 
@@ -8523,7 +8565,7 @@ LGraphNode.prototype.executeAction = function(action)
             }
             ctx.clip();
         }
-
+        
         //draw shape
         if (node.has_errors) {
             bgcolor = "red";
@@ -8592,8 +8634,11 @@ LGraphNode.prototype.executeAction = function(action)
 
                     ctx.beginPath();
 
-					if (slot_type == "array"){
-                        slot_shape = LiteGraph.GRID_SHAPE; // place in addInput? addOutput instead?
+					if (slot_type.toLowerCase() == "array"){
+                        slot_shape = LiteGraph.GRID_SHAPE;
+                    }
+                    else if (slot_type.toLowerCase() == "image" || slot_type.toLowerCase() == "latent"){
+                        slot_shape = LiteGraph.BOX_SHAPE;
                     }
                     
                     var doStroke = true;
@@ -8643,7 +8688,11 @@ LGraphNode.prototype.executeAction = function(action)
 
                     //render name
                     if (render_text) {
-                        var text = slot.label != null ? slot.label : slot.name;
+                        var slot_name = slot.label!=null? slot.label: slot.name;
+						var type_name = slot.type;
+						if (type_name == "*") type_name = "ANY";
+						if (slot_name == type_name || slot_name == "*") slot_name = "";
+						var text = slot_name + "(" + type_name + ")";
                         if (text) {
                             ctx.fillStyle = LiteGraph.NODE_TEXT_COLOR;
                             if (horizontal || slot.dir == LiteGraph.UP) {
@@ -8691,8 +8740,11 @@ LGraphNode.prototype.executeAction = function(action)
                     ctx.beginPath();
                     //ctx.rect( node.size[0] - 14,i*14,10,10);
 
-					if (slot_type == "array"){
+					if (slot_type.toLowerCase() == "array"){
                         slot_shape = LiteGraph.GRID_SHAPE;
+                    }
+                    else if (slot_type.toLowerCase() == "image" || slot_type.toLowerCase() == "latent"){
+                        slot_shape = LiteGraph.BOX_SHAPE;
                     }
                     
                     var doStroke = true;
@@ -8750,7 +8802,11 @@ LGraphNode.prototype.executeAction = function(action)
 
                     //render output name
                     if (render_text) {
-                        var text = slot.label != null ? slot.label : slot.name;
+                        var slot_name = slot.label!=null? slot.label: slot.name;
+						var type_name = slot.type;
+						if (type_name == "*") type_name = "ANY";
+						if (slot_name == type_name || slot_name == "*") slot_name = "";
+						var text = slot_name + "(" + type_name + ")";
                         if (text) {
                             ctx.fillStyle = LiteGraph.NODE_TEXT_COLOR;
                             if (horizontal || slot.dir == LiteGraph.DOWN) {
@@ -9159,6 +9215,19 @@ LGraphNode.prototype.executeAction = function(action)
                             LiteGraph.NODE_TITLE_TEXT_Y - title_height
                         );
                     }
+                }
+
+                var description = node.getDesc ? node.getDesc() : node.description;
+                if (description && !node.flags.collapsed) {
+                    var circleDia = LiteGraph.NODE_CIRCLE_DIAMETER;
+                    var circleX =  node.size[0] - circleDia * 2; 
+                    var circleY = - title_height * 0.5;
+                    ctx.beginPath();
+                    ctx.arc(circleX, circleY, circleDia, 0, 2 * Math.PI);
+                    ctx.fillStyle = "gray";
+                    ctx.fill();
+                    ctx.fillStyle = "white";
+                    ctx.fillText("?", circleX - circleDia * 0.5, circleY + circleDia * 0.5);
                 }
             }
 
@@ -12128,7 +12197,7 @@ LGraphNode.prototype.executeAction = function(action)
     LGraphCanvas.prototype.createDialog = function(html, options) {
         var def_options = { checkForInput: false, closeOnLeave: true, closeOnLeave_checkModified: true };
         options = Object.assign(def_options, options || {});
-
+        
         var dialog = document.createElement("div");
         dialog.className = "graphdialog";
         dialog.innerHTML = html;
@@ -12156,6 +12225,12 @@ LGraphNode.prototype.executeAction = function(action)
 
         dialog.style.left = offsetx + "px";
         dialog.style.top = offsety + "px";
+        if (options.width) {
+            dialog.style.width = options.width + (options.width.constructor === Number ? "px" : "");
+        }
+        if (options.height) {
+            dialog.style.height = options.height + (options.height.constructor === Number ? "px" : "");
+        }
 
         this.canvas.parentNode.appendChild(dialog);
         

@@ -1,4 +1,4 @@
-from utils.global_utils import GetGlobalValue
+from common_utils.global_utils import GetGlobalValue
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from engine.engine import Engine

@@ -1,4 +1,4 @@
-from utils.global_utils import GetOrCreateGlobalValue, GetGlobalValue
+from common_utils.global_utils import GetOrCreateGlobalValue, GetGlobalValue
 from uuid import uuid4
 from typing import Dict, TYPE_CHECKING, TypeVar, Optional, Type, Union
 from pathlib import Path

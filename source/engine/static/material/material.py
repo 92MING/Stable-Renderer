@@ -6,8 +6,8 @@ from engine.static.shader import Shader, SupportedShaderValueTypes
 from typing import Union, get_args, Dict, Tuple, TypeVar, Type
 from enum import Enum
 from dataclasses import dataclass
-from utils.type_utils import valueTypeCheck
-from utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
+from common_utils.type_utils import valueTypeCheck
+from common_utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
 import glm
 
 T = TypeVar('T', bound='Material')

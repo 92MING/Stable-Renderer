@@ -15,8 +15,8 @@ from functools import partial
 from collections.abc import Callable
 from PyQt6.QtCore import QObject, pyqtSignal as Signal
 
-from utils.base_clses.cross_module_enum import CrossModuleEnum
-from utils.type_utils import valueTypeCheck, subClassCheck
+from common_utils.base_clses.cross_module_enum import CrossModuleEnum
+from common_utils.type_utils import valueTypeCheck, subClassCheck
 
 
 # region helper functions

@@ -11,6 +11,7 @@ rendered_frames/
 .vscode/
 .conda/
 venv/
+/logs/
 **.git/
 
 # files

@@ -7,8 +7,8 @@ import pycuda.driver as cuda_driver
 
 from functools import partial
 from typing import Union, Optional, Callable
-from utils.cuda_utils import *
-from utils.data_struct.event import AutoSortTask
+from common_utils.cuda_utils import *
+from common_utils.data_struct.event import AutoSortTask
 from .manager import Manager
 from .runtimeManager import RuntimeManager
 from ..static.shader import Shader
@@ -545,7 +545,6 @@ class RenderManager(Manager):
 
     def on_frame_run(self):
         # normal render
-        
         self.BindFrameBuffer(self._gBuffer)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT) # type: ignore
@@ -555,6 +554,8 @@ class RenderManager(Manager):
         #colorData = self.colorFBOTex.update_tensor().cpu().numpy()
         
         # output data to SD
+        
+        # output map data for debug
         if self.engine.DiffusionManager.ShouldOutputFrame:    
             idData = self.idFBOTex.numpy_data(flipY=True)
             posData = self.posFBOTex.numpy_data(True)

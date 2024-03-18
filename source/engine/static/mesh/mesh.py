@@ -5,7 +5,7 @@ import ctypes
 import math
 from typing import List, Final, Union, Type
 
-from utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
+from common_utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
 from engine.static.resourcesObj import ResourcesObj
 from engine.static.enums import PrimitiveDrawingType
 

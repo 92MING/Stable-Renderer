@@ -168,11 +168,15 @@ def get_args(t)->Tuple[Any, ...]:
         return (t.__forward_arg__,)
     return tp_get_args(t)
 
-def get_cls_name(cls:type):
+def get_cls_name(cls_or_ins: Any):
     '''
     Return the pure class name, without module name. e.g. 'A' instead of 'utils.xxx....A
     Preventing error when `__qualname__` is not available.
     '''
+    if not type(cls_or_ins) == type:
+        cls = type(cls_or_ins)
+    else:
+        cls = cls_or_ins
     if hasattr(cls, '__qualname__'):
         return cls.__qualname__
     else:

@@ -4,7 +4,7 @@ import glm
 import multiprocessing
 
 from .manager import Manager
-from utils.path_utils import *
+from common_utils.path_utils import *
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
