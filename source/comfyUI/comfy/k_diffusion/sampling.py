@@ -436,7 +436,9 @@ class DPMSolver(nn.Module):
                 t_, su = t, 0.
 
             eps, eps_cache = self.eps(eps_cache, 'eps', x, s)
-            denoised = x - self.sigma(s) * eps
+            denoised = x - self.sigma(s) * eps  # DENOISE HERE
+            print(denoised)
+            print(type(denoised))
 
             if order == 2:
                 x_low, eps_cache = self.dpm_solver_1_step(x, s, t_, eps_cache=eps_cache)
