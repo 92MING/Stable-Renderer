@@ -273,7 +273,7 @@ export const LiteGraph: {
     createNode<T extends LGraphNode>(
         type: string,
         title: string,
-        options: object
+        options: object,
     ): T;
 
     /**
@@ -666,6 +666,8 @@ export declare class LGraphNode {
     toString(): string;
     /** get the title string */
     getTitle(): string;
+    /** get the description string of this node */
+    getDesc(): string;
     /** sets the value of a property */
     setProperty(name: string, value: any): void;
     /** sets the output data */

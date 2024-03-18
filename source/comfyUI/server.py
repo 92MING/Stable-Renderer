@@ -2,35 +2,35 @@ import os
 import sys
 import asyncio
 import traceback
-
-import nodes
-import folder_paths
-import execution
+import mimetypes
 import uuid
 import urllib
 import json
 import glob
 import struct
-from PIL import Image, ImageOps
-from PIL.PngImagePlugin import PngInfo
-from io import BytesIO
+import aiohttp
+import asyncio
 
-try:
-    import aiohttp
-    from aiohttp import web
-except ImportError:
-    print("Module 'aiohttp' not installed. Please install it via:")
-    print("pip install aiohttp")
-    print("or")
-    print("pip install -r requirements.txt")
-    sys.exit()
-
-import mimetypes
-from comfy.cli_args import args
+import nodes
+import folder_paths
 import comfy.utils
 import comfy.model_management
 
+from typing import Optional, TYPE_CHECKING
+from PIL import Image, ImageOps
+from PIL.PngImagePlugin import PngInfo
+from io import BytesIO
+from asyncio.events import AbstractEventLoop
+from aiohttp import web
+
+from common_utils.decorators import singleton, class_or_ins_property
+from common_utils.global_utils import GetOrCreateGlobalValue
+from comfy.cli_args import args
 from app.user_manager import UserManager
+
+if TYPE_CHECKING:
+    from execution import PromptQueue
+
 
 class BinaryEventTypes:
     PREVIEW_IMAGE = 1
@@ -66,16 +66,27 @@ def create_cors_middleware(allowed_origin: str):
 
     return cors_middleware
 
-class PromptServer():
-    def __init__(self, loop):
-        PromptServer.instance = self
 
+@singleton(cross_module_singleton=True)
+class PromptServer:
+    
+    @class_or_ins_property  # type: ignore
+    def instance(cls_or_ins)->'PromptServer':
+        if not hasattr(cls_or_ins, '__instance__'):
+            return PromptServer()
+        return cls_or_ins.__instance__  # type: ignore
+    
+    def __init__(self, loop: Optional[AbstractEventLoop]=None):
+        if loop is None:
+            loop = GetOrCreateGlobalValue("__COMFYUI_EVENT_LOOP__", lambda: asyncio.new_event_loop())
+        
         mimetypes.init()
         mimetypes.types_map['.js'] = 'application/javascript; charset=utf-8'
 
         self.user_manager = UserManager()
+        self.last_prompt_id: str = None # type: ignore
         self.supports = ["custom_nodes_from_web"]
-        self.prompt_queue = None
+        self.prompt_queue:'PromptQueue' = None  # type: ignore
         self.loop = loop
         self.messages = asyncio.Queue()
         self.number = 0
@@ -91,7 +102,7 @@ class PromptServer():
             os.path.realpath(__file__)), "web")
         routes = web.RouteTableDef()
         self.routes = routes
-        self.last_node_id = None
+        self.last_node_id: Optional[str] = None
         self.client_id = None
 
         self.on_prompt_handlers = []
@@ -471,7 +482,7 @@ class PromptServer():
 
             if "prompt" in json_data:
                 prompt = json_data["prompt"]
-                
+                import execution
                 valid = execution.validate_prompt(prompt)   
                 # valid = (is_valid:bool, error: dict, good_outputs: list, node_errors: dict)
                 

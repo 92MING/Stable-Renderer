@@ -1618,6 +1618,7 @@ export class ComfyApp {
 			},
 			{
 				title: nodeData.display_name || nodeData.name,
+				description: nodeData.description,
 				comfyClass: nodeData.name,
 				nodeData
 			}

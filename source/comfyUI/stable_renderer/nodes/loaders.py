@@ -1,2 +1,2 @@
-from comfyUI.stable_renderer.utils import *
+from comfyUI.types import *
 from .node_base import StableRendererNodeBase

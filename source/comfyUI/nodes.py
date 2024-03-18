@@ -1,5 +1,4 @@
 import torch
-
 import os
 import sys
 import json
@@ -8,14 +7,19 @@ import traceback
 import math
 import time
 import random
+import importlib
 
 from PIL import Image, ImageOps, ImageSequence
 from PIL.PngImagePlugin import PngInfo
 import numpy as np
 import safetensors.torch
 
-sys.path.insert(2, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
+from typing import Dict, Type, TYPE_CHECKING
 
+from common_utils.global_utils import GetGlobalValue, SetGlobalValue
+from common_utils.debug_utils import ComfyUILogger
+
+sys.path.insert(2, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
 
 import comfy.diffusers_load
 import comfy.samplers
@@ -23,20 +27,19 @@ import comfy.sample
 import comfy.sd
 import comfy.utils
 import comfy.controlnet
-
 import comfy.clip_vision
-
 import comfy.model_management
-from comfy.cli_args import args
-
-import importlib
-
 import folder_paths
 import latent_preview
-import typing
-if typing.TYPE_CHECKING:
+
+from comfy.cli_args import args
+
+if TYPE_CHECKING:
+    from comfyUI.types import ComfyUINode
     from comfy.sd import VAE, CLIP
     from comfy.controlnet import ControlNet, T2IAdapter, ControlLora, ControlBase
+
+
 
 def before_node_execution():
     comfy.model_management.throw_exception_if_processing_interrupted()
@@ -87,7 +90,7 @@ class ConditioningAverage :
         out = []
 
         if len(conditioning_from) > 1:
-            print("Warning: ConditioningAverage conditioning_from contains more than 1 cond, only the first one will actually be applied to conditioning_to.")
+            ComfyUILogger.warn("Warning: ConditioningAverage conditioning_from contains more than 1 cond, only the first one will actually be applied to conditioning_to.")
 
         cond_from = conditioning_from[0][0]
         pooled_output_from = conditioning_from[0][1].get("pooled_output", None)
@@ -126,7 +129,7 @@ class ConditioningConcat:
         out = []
 
         if len(conditioning_from) > 1:
-            print("Warning: ConditioningConcat conditioning_from contains more than 1 cond, only the first one will actually be applied to conditioning_to.")
+            ComfyUILogger.warn("Warning: ConditioningConcat conditioning_from contains more than 1 cond, only the first one will actually be applied to conditioning_to.")
 
         cond_from = conditioning_from[0][0]
 
@@ -1296,7 +1299,7 @@ class LatentCrop:
         x =  x // 8
         y = y // 8
 
-        #enfonce minimum size of 64
+        #enforce minimum size of 64
         if x > (samples.shape[3] - 8):
             x = samples.shape[3] - 8
         if y > (samples.shape[2] - 8):
@@ -1743,137 +1746,148 @@ class ImagePadForOutpaint:
         return (new_image, mask)
 
 
-NODE_CLASS_MAPPINGS = {
-    "KSampler": KSampler,
-    "CheckpointLoaderSimple": CheckpointLoaderSimple,
-    "CLIPTextEncode": CLIPTextEncode,
-    "CLIPSetLastLayer": CLIPSetLastLayer,
-    "VAEDecode": VAEDecode,
-    "VAEEncode": VAEEncode,
-    "VAEEncodeForInpaint": VAEEncodeForInpaint,
-    "VAELoader": VAELoader,
-    "EmptyLatentImage": EmptyLatentImage,
-    "LatentUpscale": LatentUpscale,
-    "LatentUpscaleBy": LatentUpscaleBy,
-    "LatentFromBatch": LatentFromBatch,
-    "RepeatLatentBatch": RepeatLatentBatch,
-    "SaveImage": SaveImage,
-    "PreviewImage": PreviewImage,
-    "LoadImage": LoadImage,
-    "LoadImageMask": LoadImageMask,
-    "ImageScale": ImageScale,
-    "ImageScaleBy": ImageScaleBy,
-    "ImageInvert": ImageInvert,
-    "ImageBatch": ImageBatch,
-    "ImagePadForOutpaint": ImagePadForOutpaint,
-    "EmptyImage": EmptyImage,
-    "ConditioningAverage": ConditioningAverage ,
-    "ConditioningCombine": ConditioningCombine,
-    "ConditioningConcat": ConditioningConcat,
-    "ConditioningSetArea": ConditioningSetArea,
-    "ConditioningSetAreaPercentage": ConditioningSetAreaPercentage,
-    "ConditioningSetAreaStrength": ConditioningSetAreaStrength,
-    "ConditioningSetMask": ConditioningSetMask,
-    "KSamplerAdvanced": KSamplerAdvanced,
-    "SetLatentNoiseMask": SetLatentNoiseMask,
-    "LatentComposite": LatentComposite,
-    "LatentBlend": LatentBlend,
-    "LatentRotate": LatentRotate,
-    "LatentFlip": LatentFlip,
-    "LatentCrop": LatentCrop,
-    "LoraLoader": LoraLoader,
-    "CLIPLoader": CLIPLoader,
-    "UNETLoader": UNETLoader,
-    "DualCLIPLoader": DualCLIPLoader,
-    "CLIPVisionEncode": CLIPVisionEncode,
-    "StyleModelApply": StyleModelApply,
-    "unCLIPConditioning": unCLIPConditioning,
-    "ControlNetApply": ControlNetApply,
-    "ControlNetApplyAdvanced": ControlNetApplyAdvanced,
-    "ControlNetLoader": ControlNetLoader,
-    "DiffControlNetLoader": DiffControlNetLoader,
-    "StyleModelLoader": StyleModelLoader,
-    "CLIPVisionLoader": CLIPVisionLoader,
-    "VAEDecodeTiled": VAEDecodeTiled,
-    "VAEEncodeTiled": VAEEncodeTiled,
-    "unCLIPCheckpointLoader": unCLIPCheckpointLoader,
-    "GLIGENLoader": GLIGENLoader,
-    "GLIGENTextBoxApply": GLIGENTextBoxApply,
-    "InpaintModelConditioning": InpaintModelConditioning,
+NODE_CLASS_MAPPINGS: Dict[str, Type['ComfyUINode']] = GetGlobalValue("__COMFYUI_NODE_CLASS_MAPPINGS__", None) # type: ignore
+'''Node class mappings for all nodes. This dictionary will be updated on init.'''
+if NODE_CLASS_MAPPINGS is None:
+    NODE_CLASS_MAPPINGS: Dict[str, Type['ComfyUINode']] = {
+        "KSampler": KSampler,
+        "CheckpointLoaderSimple": CheckpointLoaderSimple,
+        "CLIPTextEncode": CLIPTextEncode,
+        "CLIPSetLastLayer": CLIPSetLastLayer,
+        "VAEDecode": VAEDecode,
+        "VAEEncode": VAEEncode,
+        "VAEEncodeForInpaint": VAEEncodeForInpaint,
+        "VAELoader": VAELoader,
+        "EmptyLatentImage": EmptyLatentImage,
+        "LatentUpscale": LatentUpscale,
+        "LatentUpscaleBy": LatentUpscaleBy,
+        "LatentFromBatch": LatentFromBatch,
+        "RepeatLatentBatch": RepeatLatentBatch,
+        "SaveImage": SaveImage,
+        "PreviewImage": PreviewImage,
+        "LoadImage": LoadImage,
+        "LoadImageMask": LoadImageMask,
+        "ImageScale": ImageScale,
+        "ImageScaleBy": ImageScaleBy,
+        "ImageInvert": ImageInvert,
+        "ImageBatch": ImageBatch,
+        "ImagePadForOutpaint": ImagePadForOutpaint,
+        "EmptyImage": EmptyImage,
+        "ConditioningAverage": ConditioningAverage ,
+        "ConditioningCombine": ConditioningCombine,
+        "ConditioningConcat": ConditioningConcat,
+        "ConditioningSetArea": ConditioningSetArea,
+        "ConditioningSetAreaPercentage": ConditioningSetAreaPercentage,
+        "ConditioningSetAreaStrength": ConditioningSetAreaStrength,
+        "ConditioningSetMask": ConditioningSetMask,
+        "KSamplerAdvanced": KSamplerAdvanced,
+        "SetLatentNoiseMask": SetLatentNoiseMask,
+        "LatentComposite": LatentComposite,
+        "LatentBlend": LatentBlend,
+        "LatentRotate": LatentRotate,
+        "LatentFlip": LatentFlip,
+        "LatentCrop": LatentCrop,
+        "LoraLoader": LoraLoader,
+        "CLIPLoader": CLIPLoader,
+        "UNETLoader": UNETLoader,
+        "DualCLIPLoader": DualCLIPLoader,
+        "CLIPVisionEncode": CLIPVisionEncode,
+        "StyleModelApply": StyleModelApply,
+        "unCLIPConditioning": unCLIPConditioning,
+        "ControlNetApply": ControlNetApply,
+        "ControlNetApplyAdvanced": ControlNetApplyAdvanced,
+        "ControlNetLoader": ControlNetLoader,
+        "DiffControlNetLoader": DiffControlNetLoader,
+        "StyleModelLoader": StyleModelLoader,
+        "CLIPVisionLoader": CLIPVisionLoader,
+        "VAEDecodeTiled": VAEDecodeTiled,
+        "VAEEncodeTiled": VAEEncodeTiled,
+        "unCLIPCheckpointLoader": unCLIPCheckpointLoader,
+        "GLIGENLoader": GLIGENLoader,
+        "GLIGENTextBoxApply": GLIGENTextBoxApply,
+        "InpaintModelConditioning": InpaintModelConditioning,
 
-    "CheckpointLoader": CheckpointLoader,
-    "DiffusersLoader": DiffusersLoader,
+        "CheckpointLoader": CheckpointLoader,
+        "DiffusersLoader": DiffusersLoader,
 
-    "LoadLatent": LoadLatent,
-    "SaveLatent": SaveLatent,
+        "LoadLatent": LoadLatent,
+        "SaveLatent": SaveLatent,
 
-    "ConditioningZeroOut": ConditioningZeroOut,
-    "ConditioningSetTimestepRange": ConditioningSetTimestepRange,
-    "LoraLoaderModelOnly": LoraLoaderModelOnly,
-}
+        "ConditioningZeroOut": ConditioningZeroOut,
+        "ConditioningSetTimestepRange": ConditioningSetTimestepRange,
+        "LoraLoaderModelOnly": LoraLoaderModelOnly,
+    }   # type: ignore
+    SetGlobalValue("__COMFYUI_NODE_CLASS_MAPPINGS__", NODE_CLASS_MAPPINGS)
 
-NODE_DISPLAY_NAME_MAPPINGS = {
-    # Sampling
-    "KSampler": "KSampler",
-    "KSamplerAdvanced": "KSampler (Advanced)",
-    # Loaders
-    "CheckpointLoader": "Load Checkpoint With Config (DEPRECATED)",
-    "CheckpointLoaderSimple": "Load Checkpoint",
-    "VAELoader": "Load VAE",
-    "LoraLoader": "Load LoRA",
-    "CLIPLoader": "Load CLIP",
-    "ControlNetLoader": "Load ControlNet Model",
-    "DiffControlNetLoader": "Load ControlNet Model (diff)",
-    "StyleModelLoader": "Load Style Model",
-    "CLIPVisionLoader": "Load CLIP Vision",
-    "UpscaleModelLoader": "Load Upscale Model",
-    # Conditioning
-    "CLIPVisionEncode": "CLIP Vision Encode",
-    "StyleModelApply": "Apply Style Model",
-    "CLIPTextEncode": "CLIP Text Encode (Prompt)",
-    "CLIPSetLastLayer": "CLIP Set Last Layer",
-    "ConditioningCombine": "Conditioning (Combine)",
-    "ConditioningAverage ": "Conditioning (Average)",
-    "ConditioningConcat": "Conditioning (Concat)",
-    "ConditioningSetArea": "Conditioning (Set Area)",
-    "ConditioningSetAreaPercentage": "Conditioning (Set Area with Percentage)",
-    "ConditioningSetMask": "Conditioning (Set Mask)",
-    "ControlNetApply": "Apply ControlNet",
-    "ControlNetApplyAdvanced": "Apply ControlNet (Advanced)",
-    # Latent
-    "VAEEncodeForInpaint": "VAE Encode (for Inpainting)",
-    "SetLatentNoiseMask": "Set Latent Noise Mask",
-    "VAEDecode": "VAE Decode",
-    "VAEEncode": "VAE Encode",
-    "LatentRotate": "Rotate Latent",
-    "LatentFlip": "Flip Latent",
-    "LatentCrop": "Crop Latent",
-    "EmptyLatentImage": "Empty Latent Image",
-    "LatentUpscale": "Upscale Latent",
-    "LatentUpscaleBy": "Upscale Latent By",
-    "LatentComposite": "Latent Composite",
-    "LatentBlend": "Latent Blend",
-    "LatentFromBatch" : "Latent From Batch",
-    "RepeatLatentBatch": "Repeat Latent Batch",
-    # Image
-    "SaveImage": "Save Image",
-    "PreviewImage": "Preview Image",
-    "LoadImage": "Load Image",
-    "LoadImageMask": "Load Image (as Mask)",
-    "ImageScale": "Upscale Image",
-    "ImageScaleBy": "Upscale Image By",
-    "ImageUpscaleWithModel": "Upscale Image (using Model)",
-    "ImageInvert": "Invert Image",
-    "ImagePadForOutpaint": "Pad Image for Outpainting",
-    "ImageBatch": "Batch Images",
-    # _for_testing
-    "VAEDecodeTiled": "VAE Decode (Tiled)",
-    "VAEEncodeTiled": "VAE Encode (Tiled)",
-}
-
-EXTENSION_WEB_DIRS = {}
-
-def load_custom_node(module_path, ignore=set()):
+NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = GetGlobalValue("__COMFYUI_NODE_DISPLAY_NAME_MAPPINGS__", None) # type: ignore
+'''Node display name mappings. This dictionary will be updated on init.'''
+if NODE_DISPLAY_NAME_MAPPINGS is None:
+    NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
+        # Sampling
+        "KSampler": "KSampler",
+        "KSamplerAdvanced": "KSampler (Advanced)",
+        # Loaders
+        "CheckpointLoader": "Load Checkpoint With Config (DEPRECATED)",
+        "CheckpointLoaderSimple": "Load Checkpoint",
+        "VAELoader": "Load VAE",
+        "LoraLoader": "Load LoRA",
+        "CLIPLoader": "Load CLIP",
+        "ControlNetLoader": "Load ControlNet Model",
+        "DiffControlNetLoader": "Load ControlNet Model (diff)",
+        "StyleModelLoader": "Load Style Model",
+        "CLIPVisionLoader": "Load CLIP Vision",
+        "UpscaleModelLoader": "Load Upscale Model",
+        # Conditioning
+        "CLIPVisionEncode": "CLIP Vision Encode",
+        "StyleModelApply": "Apply Style Model",
+        "CLIPTextEncode": "CLIP Text Encode (Prompt)",
+        "CLIPSetLastLayer": "CLIP Set Last Layer",
+        "ConditioningCombine": "Conditioning (Combine)",
+        "ConditioningAverage ": "Conditioning (Average)",
+        "ConditioningConcat": "Conditioning (Concat)",
+        "ConditioningSetArea": "Conditioning (Set Area)",
+        "ConditioningSetAreaPercentage": "Conditioning (Set Area with Percentage)",
+        "ConditioningSetMask": "Conditioning (Set Mask)",
+        "ControlNetApply": "Apply ControlNet",
+        "ControlNetApplyAdvanced": "Apply ControlNet (Advanced)",
+        # Latent
+        "VAEEncodeForInpaint": "VAE Encode (for Inpainting)",
+        "SetLatentNoiseMask": "Set Latent Noise Mask",
+        "VAEDecode": "VAE Decode",
+        "VAEEncode": "VAE Encode",
+        "LatentRotate": "Rotate Latent",
+        "LatentFlip": "Flip Latent",
+        "LatentCrop": "Crop Latent",
+        "EmptyLatentImage": "Empty Latent Image",
+        "LatentUpscale": "Upscale Latent",
+        "LatentUpscaleBy": "Upscale Latent By",
+        "LatentComposite": "Latent Composite",
+        "LatentBlend": "Latent Blend",
+        "LatentFromBatch" : "Latent From Batch",
+        "RepeatLatentBatch": "Repeat Latent Batch",
+        # Image
+        "SaveImage": "Save Image",
+        "PreviewImage": "Preview Image",
+        "LoadImage": "Load Image",
+        "LoadImageMask": "Load Image (as Mask)",
+        "ImageScale": "Upscale Image",
+        "ImageScaleBy": "Upscale Image By",
+        "ImageUpscaleWithModel": "Upscale Image (using Model)",
+        "ImageInvert": "Invert Image",
+        "ImagePadForOutpaint": "Pad Image for Outpainting",
+        "ImageBatch": "Batch Images",
+        # _for_testing
+        "VAEDecodeTiled": "VAE Decode (Tiled)",
+        "VAEEncodeTiled": "VAE Encode (Tiled)",
+    }
+    SetGlobalValue("__COMFYUI_NODE_DISPLAY_NAME_MAPPINGS__", NODE_DISPLAY_NAME_MAPPINGS)
+    
+EXTENSION_WEB_DIRS = GetGlobalValue("__COMFYUI_EXTENSION_WEB_DIRS__", None) # type: ignore
+if EXTENSION_WEB_DIRS is None:
+    EXTENSION_WEB_DIRS = {}
+    SetGlobalValue("__COMFYUI_EXTENSION_WEB_DIRS__", EXTENSION_WEB_DIRS)
+    
+def _load_custom_node(module_path, ignore=set()):
     module_name = os.path.basename(module_path)
     if os.path.isfile(module_path):
         sp = os.path.splitext(module_path)
@@ -1903,14 +1917,18 @@ def load_custom_node(module_path, ignore=set()):
                 NODE_DISPLAY_NAME_MAPPINGS.update(module.NODE_DISPLAY_NAME_MAPPINGS)
             return True
         else:
-            print(f"Skip {module_path} module for custom nodes due to the lack of NODE_CLASS_MAPPINGS.")
+            ComfyUILogger.warn(f"Skip {module_path} module for custom nodes due to the lack of NODE_CLASS_MAPPINGS.")
             return False
     except Exception as e:
-        print(traceback.format_exc())
-        print(f"Cannot import {module_path} module for custom nodes:", e)
+        ComfyUILogger.warn(f"Cannot import {module_path} module for custom nodes with error: {e}. Traceback: {traceback.format_exc()}")
         return False
 
 def load_custom_nodes():
+    '''
+    Load all custom nodes from:
+        - the stable_renderer/nodes folder
+        - the custom_nodes folder
+    '''
     base_node_names = set(NODE_CLASS_MAPPINGS.keys())
     
     node_paths = list(folder_paths.get_folder_paths("custom_nodes"))
@@ -1926,27 +1944,26 @@ def load_custom_nodes():
             if os.path.isfile(module_path) and os.path.splitext(module_path)[1] != ".py": continue
             if module_path.endswith(".disabled"): continue
             time_before = time.perf_counter()
-            success = load_custom_node(module_path, base_node_names)
+            success = _load_custom_node(module_path, base_node_names)
             node_import_times.append((time.perf_counter() - time_before, module_path, success))
 
     if len(node_import_times) > 0:
-        print("\nImport times for custom nodes:")
+        ComfyUILogger.debug("\nImport times for custom nodes:")
         for n in sorted(node_import_times):
             if n[2]:
                 import_message = ""
             else:
                 import_message = " (IMPORT FAILED)"
-            print("{:6.1f} seconds{}:".format(n[0], import_message), n[1])
-        print()
+            ComfyUILogger.debug("{:6.1f} seconds{}:".format(n[0], import_message), n[1])
     
-    print('loading stable-renderer nodes...')
+    ComfyUILogger.debug('loading stable-renderer nodes...')
     stable_renderer_nodes_path = os.path.join(folder_paths.base_path, 'stable_renderer', 'nodes')
-    success = load_custom_node(stable_renderer_nodes_path, )
-    print()
+    success = _load_custom_node(stable_renderer_nodes_path, )
+
     if not success:
-        print('failed to load stable-renderer nodes.')
+        ComfyUILogger.warn('failed to load stable-renderer nodes.')
     else:
-        print('successfully loaded stable-renderer nodes.')
+        ComfyUILogger.debug('successfully loaded stable-renderer nodes.')
 
 def init_custom_nodes():
     extras_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy_extras")
@@ -1982,18 +1999,17 @@ def init_custom_nodes():
 
     import_failed = []
     for node_file in extras_files:
-        if not load_custom_node(os.path.join(extras_dir, node_file)):
+        if not _load_custom_node(os.path.join(extras_dir, node_file)):
             import_failed.append(node_file)
 
     load_custom_nodes()
 
     if len(import_failed) > 0:
-        print("WARNING: some comfy_extras/ nodes did not import correctly. This may be because they are missing some dependencies.\n")
+        ComfyUILogger.warn("WARNING: some comfy_extras/ nodes did not import correctly. This may be because they are missing some dependencies.\n")
         for node in import_failed:
-            print("IMPORT FAILED: {}".format(node))
-        print("\nThis issue might be caused by missing dependencies.")
+            ComfyUILogger.warn("IMPORT FAILED: {}".format(node))
+        ComfyUILogger.warn("\nThis issue might be caused by missing dependencies.")
         if args.windows_standalone_build:
-            print("Please run the update script: update/update_comfyui.bat")
+            ComfyUILogger.info("Please run the update script: update/update_comfyui.bat")
         else:
-            print("Please do a: pip install -r requirements.txt")
-        print()
+            ComfyUILogger.info("Please do a: pip install -r requirements.txt")

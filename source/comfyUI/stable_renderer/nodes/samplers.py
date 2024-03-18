@@ -1,9 +1,11 @@
-from comfyUI.stable_renderer.utils import *
+from comfyUI.types import *
 from .node_base import StableRendererNodeBase
 from comfyUI.nodes import common_ksampler
 
+
 _default_sampler = COMFY_SAMPLERS.__args__[0]
 _default_scheduler = COMFY_SCHEDULERS.__args__[0]
+
 
 class StableRenderSampler(StableRendererNodeBase):
     
