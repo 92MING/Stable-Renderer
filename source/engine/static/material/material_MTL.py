@@ -2,7 +2,7 @@ import os.path
 from .material import Material, DefaultTextureType
 from typing import Tuple, Dict, TYPE_CHECKING, Optional
 from ..texture import Texture
-from utils.global_utils import GetGlobalValue
+from common_utils.global_utils import GetGlobalValue
 if TYPE_CHECKING:
     from engine.engine import Engine
 

@@ -16,10 +16,10 @@ from PIL import Image
 from typing import List, Optional
 from datetime import datetime
 
-from utils.image_utils import save_images_as_gif
-from utils.global_utils import GetEnv
-from utils.debug_utils import DefaultLogger
-from utils.path_utils import GIF_OUTPUT_DIR, MAP_OUTPUT_DIR, RESOURCES_DIR, EXAMPLE_MAP_OUTPUT_DIR
+from common_utils.image_utils import save_images_as_gif
+from common_utils.global_utils import GetEnv
+from common_utils.debug_utils import DefaultLogger
+from common_utils.path_utils import GIF_OUTPUT_DIR, MAP_OUTPUT_DIR, RESOURCES_DIR, EXAMPLE_MAP_OUTPUT_DIR
 
 
 @dataclass

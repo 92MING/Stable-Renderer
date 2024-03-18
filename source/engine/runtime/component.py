@@ -1,5 +1,5 @@
 from engine.runtime.engineObj import EngineObj
-from utils.global_utils import GetOrAddGlobalValue
+from common_utils.global_utils import GetOrAddGlobalValue
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .gameObj import GameObject

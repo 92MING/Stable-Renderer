@@ -1,7 +1,7 @@
 import traceback
 from enum import Enum
 from typing import TYPE_CHECKING, ClassVar, List
-from utils.global_utils import GetOrCreateGlobalValue, GetGlobalValue
+from common_utils.global_utils import GetOrCreateGlobalValue, GetGlobalValue
 if TYPE_CHECKING:
     from ..engine import Engine
 

@@ -2,7 +2,7 @@ import torch
 import os
 import sys
 try:
-    from utils.path_utils import PROJECT_DIR
+    from common_utils.path_utils import PROJECT_DIR
 except Exception as e:
     print(e)
     PROJECT_DIR = "."

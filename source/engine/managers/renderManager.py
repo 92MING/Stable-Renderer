@@ -7,8 +7,8 @@ import pycuda.driver as cuda_driver
 
 from functools import partial
 from typing import Union, Optional, Callable
-from utils.cuda_utils import *
-from utils.data_struct.event import AutoSortTask
+from common_utils.cuda_utils import *
+from common_utils.data_struct.event import AutoSortTask
 from .manager import Manager
 from .runtimeManager import RuntimeManager
 from ..static.shader import Shader

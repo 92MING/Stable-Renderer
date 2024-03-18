@@ -21,8 +21,8 @@ from OpenGL.GL.EXT.texture_filter_anisotropic import GL_TEXTURE_MAX_ANISOTROPY_E
 from ..resourcesObj import ResourcesObj
 from ..enums import *
 from ..color import Color
-from utils.decorators import Overload
-from utils.cuda_utils import *
+from common_utils.decorators import Overload
+from common_utils.cuda_utils import *
 
 from typing import TYPE_CHECKING, Union, Optional, Final, Literal
 if TYPE_CHECKING:

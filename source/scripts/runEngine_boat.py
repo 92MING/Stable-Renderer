@@ -13,7 +13,7 @@ from engine.runtime.component import Component
 from engine.engine import Engine
 from engine.runtime.components import CameraController
 from engine.static import Material, Mesh, Texture, DefaultTextureType, GLFW_Key
-from utils.path_utils import EXAMPLE_3D_MODEL_DIR
+from common_utils.path_utils import EXAMPLE_3D_MODEL_DIR
 
 
 if __name__ == '__main__':

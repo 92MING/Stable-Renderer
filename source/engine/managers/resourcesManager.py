@@ -1,7 +1,7 @@
 import OpenGL.error
 from .manager import Manager
 from .sceneManager import SceneManager
-from utils.global_utils import GetOrAddGlobalValue
+from common_utils.global_utils import GetOrAddGlobalValue
 import traceback
 
 class ResourcesManager(Manager):

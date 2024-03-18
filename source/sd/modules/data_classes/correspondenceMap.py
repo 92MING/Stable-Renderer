@@ -9,9 +9,9 @@ from typing import Callable, Tuple, Union, List, TypeVar, Type, Optional
 
 from .common import Rectangle
 from .. import log_utils as logu, config
-from utils.os_utils import is_windows, is_mac
-from utils.data_struct import SortableElement
-from utils.path_utils import MAP_OUTPUT_DIR
+from common_utils.os_utils import is_windows, is_mac
+from common_utils.data_struct import SortableElement
+from common_utils.path_utils import MAP_OUTPUT_DIR
 
 T = TypeVar('T', bound='CorrespondenceMap')
 

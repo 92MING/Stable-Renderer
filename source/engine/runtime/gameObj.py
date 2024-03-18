@@ -4,8 +4,8 @@ from typing import Union, List, Optional, Set, Dict, TypeVar, Type
 import heapq
 import glm
 
-from utils.base_clses import NamedObj
-from utils.global_utils import GetOrAddGlobalValue
+from common_utils.base_clses import NamedObj
+from common_utils.global_utils import GetOrAddGlobalValue
 from .component import Component, ComponentMeta
 from .components.transform import Transform
 from .engineObj import EngineObj

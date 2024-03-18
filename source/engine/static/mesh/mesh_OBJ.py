@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from .mesh import Mesh
 from engine.static.enums import PrimitiveDrawingType
-from utils.math_utils import calculate_tangent
+from common_utils.math_utils import calculate_tangent
 
 @dataclass
 class MTL_Data:

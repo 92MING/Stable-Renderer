@@ -4,7 +4,7 @@ import glm
 import multiprocessing
 
 from .manager import Manager
-from utils.path_utils import *
+from common_utils.path_utils import *
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
@@ -38,6 +38,7 @@ class DiffusionManager(Manager):
     
     # region comfyUI
     def _init_comfyUI(self):
+        return
         from comfyUI.main import execute_prestartup_script
         execute_prestartup_script()
         

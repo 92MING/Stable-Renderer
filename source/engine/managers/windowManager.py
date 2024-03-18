@@ -3,7 +3,7 @@ import OpenGL.GL as gl
 
 from .manager import Manager
 from .renderManager import RenderManager
-from utils.data_struct import DelayEvent, Event
+from common_utils.data_struct import DelayEvent, Event
 from typing import Tuple
 from ..static import Color
 

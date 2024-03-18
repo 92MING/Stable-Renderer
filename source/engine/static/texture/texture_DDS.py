@@ -3,7 +3,7 @@ import OpenGL.GL as gl
 from pathlib import Path
 from typing import Union, Optional
 
-from utils.decorators import Overload
+from common_utils.decorators import Overload
 from .ddsImage import *
 from .texture import Texture
 

@@ -7,9 +7,9 @@ from colorama import Fore, Style
 from enum import Enum
 from typing import Optional, Literal
 
-from utils.global_utils import *
-from utils.decorators import class_or_ins_property, prevent_re_init 
-from utils.data_struct import Event
+from common_utils.global_utils import *
+from common_utils.decorators import class_or_ins_property, prevent_re_init 
+from common_utils.data_struct import Event
 from .managers import *
 from .static.scene import *
 from .static import Color

@@ -8,7 +8,7 @@ from engine.runtime.component import Component
 from engine.engine import Engine
 from engine.runtime.components import CameraController
 from engine.static import Mesh, Material, Material_MTL, GLFW_Key, MouseButton
-from utils.path_utils import *
+from common_utils.path_utils import *
 
 
 if __name__ == '__main__':

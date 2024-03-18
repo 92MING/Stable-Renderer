@@ -8,7 +8,7 @@ from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
 from engine.static import Material, Mesh, Texture, DefaultTextureType
-from utils.path_utils import *
+from common_utils.path_utils import *
 
 
 if __name__ == '__main__':

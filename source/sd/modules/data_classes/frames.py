@@ -1,4 +1,4 @@
-from utils.data_struct import SortableElement
+from common_utils.data_struct import SortableElement
 from typing import Any
 import os
 

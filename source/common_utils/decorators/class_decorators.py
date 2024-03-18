@@ -6,10 +6,12 @@ Note: `setter` is not supported for class property, due to the limitation of pyt
 
 from collections.abc import Callable
 from functools import update_wrapper
-from typing import Type, Optional, TypeVar
+from typing import Type, Optional, TypeVar, Union, overload
 
-ClsT = TypeVar('ClsT')
-RetT = TypeVar('RetT')
+from common_utils.global_utils import GetOrCreateGlobalValue
+
+ClsT = TypeVar('ClsT', bound=type)
+RetT = TypeVar('RetT', bound=type)
 
 class class_property(property): # still inherit from property(but it works nothing for this class), cuz it makes `isinstance(..., property)` True
     '''
@@ -97,9 +99,79 @@ def prevent_re_init(cls: ClsT)->ClsT:
     def new_init(self, *args, **kwargs):
         if hasattr(self, '__inited__') and getattr(self, '__inited__'):
             return  # do nothing
-        origin_init(self, *args, **kwargs)
         setattr(self, '__inited__', True)
+        origin_init(self, *args, **kwargs)       
     cls.__init__ = new_init
     return cls
 
-__all__.extend(['prevent_re_init'])
+@overload
+def singleton(cls: ClsT)->ClsT:   # type: ignore
+    '''
+    The singleton class decorator.
+    Singleton class is a class that only has one instance. 
+    You will still got the same instance even if you create the instance multiple times.
+    '''
+@overload
+def singleton(cross_module_singleton: bool=True)->Callable[[ClsT], ClsT]:   # type: ignore
+    '''
+    The singleton class decorator.
+    Singleton class is a class that only has one instance. 
+    You will still got the same instance even if you create the instance multiple times.
+    
+    if cross_module_singleton is True, the class will be unique even if you import the module in different ways.
+    This is helpful when the import relationship is complex.
+    '''
+
+_singleton_cls_dict = GetOrCreateGlobalValue('__singleton_cls_dict__', dict)
+
+def _singleton(cls: ClsT, cross_module_singleton:bool=False)->ClsT:
+    '''
+    Make the class as singleton class.
+    Singleton class is a class that only has one instance. 
+    You will still got the same instance even if you create the instance multiple times.
+    '''
+    if cross_module_singleton:
+        cls_name = cls.__qualname__
+        if cls_name in _singleton_cls_dict:
+            return _singleton_cls_dict[cls_name]()
+    
+    origin_new = cls.__new__
+    def new_new(this_cls, *args, **kwargs):
+        if hasattr(this_cls, '__instance__') and getattr(this_cls, '__instance__') is not None:
+            return getattr(this_cls, '__instance__')
+        if origin_new is object.__new__:
+            return origin_new(this_cls) # type: ignore
+        return origin_new(this_cls, *args, **kwargs)
+    cls.__new__ = new_new
+    
+    origin_init = cls.__init__
+    def new_init(self, *args, **kwargs):
+        if hasattr(self, '__instance__') and getattr(self, '__instance__') is not None:
+            return  # do nothing
+        setattr(self, '__instance__', self)
+        origin_init(self, *args, **kwargs)
+    cls.__init__ = new_init
+    
+    if cross_module_singleton:
+        _singleton_cls_dict[cls_name] = cls
+    
+    return cls
+
+
+def singleton(*args, **kwargs)->Union[ClsT, Callable[[ClsT], ClsT]]:  # type: ignore
+    if len(args) + len(kwargs) != 1:
+        raise ValueError('singleton only accept one argument.')
+    
+    arg = args[0] if args else None
+    if arg is None:
+        for _, v in kwargs.items():
+            arg = v
+            break
+    
+    if isinstance(arg, bool):
+        return lambda cls: _singleton(cls, arg)
+    else:
+        return _singleton(arg)
+
+
+__all__.extend(['prevent_re_init', 'singleton'])

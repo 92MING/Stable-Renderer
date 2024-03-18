@@ -10,7 +10,7 @@ from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 
 from .multi_frame_stable_diffusion import StableRendererPipeline
 from .. import log_utils as logu
-from utils.global_utils import GetEnv
+from common_utils.global_utils import GetEnv
 
 def load_pipe(
     model_path: str = GetEnv('SD_PATH', 'runwayml/stable-diffusion-v1-5'),

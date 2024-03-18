@@ -1,6 +1,6 @@
 import os.path
 
-from utils.base_clses import NamedObj
+from common_utils.base_clses import NamedObj
 import inspect
 from typing import Literal
 
