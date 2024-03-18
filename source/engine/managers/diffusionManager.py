@@ -38,6 +38,7 @@ class DiffusionManager(Manager):
     
     # region comfyUI
     def _init_comfyUI(self):
+        return
         from comfyUI.main import execute_prestartup_script
         execute_prestartup_script()
         

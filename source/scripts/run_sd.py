@@ -12,8 +12,8 @@ config = RunPipeConfig(
         controlnet_loose_depth_model= None,
         
         prompt='a luxury golden boat',
-        #specific_timesteps=[139, 279, 499],
-        num_inference_steps = 3,
+        specific_timesteps=[139, 279, 499],
+        # num_inference_steps = 10,
         
         overlap_end_value=0.2,
         corrmap_merge_len=8,

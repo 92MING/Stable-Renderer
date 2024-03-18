@@ -370,8 +370,8 @@ class Texture(ResourcesObj):
                                 device=f"cuda:{self.engine.RenderManager.TargetDevice}")
         try:
             self._cuda_buffer = pycuda.gl.RegisteredImage(int(self.textureID), 
-                                                    int(gl.GL_TEXTURE_2D), 
-                                                    pycuda.gl.graphics_map_flags.NONE)
+                                                        int(gl.GL_TEXTURE_2D), 
+                                                        pycuda.gl.graphics_map_flags.NONE)
         except pycuda._driver.Error:
             print('Warning: failed to register image. The hardware does not support gl share to torch. Data will be copied from CPU on each frame.')
             self._support_gl_share_to_torch = False

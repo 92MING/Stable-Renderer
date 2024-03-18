@@ -283,7 +283,8 @@ class EulerDiscreteScheduler(SchedulerMixin, ConfigMixin):
 
     def set_timesteps(self, 
                       num_inference_steps: int, 
-                      device: Union[str, torch.device] = None):
+                      device: Union[str, torch.device] = None,
+                      **kwargs):
         """
         Sets the discrete timesteps used for the diffusion chain (to be run before inference).
 
@@ -326,6 +327,8 @@ class EulerDiscreteScheduler(SchedulerMixin, ConfigMixin):
         self._step_index = None
         self._begin_index = None
         self.sigmas = self.sigmas.to("cpu")  # to avoid too much CPU/GPU communication
+
+        logger.warn(f"Keyword arguments {kwargs} are not applied on {str(self.__class__.__name__)}.set_timesteps()")
 
     # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler.index_for_timestep
     def index_for_timestep(self, timestep, schedule_timesteps=None):
