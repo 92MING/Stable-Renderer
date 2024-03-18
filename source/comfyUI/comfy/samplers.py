@@ -548,7 +548,7 @@ class KSAMPLER(Sampler):
         return samples
 
 
-def get_ksampler(sampler_name, extra_options={}, inpaint_options={}):
+def ksampler(sampler_name, extra_options={}, inpaint_options={}):
     if sampler_name == "dpm_fast":
         def dpm_fast_function(model, noise, sigmas, extra_args, callback, disable):
             sigma_min = sigmas[-1]
@@ -634,9 +634,9 @@ def sampler_object(name):
     elif name == "uni_pc_bh2":
         sampler = KSAMPLER(uni_pc.sample_unipc_bh2)
     elif name == "ddim":
-        sampler = get_ksampler("euler", inpaint_options={"random": True})
+        sampler = ksampler("euler", inpaint_options={"random": True})
     else:
-        sampler = get_ksampler(name)
+        sampler = ksampler(name)
     return sampler
 
 class KSampler:

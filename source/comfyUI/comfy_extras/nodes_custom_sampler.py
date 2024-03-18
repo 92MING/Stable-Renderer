@@ -201,7 +201,7 @@ class SamplerDPMPP_2M_SDE:
             sampler_name = "dpmpp_2m_sde"
         else:
             sampler_name = "dpmpp_2m_sde_gpu"
-        sampler = comfy.samplers.get_ksampler(sampler_name, {"eta": eta, "s_noise": s_noise, "solver_type": solver_type})
+        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "s_noise": s_noise, "solver_type": solver_type})
         return (sampler, )
 
 
@@ -225,7 +225,7 @@ class SamplerDPMPP_SDE:
             sampler_name = "dpmpp_sde"
         else:
             sampler_name = "dpmpp_sde_gpu"
-        sampler = comfy.samplers.get_ksampler(sampler_name, {"eta": eta, "s_noise": s_noise, "r": r})
+        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "s_noise": s_noise, "r": r})
         return (sampler, )
 
 class SamplerCustom:
