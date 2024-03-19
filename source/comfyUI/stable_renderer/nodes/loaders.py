@@ -53,8 +53,8 @@ class ImageSequenceLoader(StableRendererNodeBase):
         # Read images as tensor from filenames
         tensor_images = []
         for filename in filenames[frame_start: frame_start+num_frames]:
-            tensor_img = read_image(os.path.join(directory, filename))
-            tensor_img = tensor_img.permute(1, 2, 0) / 255.0
+            tensor_img = read_image(os.path.join(directory, filename), mode=ImageReadMode.RGB)
+            tensor_img = tensor_img.permute(1, 2, 0).unsqueeze(0) / 255.0
             tensor_images.append(tensor_img)
 
-        return torch.vstack(tensor_images)
+        return torch.cat(tensor_images, dim=0) 
