@@ -1,7 +1,6 @@
-import torch
-from typing import List, Literal
+from typing import Literal
 from .utils import value_interpolation
-from ... import log_utils as logu
+
 
 __ALL_SCHEDULER_TYPE__ = ["constant", "linear", "cosine", "exponential"]
 

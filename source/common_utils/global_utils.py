@@ -89,6 +89,8 @@ def GetEnv(key: str, default: Optional[T] = None, type: Type[T] = str)->Optional
         return _env_type_convert(val)   # type: ignore
     except ValueError:
         return default
+    except TypeError:
+        return default
 
 def is_game_mode()->bool:
     '''
