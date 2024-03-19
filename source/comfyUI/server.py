@@ -72,14 +72,12 @@ class PromptServer:
     
     @class_or_ins_property  # type: ignore
     def instance(cls_or_ins)->'PromptServer':
-        if not hasattr(cls_or_ins, '__instance__'):
-            return PromptServer()
-        return cls_or_ins.__instance__  # type: ignore
+        return PromptServer()   # will get the singleton instance if it's already created
     
     def __init__(self, loop: Optional[AbstractEventLoop]=None):
         if loop is None:
             loop = GetOrCreateGlobalValue("__COMFYUI_EVENT_LOOP__", lambda: asyncio.new_event_loop())
-        
+            
         mimetypes.init()
         mimetypes.types_map['.js'] = 'application/javascript; charset=utf-8'
 

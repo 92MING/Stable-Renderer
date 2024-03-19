@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 '''跨模組類，無論在哪裡import，都會得到相同的類'''
 
-from ..global_utils import GetOrAddGlobalValue
-_CrossModuleClassDict: dict = GetOrAddGlobalValue("_CrossModuleClassDict", dict())
+from ..global_utils import GetOrCreateGlobalValue
+_CrossModuleClassDict: dict = GetOrCreateGlobalValue("__CROSS_MODULE_CLASS_DICT__", dict)
 
 class CrossModuleClassMeta(type):
     '''跨模組類的Meta class'''

@@ -4,9 +4,60 @@ _STABLE_RENDERER_PROJ_PATH = os.path.dirname(_COMFYUI_PROJ_PATH)
 sys.path.insert(0, _COMFYUI_PROJ_PATH)
 sys.path.insert(0, _STABLE_RENDERER_PROJ_PATH)
 
+import comfy.options
+comfy.options.enable_args_parsing()
+
+import importlib.util
+import folder_paths
+import time
+
 from common_utils.debug_utils import ComfyUILogger
 from common_utils.global_utils import GetOrCreateGlobalValue, is_game_mode
 from common_utils.system_utils import get_available_port, check_port_is_using
+
+should_run_web_server = (__name__ == '__main__')
+if not should_run_web_server:
+    should_run_web_server = not is_game_mode()  # web server only run in editor mode
+
+def server_execute_prestartup_script():
+    def execute_script(script_path):
+        module_name = os.path.splitext(script_path)[0]
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, script_path)
+            module = importlib.util.module_from_spec(spec)  # type: ignore
+            spec.loader.exec_module(module) # type: ignore
+            return True
+        except Exception as e:
+            ComfyUILogger.warn(f"Failed to execute startup-script: {script_path} / {e}")
+        return False
+
+    node_paths = folder_paths.get_folder_paths("custom_nodes")
+    for custom_node_path in node_paths:
+        possible_modules = os.listdir(custom_node_path)
+        node_prestartup_times = []
+
+        for possible_module in possible_modules:
+            module_path = os.path.join(custom_node_path, possible_module)
+            if os.path.isfile(module_path) or module_path.endswith(".disabled") or module_path == "__pycache__":
+                continue
+
+            script_path = os.path.join(module_path, "prestartup_script.py")
+            if os.path.exists(script_path):
+                time_before = time.perf_counter()
+                success = execute_script(script_path)
+                node_prestartup_times.append((time.perf_counter() - time_before, module_path, success))
+                
+    if len(node_prestartup_times) > 0:
+        ComfyUILogger.debug("\nPrestartup times for custom nodes:")
+        for n in sorted(node_prestartup_times):
+            if n[2]:
+                import_message = ""
+            else:
+                import_message = " (PRESTARTUP FAILED)"
+            ComfyUILogger.debug("{:6.1f} seconds{}:".format(n[0], import_message), n[1])
+
+if should_run_web_server:
+    server_execute_prestartup_script()
 
 import asyncio
 import itertools
@@ -14,23 +65,15 @@ import shutil
 import threading
 import gc
 import yaml
-import importlib.util
-import time
-import asyncio
 
 from typing import Union
 
-import folder_paths
 import server
 import execution
 import nodes
 import cuda_malloc
 import comfy.utils
 import comfy.model_management
-
-if __name__ == '__main__':
-    import comfy.options
-    comfy.options.enable_args_parsing()
 
 from comfy.cli_args import args
 
@@ -41,60 +84,6 @@ def run()->Union[execution.PromptExecutor, None]:
     When game_mode, it will return the prompt_executor.
     '''
     
-    should_run_web_server = (__name__ == '__main__')
-    if not should_run_web_server:
-        should_run_web_server = not is_game_mode()  # web server only run in editor mode
-    
-    if should_run_web_server:
-        event_loop = GetOrCreateGlobalValue("__COMFYUI_EVENT_LOOP__", lambda: asyncio.new_event_loop())
-        asyncio.set_event_loop(event_loop)
-        prompt_server = server.PromptServer(event_loop)
-        prompt_queue = execution.PromptQueue(prompt_server)
-    else:
-        prompt_server = None
-        prompt_queue = None
-    prompt_executor = execution.PromptExecutor(prompt_server)   # sever can be none, means running in game mode
-    
-    def execute_prestartup_script():
-        def execute_script(script_path):
-            module_name = os.path.splitext(script_path)[0]
-            try:
-                spec = importlib.util.spec_from_file_location(module_name, script_path)
-                module = importlib.util.module_from_spec(spec)  # type: ignore
-                spec.loader.exec_module(module) # type: ignore
-                return True
-            except Exception as e:
-                ComfyUILogger.warn(f"Failed to execute startup-script: {script_path} / {e}")
-            return False
-
-        node_paths = folder_paths.get_folder_paths("custom_nodes")
-        for custom_node_path in node_paths:
-            possible_modules = os.listdir(custom_node_path)
-            node_prestartup_times = []
-
-            for possible_module in possible_modules:
-                module_path = os.path.join(custom_node_path, possible_module)
-                if os.path.isfile(module_path) or module_path.endswith(".disabled") or module_path == "__pycache__":
-                    continue
-
-                script_path = os.path.join(module_path, "prestartup_script.py")
-                if os.path.exists(script_path):
-                    time_before = time.perf_counter()
-                    success = execute_script(script_path)
-                    node_prestartup_times.append((time.perf_counter() - time_before, module_path, success))
-                    
-        if len(node_prestartup_times) > 0:
-            ComfyUILogger.debug("\nPrestartup times for custom nodes:")
-            for n in sorted(node_prestartup_times):
-                if n[2]:
-                    import_message = ""
-                else:
-                    import_message = " (PRESTARTUP FAILED)"
-                ComfyUILogger.debug("{:6.1f} seconds{}:".format(n[0], import_message), n[1])
-
-    if should_run_web_server:
-        execute_prestartup_script()
-
     if args.cuda_device is not None:
         os.environ['CUDA_VISIBLE_DEVICES'] = str(args.cuda_device)
         ComfyUILogger.debug("Set cuda device to:", args.cuda_device)
@@ -230,6 +219,18 @@ def run()->Union[execution.PromptExecutor, None]:
     nodes.init_custom_nodes()
 
     cuda_malloc_warning()
+    
+        
+    if should_run_web_server:
+        event_loop = GetOrCreateGlobalValue("__COMFYUI_EVENT_LOOP__", lambda: asyncio.new_event_loop())
+        asyncio.set_event_loop(event_loop)
+        prompt_server = server.PromptServer(event_loop)
+        prompt_queue = execution.PromptQueue(prompt_server)
+    else:
+        prompt_server = None
+        prompt_queue = None
+    prompt_executor = execution.PromptExecutor(prompt_server)   # sever can be none, means running in game mode
+    
 
     if should_run_web_server:
         prompt_server.add_routes()  # type: ignore
