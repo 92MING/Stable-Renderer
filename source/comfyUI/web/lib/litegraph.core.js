@@ -8636,9 +8636,11 @@ LGraphNode.prototype.executeAction = function(action)
 
 					if (slot_type.toLowerCase() == "array"){
                         slot_shape = LiteGraph.GRID_SHAPE;
+                        slot.shape = LiteGraph.GRID_SHAPE;   // some methods are calling `slot.shape` instead of `slot_type` so we need to set it here
                     }
                     else if (slot_type.toLowerCase() == "image" || slot_type.toLowerCase() == "latent"){
                         slot_shape = LiteGraph.BOX_SHAPE;
+                        slot.shape = LiteGraph.BOX_SHAPE;   // some methods are calling `slot.shape` instead of `slot_type` so we need to set it here
                     }
                     
                     var doStroke = true;
@@ -8690,8 +8692,13 @@ LGraphNode.prototype.executeAction = function(action)
                     if (render_text) {
                         var slot_name = slot.label!=null? slot.label: slot.name;
 						var type_name = slot.type;
-						if (type_name == "*") type_name = "ANY";
-						if (slot_name == type_name || slot_name == "*") slot_name = "";
+						
+                        if (type_name == "*") 
+                            type_name = "ANY";
+                        else if (type_name.toLowerCase() == slot_name.toLowerCase())
+							slot_name = "";
+                        
+                            if (slot_name == type_name || slot_name == "*") slot_name = "";
 						var text = slot_name + "(" + type_name + ")";
                         if (text) {
                             ctx.fillStyle = LiteGraph.NODE_TEXT_COLOR;
@@ -8742,9 +8749,11 @@ LGraphNode.prototype.executeAction = function(action)
 
 					if (slot_type.toLowerCase() == "array"){
                         slot_shape = LiteGraph.GRID_SHAPE;
+                        slot.shape = LiteGraph.GRID_SHAPE;   // some methods are calling `slot.shape` instead of `slot_type` so we need to set it here
                     }
                     else if (slot_type.toLowerCase() == "image" || slot_type.toLowerCase() == "latent"){
                         slot_shape = LiteGraph.BOX_SHAPE;
+                        slot.shape = LiteGraph.BOX_SHAPE;   // some methods are calling `slot.shape` instead of `slot_type` so we need to set it here
                     }
                     
                     var doStroke = true;
@@ -8804,7 +8813,12 @@ LGraphNode.prototype.executeAction = function(action)
                     if (render_text) {
                         var slot_name = slot.label!=null? slot.label: slot.name;
 						var type_name = slot.type;
-						if (type_name == "*") type_name = "ANY";
+						
+                        if (type_name == "*") 
+                            type_name = "ANY";
+                        else if (type_name.toLowerCase() == slot_name.toLowerCase())
+							slot_name = "";
+
 						if (slot_name == type_name || slot_name == "*") slot_name = "";
 						var text = slot_name + "(" + type_name + ")";
                         if (text) {
@@ -9867,7 +9881,7 @@ LGraphNode.prototype.executeAction = function(action)
 			if(w.disabled)
 				ctx.globalAlpha *= 0.5;
 			var widget_width = w.width || width;
-
+            
             switch (w.type) {
                 case "button":
                     ctx.fillStyle = background_color;
@@ -9965,6 +9979,8 @@ LGraphNode.prototype.executeAction = function(action)
 						if(!w.disabled)
 		                    ctx.stroke();
                         ctx.fillStyle = text_color;
+
+                         // draw arrows
 						if(!w.disabled)
 						{
 							ctx.beginPath();
@@ -9978,8 +9994,22 @@ LGraphNode.prototype.executeAction = function(action)
 							ctx.lineTo(widget_width - margin - 16, y + H - 5);
 							ctx.fill();
 						}
+
+                        // draw field name
                         ctx.fillStyle = secondary_text_color;
-                        ctx.fillText(w.label || w.name, margin * 2 + 5, y + H * 0.7);
+                        let field_name = w.label || w.name;
+						let maxLength = 80;
+						let metrics = ctx.measureText(field_name);
+						let field_name_width = metrics.width;
+						
+						if (field_name_width > maxLength) {
+						  let charWidth = field_name_width / Math.max(field_name.length, 1);
+						  let maxChars = Math.floor(maxLength / charWidth);
+						  field_name = field_name.substring(0, maxChars-3) + "...";
+						}
+                        ctx.fillText(field_name, margin * 2 + 5, y + H * 0.7);
+                        
+                        // draw value
                         ctx.fillStyle = text_color;
                         ctx.textAlign = "right";
                         if (w.type == "number") {
@@ -10001,6 +10031,15 @@ LGraphNode.prototype.executeAction = function(action)
 									values = values();
 								if(values && values.constructor !== Array)
 									v = values[ w.value ];
+							}
+                            let maxLength = 120;
+                            let metrics = ctx.measureText(v);
+                            let v_width = metrics.width;
+                            
+                            if (v_width > maxLength) {
+	                            let charWidth = v_width / Math.max(v.length, 1);
+	                            let maxChars = Math.floor(maxLength / charWidth);
+	                            v = v.substring(0, maxChars-4) + "..." + v.substring(v.length-5);
 							}
                             ctx.fillText(
                                 v,
@@ -10039,6 +10078,56 @@ LGraphNode.prototype.executeAction = function(action)
                         ctx.textAlign = "right";
                         ctx.fillText(String(w.value).substr(0,30), widget_width - margin * 2, y + H * 0.7); //30 chars max
 						ctx.restore();
+                    }
+                    break;
+                case "path":
+                    ctx.textAlign = "left";
+                    ctx.strokeStyle = outline_color;
+                    ctx.fillStyle = background_color;
+                    ctx.beginPath();
+                    if(show_text)
+                        ctx.roundRect(margin, y, widget_width - margin * 2, H, [H * 0.5] );
+                    else
+                        ctx.rect(margin, y, widget_width - margin * 2, H );
+                    ctx.fill();
+                    if (show_text) {
+                        if(!w.disabled)
+                            ctx.stroke();
+                        
+                        // draw the field name
+                        ctx.fillStyle = secondary_text_color;
+                        let field_name = w.label || w.name;
+						let maxLength = 80;
+						let metrics = ctx.measureText(field_name);
+						let field_name_width = metrics.width;
+						
+						if (field_name_width > maxLength) {
+						  let charWidth = field_name_width / Math.max(field_name.length, 1);
+						  let maxChars = Math.floor(maxLength / charWidth);
+						  field_name = field_name.substring(0, maxChars-3) + "...";
+						}
+                        ctx.fillText(field_name, margin * 2 + 5, y + H * 0.7);
+                        
+                        // draw the value
+                        ctx.textAlign = "right";
+                        ctx.fillStyle = text_color;
+                        var path = w.value;
+                        var filename = path.split("\\").pop().split("/").pop();
+                        
+                        let max_filename_length = 120;
+                        let metrics_filename = ctx.measureText(filename);
+                        let filename_width = metrics_filename.width;
+                        if (filename_width > max_filename_length) {
+                            let charWidth = filename_width / Math.max(filename.length, 1);
+                            let maxChars = Math.floor(max_filename_length / charWidth);
+                            filename = filename.substring(0, maxChars-4) + "..." + filename.substring(filename.length-5);
+                        }
+
+                        ctx.fillText(
+                            filename,
+                            widget_width - margin * 2 - 20,
+                            y + H * 0.7
+                        );
                     }
                     break;
                 default:
@@ -10133,7 +10222,8 @@ LGraphNode.prototype.executeAction = function(action)
 						if ( w.options.max != null && w.value > w.options.max ) {
 							w.value = w.options.max;
 						}
-					} else if (event.type == LiteGraph.pointerevents_method+"down") {
+					} 
+                    else if (event.type == LiteGraph.pointerevents_method+"down") {
 						var values = w.options.values;
 						if (values && values.constructor === Function) {
 							values = w.options.values(w, node);
@@ -10152,7 +10242,8 @@ LGraphNode.prototype.executeAction = function(action)
 							if ( w.options.max != null && w.value > w.options.max ) {
 								w.value = w.options.max;
 							}
-						} else if (delta) { //clicked in arrow, used for combos 
+						} 
+                        else if (delta) { //clicked in arrow, used for combos 
 							var index = -1;
 							this.last_mouseclick = 0; //avoids dobl click event
 							if(values.constructor === Object)
@@ -10160,16 +10251,17 @@ LGraphNode.prototype.executeAction = function(action)
 							else
 								index = values_list.indexOf( w.value ) + delta;
 							if (index >= values_list.length) {
-								index = values_list.length - 1;
-							}
+                                index = index % values_list.length;
+                            }
 							if (index < 0) {
-								index = 0;
+								index = values_list.length + index;
 							}
 							if( values.constructor === Array )
 								w.value = values[index];
 							else
 								w.value = index;
-						} else { //combo clicked 
+						} 
+                        else { //combo clicked 
 							var text_values = values != values_list ? Object.values(values) : values;
 							var menu = new LiteGraph.ContextMenu(text_values, {
 									scale: Math.max(1, this.ds.scale),
@@ -10232,7 +10324,18 @@ LGraphNode.prototype.executeAction = function(action)
 							event,w.options ? w.options.multiline : false );
 					}
 					break;
-				default:
+				case "path":
+                    if (event.type === LiteGraph.pointerevents_method+"down") {
+                        if (w.callback) {
+                            setTimeout(function() {
+                                w.callback(that, node);
+                            }, 20);
+                        }
+                        w.clicked = true;
+                        this.dirty_canvas = true;
+                    }
+					break;
+                default:
 					if (w.mouse) {
 						this.dirty_canvas = w.mouse(event, [x, y], node);
 					}

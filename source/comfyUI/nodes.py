@@ -90,7 +90,7 @@ class ConditioningAverage :
         out = []
 
         if len(conditioning_from) > 1:
-            ComfyUILogger.warn("Warning: ConditioningAverage conditioning_from contains more than 1 cond, only the first one will actually be applied to conditioning_to.")
+            ComfyUILogger.warning("Warning: ConditioningAverage conditioning_from contains more than 1 cond, only the first one will actually be applied to conditioning_to.")
 
         cond_from = conditioning_from[0][0]
         pooled_output_from = conditioning_from[0][1].get("pooled_output", None)
@@ -129,7 +129,7 @@ class ConditioningConcat:
         out = []
 
         if len(conditioning_from) > 1:
-            ComfyUILogger.warn("Warning: ConditioningConcat conditioning_from contains more than 1 cond, only the first one will actually be applied to conditioning_to.")
+            ComfyUILogger.warning("Warning: ConditioningConcat conditioning_from contains more than 1 cond, only the first one will actually be applied to conditioning_to.")
 
         cond_from = conditioning_from[0][0]
 
@@ -1917,10 +1917,10 @@ def _load_custom_node(module_path, ignore=set()):
                 NODE_DISPLAY_NAME_MAPPINGS.update(module.NODE_DISPLAY_NAME_MAPPINGS)
             return True
         else:
-            ComfyUILogger.warn(f"Skip {module_path} module for custom nodes due to the lack of NODE_CLASS_MAPPINGS.")
+            ComfyUILogger.warning(f"Skip {module_path} module for custom nodes due to the lack of NODE_CLASS_MAPPINGS.")
             return False
     except Exception as e:
-        ComfyUILogger.warn(f"Cannot import {module_path} module for custom nodes with error: {e}. Traceback: {traceback.format_exc()}")
+        ComfyUILogger.warning(f"Cannot import {module_path} module for custom nodes with error: {e}. Traceback: {traceback.format_exc()}")
         return False
 
 def load_custom_nodes():
@@ -1948,20 +1948,20 @@ def load_custom_nodes():
             node_import_times.append((time.perf_counter() - time_before, module_path, success))
 
     if len(node_import_times) > 0:
-        ComfyUILogger.debug("\nImport times for custom nodes:")
+        ComfyUILogger.debug("Import times for custom nodes:")
         for n in sorted(node_import_times):
             if n[2]:
                 import_message = ""
             else:
                 import_message = " (IMPORT FAILED)"
-            ComfyUILogger.debug("{:6.1f} seconds{}:".format(n[0], import_message), n[1])
+            ComfyUILogger.debug("{:6.1f} seconds{}:".format(n[0], import_message) + n[1])
     
     ComfyUILogger.debug('loading stable-renderer nodes...')
     stable_renderer_nodes_path = os.path.join(folder_paths.base_path, 'stable_renderer', 'nodes')
     success = _load_custom_node(stable_renderer_nodes_path, )
 
     if not success:
-        ComfyUILogger.warn('failed to load stable-renderer nodes.')
+        ComfyUILogger.warning('failed to load stable-renderer nodes.')
     else:
         ComfyUILogger.debug('successfully loaded stable-renderer nodes.')
 
@@ -2005,10 +2005,10 @@ def init_custom_nodes():
     load_custom_nodes()
 
     if len(import_failed) > 0:
-        ComfyUILogger.warn("WARNING: some comfy_extras/ nodes did not import correctly. This may be because they are missing some dependencies.\n")
+        ComfyUILogger.warning("WARNING: some comfy_extras/ nodes did not import correctly. This may be because they are missing some dependencies.\n")
         for node in import_failed:
-            ComfyUILogger.warn("IMPORT FAILED: {}".format(node))
-        ComfyUILogger.warn("\nThis issue might be caused by missing dependencies.")
+            ComfyUILogger.warning("IMPORT FAILED: {}".format(node))
+        ComfyUILogger.warning("This issue might be caused by missing dependencies.")
         if args.windows_standalone_build:
             ComfyUILogger.info("Please run the update script: update/update_comfyui.bat")
         else:

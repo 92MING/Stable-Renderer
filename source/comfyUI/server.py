@@ -16,6 +16,7 @@ import folder_paths
 import comfy.utils
 import comfy.model_management
 
+from multidict import MultiDict
 from typing import Optional, TYPE_CHECKING
 from PIL import Image, ImageOps
 from PIL.PngImagePlugin import PngInfo
@@ -25,6 +26,7 @@ from aiohttp import web
 
 from common_utils.decorators import singleton, class_or_ins_property
 from common_utils.global_utils import GetOrCreateGlobalValue
+from common_utils.debug_utils import ComfyUILogger
 from comfy.cli_args import args
 from app.user_manager import UserManager
 
@@ -40,7 +42,7 @@ async def send_socket_catch_exception(function, message):
     try:
         await function(message)
     except (aiohttp.ClientError, aiohttp.ClientPayloadError, ConnectionResetError) as err:
-        print("send error:", err)
+        ComfyUILogger.warning("send error:", err)
 
 @web.middleware
 async def cache_control(request: web.Request, handler):
@@ -127,7 +129,7 @@ class PromptServer:
                     
                 async for msg in ws:
                     if msg.type == aiohttp.WSMsgType.ERROR:
-                        print('ws connection closed with exception %s' % ws.exception())
+                        ComfyUILogger.warning('ws connection closed with exception %s' % ws.exception())
             finally:
                 self.sockets.pop(sid, None)
             return ws
@@ -137,7 +139,7 @@ class PromptServer:
             return web.FileResponse(os.path.join(self.web_root, "index.html"))
 
         @routes.get("/embeddings")
-        def get_embeddings(self):
+        async def get_embeddings(self):
             embeddings = folder_paths.get_filename_list("embeddings")
             return web.json_response(list(map(lambda a: os.path.splitext(a)[0], embeddings)))
 
@@ -168,15 +170,19 @@ class PromptServer:
 
             return type_dir, dir_type
 
-        def image_upload(post, image_save_function=None):
-            image = post.get("image")
+        def file_upload(post: MultiDict, file_save_func=None):
+            file_data = post.get("data")
+            if not file_data:
+                file_data = post.get("image")
+            if not file_data:
+                return web.Response(status=400, reason="No file provided. It must be in a field called 'data' or 'image'.")
             overwrite = post.get("overwrite")
 
-            image_upload_type = post.get("type")
-            upload_dir, image_upload_type = get_dir_by_type(image_upload_type)
+            upload_type = post.get("type", 'input')
+            upload_dir, upload_type = get_dir_by_type(upload_type)
 
-            if image and image.file:
-                filename = image.filename
+            if file_data and file_data.file:
+                filename = file_data.filename
                 if not filename:
                     return web.Response(status=400)
 
@@ -201,21 +207,37 @@ class PromptServer:
                         filepath = os.path.join(full_output_folder, filename)
                         i += 1
 
-                if image_save_function is not None:
-                    image_save_function(image, post, filepath)
+                if file_save_func is not None:
+                    file_save_func(file_data, post, filepath)
                 else:
                     with open(filepath, "wb") as f:
-                        f.write(image.file.read())
-
-                return web.json_response({"name" : filename, "subfolder": subfolder, "type": image_upload_type})
+                        f.write(file_data.file.read())
+                
+                relative_path = os.path.relpath(filepath, upload_dir)
+                abs_path = os.path.abspath(filepath)
+                return web.json_response({
+                    "name" : filename, 
+                    "subfolder": subfolder, 
+                    "type": upload_type, 
+                    "relative_path": relative_path,
+                    "absolute_path": abs_path,
+                })
             else:
                 return web.Response(status=400)
 
         @routes.post("/upload/image")
         async def upload_image(request):
+            '''
+            Actually the same as upload_file.
+            It is for compatibility with the old version of the frontend.
+            '''
             post = await request.post()
-            return image_upload(post)
+            return file_upload(post)
 
+        @routes.post("/upload/file")
+        async def upload_file(request):
+            post = await request.post()
+            return file_upload(post)
 
         @routes.post("/upload/mask")
         async def upload_mask(request):
@@ -258,7 +280,7 @@ class PromptServer:
                         original_pil.putalpha(new_alpha)
                         original_pil.save(filepath, compress_level=4, pnginfo=metadata)
 
-            return image_upload(post, image_save_function)
+            return file_upload(post, image_save_function)
 
         @routes.get("/view")
         async def view_image(request):
@@ -411,6 +433,11 @@ class PromptServer:
             info['name'] = node_class
             info['display_name'] = nodes.NODE_DISPLAY_NAME_MAPPINGS[node_class] if node_class in nodes.NODE_DISPLAY_NAME_MAPPINGS.keys() else node_class
             info['description'] = obj_class.DESCRIPTION if hasattr(obj_class,'DESCRIPTION') else ''
+            info['reduce_inputs'] = obj_class.REDUCE_INPUTS if hasattr(obj_class, 'REDUCE_INPUTS') else tuple()
+            
+            if not info['description']:
+                if hasattr(obj_class, '__doc__') and obj_class.__doc__:
+                    info['description'] = obj_class.__doc__
             info['category'] = 'sd'
             if hasattr(obj_class, 'OUTPUT_NODE') and obj_class.OUTPUT_NODE == True:
                 info['output_node'] = True
@@ -428,7 +455,7 @@ class PromptServer:
                 try:
                     out[x] = node_info(x)
                 except Exception as e:
-                    print(f"[ERROR] An error occurred while retrieving information for the '{x}' node.", file=sys.stderr)
+                    ComfyUILogger.warning(f"[ERROR] An error occurred while retrieving information for the '{x}' node.", file=sys.stderr)
                     traceback.print_exc()
             return web.json_response(out)
 
@@ -462,7 +489,7 @@ class PromptServer:
 
         @routes.post("/prompt")
         async def post_prompt(request):
-            print("got prompt")
+            ComfyUILogger.debug("got prompt")
             resp_code = 200
             out_string = ""
             json_data =  await request.json()
@@ -497,7 +524,7 @@ class PromptServer:
                     response = {"prompt_id": prompt_id, "number": number, "node_errors": valid[3]}
                     return web.json_response(response)
                 else:
-                    print("invalid prompt:", valid[1])
+                    ComfyUILogger.warning("invalid prompt:", valid[1])
                     return web.json_response({"error": valid[1], "node_errors": valid[3]}, status=400)
             else:
                 return web.json_response({"error": "no prompt", "node_errors": []}, status=400)
@@ -645,8 +672,8 @@ class PromptServer:
         await site.start()
 
         if verbose:
-            print("Starting server\n")
-            print("To see the GUI go to: http://{}:{}".format(address, port))
+            ComfyUILogger.info("Starting server\n")
+            ComfyUILogger.info("To see the GUI go to: http://{}:{}".format(address, port))
         if call_on_start is not None:
             call_on_start(address, port)
 
@@ -658,7 +685,7 @@ class PromptServer:
             try:
                 json_data = handler(json_data)
             except Exception as e:
-                print(f"[ERROR] An error occurred during the on_prompt_handler processing")
+                ComfyUILogger.warning(f"[ERROR] An error occurred during the on_prompt_handler processing")
                 traceback.print_exc()
 
         return json_data

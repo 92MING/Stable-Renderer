@@ -31,7 +31,7 @@ class SRComfyNode(ComfyUINode, Generic[NT]):
 
 __all__ = ['SRComfyNode']
 
-def _get_input_param_type(key: str, param: Parameter)->Literal['required', 'optional', 'hidden']:
+def _get_input_param_type(key: str, param: Parameter, tags: Optional[List[str]]=None)->Literal['required', 'optional', 'hidden']:
     '''
     Get the input parameter type for registration.
     
@@ -40,8 +40,30 @@ def _get_input_param_type(key: str, param: Parameter)->Literal['required', 'opti
         * optional: param default is None, e.g. def f(x:int = None)
         * required: others
     '''
+    # 3 conditions for hidden
     if key.startswith('_'):
         return 'hidden'
+    anno = param.annotation
+    anno_origin = get_origin(anno)
+    if anno_origin:
+        if anno_origin == Annotated:
+            args = get_args(anno)
+            if isinstance(args[0], str):
+                if args[0].lower() == 'hidden':
+                    return 'hidden'
+            if isinstance(args[0], type):
+                if issubclass(args[0], HIDDEN):
+                    return 'hidden'
+    elif type(anno) == type:
+        if issubclass(anno, HIDDEN):
+            return 'hidden'
+    elif isinstance(anno, str):
+        if anno.lower() == 'hidden':
+            return 'hidden'
+    if tags:
+        if 'hidden' in tags:
+            return 'hidden'
+    
     if param.default is None:
         return 'optional'   # only when default=None will be considered as optional
     return 'required'  
@@ -160,12 +182,14 @@ class _NodeField:
                 
             if param.default != Parameter.empty:
                 self.param.default = param.default
-
-            self.param_type = _get_input_param_type(self.origin_param_name, param)
-        else:   # return field info
-            self.origin_param_name = None
-            self.param_name = None
-            self.param_type = None
+            
+            tags = self.param.tags
+            self.param_type = _get_input_param_type(self.origin_param_name, param, tags)
+            
+        else:   # return fields' info
+            self.origin_param_name = None   # return type may has no name
+            self.param_name = None  
+            self.param_type = None  # return type has no type
             
             if param == Parameter.empty:
                 param = Any # type: ignore
@@ -239,7 +263,7 @@ class NodeBase(ABC):
     _RealComfyUINode: ClassVar[type] = None     # type: ignore
     '''The real registration node class for ComfyUI'''
     
-        
+
     @classmethod
     def _InitFields(cls):
         cls._InputFields = {param_name: _NodeField(param) for param_name, param in cls._CallSig.parameters.items()}
@@ -248,15 +272,17 @@ class NodeBase(ABC):
         if return_anno == Parameter.empty:
             return_anno = Any
         origin = get_origin(return_anno)
+        
         return_field_names = []
         return_fields = []
+        
         if origin:  # special types, e.g. Annotated, Literal
             if origin in (Annotated, Literal, Any):
                 field = _NodeField(return_anno)
                 return_field_names.append(field.param_name) # can append `None`
                 return_fields.append(field)
             elif origin in (Tuple, tuple):   # multiple return values
-                args = get_args(origin)
+                args = get_args(return_anno)
                 for arg in args:
                     field = _NodeField(arg)
                     return_field_names.append(field.param_name)
@@ -268,11 +294,8 @@ class NodeBase(ABC):
             return_field_names.append(field.param_name) # can append `None`
             return_fields.append(field)
         
-        no_name_count = return_field_names.count(None)
-        if no_name_count not in (0, len(return_field_names)):   # all or none should have names
-             raise TypeError(f'If you have named any of the return value, all of the return values should be named')
         cls._ReturnFields = tuple(zip(return_field_names, return_fields))   # named return values
-    
+
     @classmethod
     def _InitCategory(cls):
         '''Return the real category for registration.'''
@@ -344,7 +367,7 @@ class NodeBase(ABC):
         setattr(newcls, 'OUTPUT_NODE', has_ui_ret)    # `OUTPUT_NODE` is a flag for ComfyUI to shown on UI
         
         return_names = [name for name, _ in cls._ReturnFields if name]
-        return_types = [field.param._comfy_type_definition for _, field in cls._ReturnFields]   # not sure ComfyUI support COMBO return? maybe error in future
+        return_types = [field.param._comfy_type_definition for (_, field) in cls._ReturnFields]   # not sure ComfyUI support COMBO return? maybe error in future
         setattr(newcls, 'RETURN_TYPES', tuple(return_types))
         
         if return_names and return_names[0]:    # just check the first name is not None is enough(should be all or none)
@@ -588,7 +611,7 @@ class NodeBase(ABC):
         '''
     
     @classmethod
-    def ValidateInput(cls, *args, **kwargs)->bool:
+    def ValidateInput(cls, *args, **kwargs)->bool:  # type: ignore
         '''
         You can define this method to validate the node input is valid. Note that this is a classmethod
         (I think thats a bad idea actually, should be changed into instance method)

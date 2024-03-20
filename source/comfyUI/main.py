@@ -4,16 +4,16 @@ _STABLE_RENDERER_PROJ_PATH = os.path.dirname(_COMFYUI_PROJ_PATH)
 sys.path.insert(0, _COMFYUI_PROJ_PATH)
 sys.path.insert(0, _STABLE_RENDERER_PROJ_PATH)
 
+from common_utils.debug_utils import ComfyUILogger
+from common_utils.global_utils import GetOrCreateGlobalValue, is_game_mode, is_dev_mode
+from common_utils.system_utils import get_available_port, check_port_is_using
+
 import comfy.options
 comfy.options.enable_args_parsing()
 
 import importlib.util
 import folder_paths
 import time
-
-from common_utils.debug_utils import ComfyUILogger
-from common_utils.global_utils import GetOrCreateGlobalValue, is_game_mode
-from common_utils.system_utils import get_available_port, check_port_is_using
 
 should_run_web_server = (__name__ == '__main__')
 if not should_run_web_server:
@@ -28,7 +28,7 @@ def server_execute_prestartup_script():
             spec.loader.exec_module(module) # type: ignore
             return True
         except Exception as e:
-            ComfyUILogger.warn(f"Failed to execute startup-script: {script_path} / {e}")
+            ComfyUILogger.warning(f"Failed to execute startup-script: {script_path} / {e}")
         return False
 
     node_paths = folder_paths.get_folder_paths("custom_nodes")
@@ -54,7 +54,7 @@ def server_execute_prestartup_script():
                 import_message = ""
             else:
                 import_message = " (PRESTARTUP FAILED)"
-            ComfyUILogger.debug("{:6.1f} seconds{}:".format(n[0], import_message), n[1])
+            ComfyUILogger.debug("{:6.1f} seconds{}:".format(n[0], import_message) + n[1])
 
 if should_run_web_server:
     server_execute_prestartup_script()
@@ -101,7 +101,7 @@ def run()->Union[execution.PromptExecutor, None]:
                 if b in device_name:
                     cuda_malloc_warning = True
             if cuda_malloc_warning:
-                ComfyUILogger.warn("\nWARNING: this card most likely does not support cuda-malloc, if you get \"CUDA error\" please run ComfyUI with: --disable-cuda-malloc\n")
+                ComfyUILogger.warning("\nWARNING: this card most likely does not support cuda-malloc, if you get \"CUDA error\" please run ComfyUI with: --disable-cuda-malloc\n")
     
     def prompt_worker(e: execution.PromptExecutor, q: execution.PromptQueue, server: server.PromptServer):
         
@@ -219,7 +219,6 @@ def run()->Union[execution.PromptExecutor, None]:
     nodes.init_custom_nodes()
 
     cuda_malloc_warning()
-    
         
     if should_run_web_server:
         event_loop = GetOrCreateGlobalValue("__COMFYUI_EVENT_LOOP__", lambda: asyncio.new_event_loop())
