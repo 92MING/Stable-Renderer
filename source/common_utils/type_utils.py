@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-'''常用的類型相關函數，例如類型檢查等'''
+'''common type related stuff'''
+
+if __name__ == '__main__':  # for debugging
+    import sys, os
+    _proj_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    sys.path.append(_proj_path)
+    __package__ = 'common_utils'
 
 from dataclasses import dataclass
 from inspect import Parameter, signature, _empty, getmro
@@ -11,6 +17,7 @@ from inspect import getmro, signature
 from typeguard import check_type as tg_check_type, TypeCheckError
 from functools import cache
 from pathlib import Path
+
 from .path_utils import SOURCE_DIR
 
 # region type checking
@@ -377,3 +384,4 @@ AsyncFunc = Callable[..., Awaitable[Any]]
 
 __all__.extend(['BasicType', 'AsyncFunc'])
 # endregion
+
