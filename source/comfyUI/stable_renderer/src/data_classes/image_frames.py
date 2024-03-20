@@ -1,37 +1,43 @@
-from .frames import Frames
-from common_utils.data_struct import SortableElement
-from PIL import Image
-from PIL.Image import Image as PILImage
-from typing import Callable, List
-import numpy as np
 import os
 import re
 
-class ImageFrames(Frames):
+from typing import List
+from PIL import Image
+from PIL.Image import Image as PILImage
+
+from common_utils.data_struct import SortableElement
+
+# ! Deprecated
+class ImageFrames:
     def __init__(self, data: List[PILImage]):
-        super().__init__(data)
-    
+        self._data = data
+
     @property
     def Data(self) -> List[PILImage]:
-        return self._data
-    
-    def __str__(self):
-        return self.Data.__str__()
+        return self._data 
 
     @classmethod
     def from_existing_directory(cls,
                                 directory: str,
+                                frame_start: int,
                                 num_frames: int):
         assert os.path.exists(directory), f"Directory {directory} not found"
+        assert frame_start >= 0, f"frame_start must be non-negative"
+        assert num_frames > 0, f"num_frames must be positive"
+
         file_filter = lambda fname: fname.endswith((".jpeg", ".png", ".bmp", ".jpg"))
         extract_key = lambda fname: int(re.search(r"\d+", fname).group())
+
         data_container = []
         for filename in os.listdir(directory):
             if file_filter(filename):
                 key = extract_key(filename)
-                image = Image.open(os.path.join(directory, filename))
-                data_container.append(SortableElement(value=key, object=image))
-        data_container = [d.Object for d in sorted(data_container)[:num_frames]]
+                with Image.open(os.path.join(directory, filename)) as image:
+                    data_container.append(SortableElement(value=key, object=image))
+    
+        data_container = [
+            d.Object for d in sorted(data_container)[frame_start: frame_start+num_frames]
+        ]
         return ImageFrames(data_container)
 
 __all__ = ['ImageFrames']

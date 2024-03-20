@@ -9,7 +9,6 @@ from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableRen
 from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
 from sd.modules.diffuser_pipelines.overlap import Overlap, ResizeOverlap, Scheduler
 from sd.modules.diffuser_pipelines.overlap.algorithms import overlap_algorithm_factory
-from sd.modules.diffuser_pipelines.overlap.scheduler import StartEndScheduler
 from sd.modules.diffuser_pipelines.overlap.utils import build_view_normal_map
 from sd.modules.diffuser_pipelines.schedulers import EulerDiscreteScheduler, LCMScheduler
 from PIL import Image

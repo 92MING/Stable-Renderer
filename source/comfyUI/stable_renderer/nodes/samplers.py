@@ -13,17 +13,17 @@ class StableRenderSampler(StableRendererNodeBase):
 
     def __call__(self, 
                  model: MODEL,
-                 positive: "CONDITIONING",
-                 negative: "CONDITIONING",
+                 positive: "CONDITIONING", # type: ignore
+                 negative: "CONDITIONING", # type: ignore
                  latent_image: LATENT,
                  add_noise: bool= False,
-                 noise_seed: INT(0, 0xffffffffffffffff)=0,
-                 steps: INT(1, 10000)=20,
-                 cfg: FLOAT(0.0, 100.0, 0.01, round=0.01)=8.0,
+                 noise_seed: INT(0, 0xffffffffffffffff)=0, # type: ignore
+                 steps: INT(1, 10000)=20, # type: ignore
+                 cfg: FLOAT(0.0, 100.0, 0.01, round=0.01)=8.0, # type: ignore
                  sampler_name: COMFY_SAMPLERS=_default_sampler,
                  scheduler: COMFY_SCHEDULERS=_default_scheduler,
-                 start_at_step: INT(0, 10000)=0,
-                 end_at_step: INT(0, 10000)=10000,
+                 start_at_step: INT(0, 10000)=0, # type: ignore
+                 end_at_step: INT(0, 10000)=10000, # type: ignore
                  return_with_leftover_noise: bool=False,
                  denoise=1.0)->LATENT:
         
