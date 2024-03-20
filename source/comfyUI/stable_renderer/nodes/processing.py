@@ -35,6 +35,21 @@ rmbg_model = rt.InferenceSession(model_path, providers=providers)
 class StableRendererRemoveImageBackground(StableRendererNodeBase):
     Category = "Processing"
 
+    def remove_background(image: torch.Tensor) -> torch.Tensor:
+        """remove background
+
+        Args:
+            image (torch.Tensor): image with shape [height, width, channels]
+
+        Returns:
+            torch.Tensor: image with background removed
+        """
+        assert image.ndim == 3
+        npa = image2nparray(image)
+        rmb = rmbg_fn(npa)
+        img = nparray2image(rmb)
+        return img
+
     def __call__(self, image:IMAGE) -> IMAGE:
         """
         Remove background.
@@ -49,7 +64,7 @@ class StableRendererRemoveImageBackground(StableRendererNodeBase):
             ret_images = list(map(remove_background, image))
             return (torch.cat(ret_images, dim=0), )
         else:
-            img = self.remove_background(image)
+            img = remove_background(image)
             return (img, )
 
 
