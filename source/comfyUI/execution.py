@@ -39,34 +39,35 @@ def _get_input_data(inputs: NodeInputs,
     '''
     valid_inputs = class_def.INPUT_TYPES()
     lazy_inputs = class_def.LAZY_INPUTS if hasattr(class_def, "LAZY_INPUTS") else []
+    reduce_inputs = class_def.REDUCE_INPUTS if hasattr(class_def, "REDUCE_INPUTS") else []
     
     input_data_all = {}
-    for x in inputs:
-        input_data = inputs[x]
+    for node_id in inputs:
+        input_data = inputs[node_id]
         
         if isinstance(input_data, list):    # [from_node_id, from_node_output_slot_index]
             input_unique_id = input_data[0]
             output_index = input_data[1]
             if input_unique_id not in outputs:
-                input_data_all[x] = (None,)
+                input_data_all[node_id] = (None,)
                 continue
             obj = outputs[input_unique_id][output_index]
-            input_data_all[x] = obj
+            input_data_all[node_id] = obj
             
         else:   # a value
-            if ("required" in valid_inputs and x in valid_inputs["required"]) or ("optional" in valid_inputs and x in valid_inputs["optional"]):
-                input_data_all[x] = [input_data]
+            if ("required" in valid_inputs and node_id in valid_inputs["required"]) or ("optional" in valid_inputs and node_id in valid_inputs["optional"]):
+                input_data_all[node_id] = [input_data]
 
     if "hidden" in valid_inputs:
         h = valid_inputs["hidden"]
-        for x in h:
-            if h[x] == "PROMPT":
-                input_data_all[x] = [prompt]
-            if h[x] == "EXTRA_PNGINFO":
+        for node_id in h:
+            if h[node_id] == "PROMPT":
+                input_data_all[node_id] = [prompt]
+            if h[node_id] == "EXTRA_PNGINFO":
                 if "extra_pnginfo" in extra_data:
-                    input_data_all[x] = [extra_data['extra_pnginfo']]
-            if h[x] == "UNIQUE_ID":
-                input_data_all[x] = [unique_id]
+                    input_data_all[node_id] = [extra_data['extra_pnginfo']]
+            if h[node_id] == "UNIQUE_ID":
+                input_data_all[node_id] = [unique_id]
     return input_data_all
 
 def _map_node_over_list(node: Union[ComfyUINode, Type[ComfyUINode]], 
@@ -125,7 +126,7 @@ class PromptExecutor:
     Pool of all created nodes
     {node_id: node_instance, ...}
     '''
-    old_prompt: Prompt
+    old_prompt: PROMPT
     '''old prompt'''
     outputs_ui: NodeOutputs_UI
     '''outputs for UI'''
@@ -181,7 +182,7 @@ class PromptExecutor:
 
         return output, uis
 
-    def _recursive_will_execute(self, prompt: Prompt, current_node_id, memo={}):
+    def _recursive_will_execute(self, prompt: PROMPT, current_node_id, memo={}):
         outputs = self.outputs
         unique_id = current_node_id
 
@@ -205,7 +206,7 @@ class PromptExecutor:
         return memo[unique_id]
         
     def _recursive_execute(self,
-                        prompt: Prompt, 
+                        prompt: PROMPT, 
                         current_node_id: str, 
                         extra_data, 
                         executed: Set[str],   # set of node ids that have been executed 
@@ -302,7 +303,7 @@ class PromptExecutor:
         return (True, None, None)
 
     def _recursive_output_delete_if_changed(self, 
-                                            prompt: Prompt, 
+                                            prompt: PROMPT, 
                                             current_node_id: str):
         old_prompt = self.old_prompt
         outputs = self.outputs
@@ -358,7 +359,6 @@ class PromptExecutor:
             del d
         return to_delete
 
-
     def reset(self):
         self.node_pool = NodePool()
         
@@ -369,7 +369,7 @@ class PromptExecutor:
         
         self.success = True
         
-        self.old_prompt = Prompt()
+        self.old_prompt = PROMPT()
         
     def get_node(self, node_id:str, class_type_name: str)->ComfyUINode:
         '''Return the target node from the pool, or create a new one if not found.'''
@@ -423,10 +423,13 @@ class PromptExecutor:
             del d
 
     def execute(self, 
-                prompt: Prompt, 
+                prompt: Union[PROMPT, dict], 
                 prompt_id: Optional[str]=None, # random string by uuid4 
                 extra_data={}, 
                 execute_outputs=[]):
+        if not isinstance(prompt, PROMPT):
+            prompt = PROMPT(prompt)
+        
         if prompt_id is None:
             prompt_id = str(uuid.uuid4())
         
@@ -727,7 +730,7 @@ def _get_full_type_name(klass):
         return klass.__qualname__
     return module + '.' + klass.__qualname__
 
-def validate_prompt(prompt: Prompt):
+def validate_prompt(prompt: PROMPT):
     outputs = set()
     for x in prompt:
         class_ = nodes.NODE_CLASS_MAPPINGS[prompt[x]['class_type']]

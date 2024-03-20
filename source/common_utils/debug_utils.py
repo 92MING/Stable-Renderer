@@ -8,9 +8,10 @@ from functools import partial
 from concurrent_log_handler import ConcurrentTimedRotatingFileHandler as _RotatingFileHandler
 
 if __name__ == '__main__':  # for debugging
-    _proj_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+    import sys, os
+    _proj_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     sys.path.append(_proj_path)
-    __package__ = 'common_utils.debug_utils'
+    __package__ = 'common_utils'
 
 from .global_utils import GetEnv, is_dev_mode, is_editor_mode
 
@@ -27,9 +28,11 @@ logging.SUCCESS = 100   # type: ignore
 
 # log settings
 # TODO: modify settings with YAML instead of using env
-_default_log_format: str = GetEnv('DEFAULT_LOG_FORMAT', '[%(levelname)s](%(name)s) %(asctime)s - %(message)s') # type: ignore
+_default_log_format: str = GetEnv('DEFAULT_LOG_FORMAT', '[%(levelname)s](%(name)s) %(asctime)s | %(message)s') # type: ignore
 _default_date_format: str = GetEnv('DEFAULT_LOG_DATE_FORMAT', '%H:%M:%S')  # type: ignore
 _default_formatter = logging.Formatter(fmt=_default_log_format, datefmt=_default_date_format)
+
+_root_logger = logging.getLogger()
 
 class _PassToRootLogger(logging.Logger):
     '''
@@ -53,11 +56,13 @@ class _PassToRootLogger(logging.Logger):
             return
         if isinstance(maybe_record, logging.LogRecord):
             record = maybe_record
-        if len(self.handlers)>0:
-            record.msg = self.handlers[0].format(record)
-        else:
-            record.msg = self._DEFAULT_FORMATTER.format(record)
-        record.args = tuple() # no args is allowed in root logger
+        if record.args:
+            if len(self.handlers)>0:
+                record.msg = self.handlers[0].format(record)
+            else:
+                record.msg = self._DEFAULT_FORMATTER.format(record)
+            record.args = tuple() # no args is allowed in root logger
+        record.msg = record.msg.strip()
         self.callHandlers(record)
         
     def callHandlers(self, record:logging.LogRecord) -> None:
@@ -127,10 +132,9 @@ else:
                                                        interval=rot_hr_interval,
                                                        when='h')
 
-_log_level: str = GetEnv('LOG_LEVEL', ('DEBUG' if is_dev_mode() else 'INFO'))  # type: ignore
+_log_level: str = GetEnv('LOG_LEVEL', 'DEBUG' if is_dev_mode() else 'INFO')  # type: ignore
 _root_handler.setLevel(_log_level)
 
-_root_logger = logging.getLogger()
 _root_logger.handlers = [_root_handler, ]
 
 class _SuccessLogger(logging.Logger):
@@ -152,8 +156,12 @@ EngineEditorLogger: _SuccessLogger = _logger_modify(logging.getLogger("Engine.Ed
 EngineRuntimeLogger: _SuccessLogger = _logger_modify(logging.getLogger("Engine.Runtime"))
 '''Logger is active during runtime. It will not be ignore in any mode.'''
 
-ComfyUILogger: _SuccessLogger = _logger_modify(logging.getLogger("ComfyUI"))
+ComfyUILogger: _SuccessLogger = _logger_modify(logging.getLogger("Engine.ComfyUI"))
 '''Logger specifically for comfyUI'''
+
+EngineEditorLogger.setLevel(_log_level)
+EngineRuntimeLogger.setLevel(_log_level)
+ComfyUILogger.setLevel(_log_level)
 
 DefaultLogger: _SuccessLogger = _logger_modify(_root_logger)
 '''Default logger. You can use it for any purpose.'''

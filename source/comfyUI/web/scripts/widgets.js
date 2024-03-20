@@ -15,20 +15,36 @@ const IS_CONTROL_WIDGET = Symbol();
 const HAS_EXECUTED = Symbol();
 
 function getNumberDefaults(inputData, defaultStep, precision, enable_rounding) {
-	let defaultVal = inputData[1]["default"];
-	let { min, max, step, round} = inputData[1];
+	let number_type = inputData[0];
+	let is_float = number_type.toLowerCase() == "float";
 
-	if (defaultVal == undefined) defaultVal = 0;
-	if (min == undefined) min = 0;
-	if (max == undefined) max = 2048;
-	if (step == undefined) step = defaultStep;
+	let defaultVal = inputData?.[1]?.["default"]?? 0;
+	let min = inputData?.[1]?.["min"]?? 0;
+	let max = inputData?.[1]?.["max"]?? 2048;
+	let step = inputData?.[1]?.["step"]?? defaultStep?? null;
+	if (step == null){
+		if (is_float) {
+			step = 0.1;  // float number has default step 0.1
+		} else {
+			step = 1;	 // integer number has default step 1
+		}
+	}
+	let round = inputData?.[1]?.["round"]?? null;
+	if (round == null) {
+		if (is_float) {
+			round = 0.01;  // float number has default round 0.01
+		} else {
+			round = 1;	 // integer number has default round 0
+		}
+	}
+
 	// precision is the number of decimal places to show.
 	// by default, display the the smallest number of decimal places such that changes of size step are visible.
-	if (precision == undefined) {
+	if (precision == undefined || precision == null) {
 		precision = Math.max(-Math.floor(Math.log10(step)),0);
 	}
 
-	if (enable_rounding && (round == undefined || round === true)) {
+	if (enable_rounding && (round == undefined || round==null || round === true)) {
 		// by default, round the value to those decimal places shown.
 		round = Math.round(1000000*Math.pow(0.1,precision))/1000000;
 	}
@@ -219,7 +235,10 @@ function createIntWidget(node, inputName, inputData, app, isSeedInput) {
 		return seedWidget(node, inputName, inputData, app, typeof control === "string" ? control : undefined);
 	}
 
-	let widgetType = isSlider(inputData[1]["display"], app);
+	var extra_params = inputData[1]? inputData[1] : {};
+	var display_mode = extra_params?.display?? "number";
+
+	let widgetType = isSlider(display_mode, app);
 	const { val, config } = getNumberDefaults(inputData, 1, 0, true);
 	Object.assign(config, { precision: 0 });
 	return {
@@ -234,6 +253,85 @@ function createIntWidget(node, inputName, inputData, app, isSeedInput) {
 			config
 		),
 	};
+}
+
+async function uploadFile(file) {
+	try {
+	  // Wrap file in formdata so it includes filename
+	  const body = new FormData();
+	  const new_file = new File([file], file.name, {
+		type: file.type,
+		lastModified: file.lastModified,
+	  });
+	  body.append("data", new_file);
+	  const resp = await api.fetchApi("/upload/file", {
+		method: "POST",
+		body,
+	  });
+  
+	  if (resp.status === 200 || resp.status === 201) {
+		return resp.json();
+	  } else {
+		alert(`Upload failed: ${resp.statusText}`);
+	  }
+	} catch (error) {
+	  alert(`Upload failed: ${error}`);
+	}
+  }
+
+function createPathWidget(node, inputName, inputData, app) {
+	var widget = node.addWidget(
+		"path", 
+		inputName, 
+		"", 
+		function (canvas, node){
+			// find if document has a file input element, if not, create one
+			var fileInput = document.getElementById("comfy_file_input");
+			if (!fileInput) {
+				var fileInput = document.createElement("input");
+				fileInput.id = "comfy_file_input";
+				fileInput.type = "file";
+				fileInput.style.display = "none";
+				document.body.appendChild(fileInput);
+			}
+
+			var accept_types = inputData[1]?.accept_types;
+			accept_types = accept_types ?? "*";
+			fileInput.accept = accept_types;	// set the accept types for the file input
+
+			var accept_folder = inputData[1]?.accept_folder;
+			accept_folder = accept_folder ?? false;
+			if (accept_folder) {
+				fileInput.setAttribute("webkitdirectory", "");
+				fileInput.setAttribute("directory", "");
+			}
+			else {
+				if (fileInput.hasAttribute("webkitdirectory"))
+					fileInput.removeAttribute("webkitdirectory");
+				if (fileInput.hasAttribute("directory"))
+					fileInput.removeAttribute("directory");
+			}
+			
+			// add an event listener to the file input element
+			fileInput.onchange = async function() {
+				// get the file from the file input element
+				const file = fileInput.files[0];
+				// if the file is not null, set the value of the path widget to the file name
+				if (file) {
+					var resp = await uploadFile(file);
+					if (!resp || resp.error) return;
+
+					var relative_path = resp.relative_path;
+					this.value = relative_path;
+				}
+			}.bind(this);
+
+			// trigger a click event on the file input element
+			fileInput.click();
+		},
+		{}
+	);
+	return { widget };
 }
 
 function addMultilineWidget(node, name, opts, app) {
@@ -299,9 +397,14 @@ export const ComfyWidgets = {
 	"INT:seed": seedWidget,
 	"INT:noise_seed": seedWidget,
 	FLOAT(node, inputName, inputData, app) {
-		let widgetType = isSlider(inputData[1]["display"], app);
+		let input_extra_params = inputData[1]? inputData[1] : {};
+		let display_mode = input_extra_params?.display?? "number";
+
+		let widgetType = isSlider(display_mode, app);
+
 		let precision = app.ui.settings.getSettingValue("Comfy.FloatRoundingPrecision");
 		let disable_rounding = app.ui.settings.getSettingValue("Comfy.DisableFloatRounding")
+		
 		if (precision == 0) precision = undefined;
 		const { val, config } = getNumberDefaults(inputData, 0.5, precision, !disable_rounding);
 		return { widget: node.addWidget(widgetType, inputName, val,
@@ -317,30 +420,31 @@ export const ComfyWidgets = {
 		return createIntWidget(node, inputName, inputData, app);
 	},
 	BOOLEAN(node, inputName, inputData) {
-		let defaultVal = false;
 		let options = {};
-		if (inputData[1]) {
-			if (inputData[1].default)
-				defaultVal = inputData[1].default;
-			if (inputData[1].label_on)
-				options["on"] = inputData[1].label_on;
-			if (inputData[1].label_off)
-				options["off"] = inputData[1].label_off;
-		}
+
+		let extra_params = inputData[1]? inputData[1] : {};
+		let default_value = extra_params?.default?? false;
+		let label_on = extra_params?.label_on?? "True";
+		let label_off = extra_params?.label_off?? "False";
+
+		options["on"] = label_on;
+		options["off"] = label_off;
+
 		return {
 			widget: node.addWidget(
 				"toggle",
 				inputName,
-				defaultVal,
+				default_value,
 				() => {},
 				options,
 				)
 		};
 	},
 	STRING(node, inputName, inputData, app) {
-		const defaultVal = inputData[1].default || "";
-		const multiline = !!inputData[1].multiline;
-
+		let input_extra_params = inputData[1]? inputData[1] : {};
+		var defaultVal = input_extra_params["default"]?? "";
+		var multiline = input_extra_params["multiline"]? !!input_extra_params["multiline"] : false;
+		
 		let res;
 		if (multiline) {
 			res = addMultilineWidget(node, inputName, { defaultVal, ...inputData[1] }, app);
@@ -348,7 +452,7 @@ export const ComfyWidgets = {
 			res = { widget: node.addWidget("text", inputName, defaultVal, () => {}, {}) };
 		}
 
-		if(inputData[1].dynamicPrompts != undefined)
+		if(inputData[1].dynamicPrompts != undefined && inputData[1].dynamicPrompts != null)
 			res.widget.dynamicPrompts = inputData[1].dynamicPrompts;
 
 		return res;
@@ -521,5 +625,8 @@ export const ComfyWidgets = {
 		}
 
 		return { widget: uploadWidget };
+	},
+	PATH(node, inputName, inputData, app) {
+		return createPathWidget(node, inputName, inputData, app);
 	},
 };

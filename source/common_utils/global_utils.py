@@ -129,7 +129,7 @@ def is_release_mode():
     if 'RELEASE_MODE' in os.environ:
         mode: bool = GetEnv('RELEASE_MODE', False, bool)
         if not mode:
-            if 'DEV_MODE' in os.environ:
+            if 'DEV_MODE' in os.environ:    # if dev mode is set, release mode will be overrided
                 return not GetEnv('DEV_MODE', False, bool)
         return mode
     elif 'DEV_MODE' in os.environ:
