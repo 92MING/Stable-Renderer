@@ -6,6 +6,7 @@ from .io import *
 from .loaders import *
 from .samplers import *
 from .overlap_scheduler import *
+from .processing import *
 
 
 # for ComfyUI's node registry
