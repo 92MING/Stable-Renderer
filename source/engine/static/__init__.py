@@ -10,4 +10,6 @@ from .mesh import *
 
 from .material import *
 
+from .workflow import *
+
 from .scene import *

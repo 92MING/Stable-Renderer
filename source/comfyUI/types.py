@@ -2,7 +2,7 @@ from collections.abc import Iterator
 from torch import Tensor
 from typing import (Union, TypeAlias, Annotated, Literal, Optional, List, get_origin, get_args, ForwardRef, 
                     Any, TypeVar, Generic, Type, overload, Protocol, Dict, Tuple, TYPE_CHECKING,
-                    _ProtocolMeta, runtime_checkable)
+                    _ProtocolMeta, runtime_checkable, Sequence)
 from inspect import Parameter
 from enum import Enum
 from abc import ABC, abstractclassmethod
@@ -27,11 +27,14 @@ _SPECIAL_TYPE_NAMES = {
     float: "FLOAT",
 }
 
-def _get_comfy_type_definition(tp):
+def _get_comfy_type_definition(tp: Union[type, str]):
     '''
     return the type name or list of value for COMBO type.
     e.g. int->"INT", Literal[1, 2, 3]->[1, 2, 3]
     '''
+    if isinstance(tp, str): # string annotation
+        return tp.upper()     # default return type name to upper case
+    
     if tp in _SPECIAL_TYPE_NAMES:
         return _SPECIAL_TYPE_NAMES[tp]   # type: ignore
     
@@ -50,9 +53,6 @@ def _get_comfy_type_definition(tp):
             raise TypeError(f'Unexpected Annotated type: {tp}')
         else:
             raise TypeError(f'Unexpected type annotation: {tp}')
-
-    if isinstance(tp, str): # string annotation
-        return tp.upper()     # default return type name to upper case
     
     if isinstance(tp, ForwardRef):
         return tp.__forward_arg__.upper()
@@ -66,6 +66,12 @@ def _get_comfy_type_definition(tp):
         return tp.__name__.split('.')[-1].upper()
     else:
         raise TypeError(f'Cannot get type name for {tp}')
+
+def _get_comfy_type_name(tp: Union[type, str]):
+    type_name = _get_comfy_type_definition(tp)
+    if isinstance(type_name, list):
+        type_name = 'COMBO'
+    return type_name
 
 class AnnotatedParam:
     '''Annotation of parameters for ComfyUI's node system.'''
@@ -457,7 +463,7 @@ class Lazy(Generic[_T]):
     _from_slot: str = None  # type: ignore
     
     @overload
-    def __init__(self, from_node_id: str, from_slot: str):
+    def __init__(self, from_node_id: str, from_slot: int):
         '''Create a lazy type from another node's output.'''
     @overload
     def __init__(self, value: _T):
@@ -484,13 +490,19 @@ class Lazy(Generic[_T]):
         '''The real value of the lazy type. The value will only be resolved when it is accessed.'''
         return self._get_value()
 
-def Reduce(tp: Union[type, TypeAlias, AnnotatedParam]) -> Annotated:
+class Reduce(list, Generic[_T]):
     '''
     Mark the type as reduce, to allow the param accept multiple values and pack as a list.
     This could only be used in input parameters.
     '''
-    real_type = tp.origin_type if isinstance(tp, AnnotatedParam) else tp
-    return Annotated[real_type, AnnotatedParam(tp, tags=['reduce'])]    # type: ignore
+    
+    def __class_getitem__(cls, tp: Union[type, TypeAlias, AnnotatedParam]) -> Annotated:
+        '''
+        Mark the type as reduce, to allow the param accept multiple values and pack as a list.
+        This could only be used in input parameters.
+        '''
+        real_type = tp.origin_type if isinstance(tp, AnnotatedParam) else tp
+        return Annotated[real_type, AnnotatedParam(tp, tags=['reduce'])]    # type: ignore
 
 
 __all__.extend(['Lazy', 'Reduce'])
@@ -672,10 +684,21 @@ class NodePool(Dict[Union[str, Tuple[str, Union[str, Type[ComfyUINode]]]], Comfy
             if item not in (0, 1):
                 raise IndexError(f'Invalid index: {item}, it should be 0 or 1.')
             if item == 0:
-                return self
+                return self # return the node id
             else:
                 return type(self.node).__qualname__
+        
+        def __eq__(self, other: Union[str, Tuple[str, Union[str, Type[ComfyUINode]]]]) -> bool:
+            if isinstance(other, str):
+                return super().__eq__(other)
+            elif isinstance(other, tuple) and len(other)>=1:
+                return super().__eq__(other[0])
+            else:
+                return super().__eq__(other)
             
+        def __hash__(self) -> int:
+            return super().__hash__()   # not useless, it is necessary for dict key
+        
         @property
         def node_type_name(self)->str:
             return self[1]
@@ -699,6 +722,17 @@ class NodeBindingParam(Tuple[str, int]):
     (node_id, output_slot_index)
     The tuple contains the information that the input value of a node is from another node's output.
     '''
+    
+    def __repr__(self):
+        return f'NodeBindingParam({self[0]}, {self[1]})'
+    
+    def __eq__(self, __value: object) -> bool:
+        if isinstance(__value, Sequence) and len(__value) ==2:
+            return self[0] == __value[0] and self[1] == __value[1]
+        return super().__eq__(__value)
+    
+    def __hash__(self) -> int:
+        return super().__hash__()
     
     @property
     def from_node_id(self)->str:
@@ -726,7 +760,7 @@ class NodeInputs(Dict[str, Union[NodeBindingParam, Any]]):
         for key, value in self.items():
             if not isinstance(value, str):
                 if isinstance(value, list) and len(value)==2 and not isinstance(value, NodeBindingParam):
-                    self[key] = NodeBindingParam(*value)
+                    self[key] = NodeBindingParam(value)
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -752,6 +786,17 @@ class PROMPT(Dict[str, Dict[Literal['inputs', 'class_type', 'is_changed'], Any]]
 
     Prompt is actually a dict containing all nodes' input for execution.
     '''
+    
+    def _format_prompt(self):
+        '''Make sure all node inputs are set as value/NodeBindingParam'''
+        for _, node_info_dict in self.items():
+            if 'inputs' in node_info_dict:
+                if not isinstance(node_info_dict['inputs'], NodeInputs):
+                    node_info_dict['inputs'] = NodeInputs(node_info_dict['inputs'])
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._format_prompt() # tidy up types
     
     @classmethod
     def GetValue(cls, context: InferenceContext):
@@ -803,7 +848,10 @@ The status message type for PromptExecutor.
 NodeOutputs_UI: TypeAlias = Dict[str, Dict[str, Any]]
 '''All outputs of nodes for ui'''
 NodeOutputs: TypeAlias = Dict[str, List[Any]]
-'''All outputs of nodes for execution'''
+'''
+All outputs of nodes for execution.
+{node id: [output1, output2, ...], ...}
+'''
 
 QueueTask: TypeAlias = Tuple[Union[int, float], str, PROMPT, dict, list]
 '''

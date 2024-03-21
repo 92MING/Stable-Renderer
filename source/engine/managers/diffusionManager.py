@@ -3,10 +3,12 @@ import numpy as np
 import glm
 import multiprocessing
 
-from .manager import Manager
-from common_utils.path_utils import *
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
+
+from common_utils.path_utils import *
+from .manager import Manager
+from engine.static import Workflow
 
 
 class DiffusionManager(Manager):

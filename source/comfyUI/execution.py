@@ -15,6 +15,7 @@ import nodes
 import comfy.model_management
 from common_utils.decorators import singleton
 from comfyUI.types import *
+from comfyUI.adapters import AdaptersMap
 
 if TYPE_CHECKING:
     from comfyUI.server import PromptServer
@@ -30,8 +31,8 @@ def _get_input_data(inputs: NodeInputs,
     Pack inputs form value/nodes into a dict for the node to use.
     
     Args:
-        - inputs: it can be:
-            * [from_node_id, from_node_output_slot_index]
+        - inputs: {param name, value}. Values can be:
+            * [from_node_id, from_node_output_slot_index] (means the value is from another node's output)
             * a value
         - class_def: the class of the node
         - unique_id: the id of this node
@@ -39,50 +40,59 @@ def _get_input_data(inputs: NodeInputs,
     '''
     valid_inputs = class_def.INPUT_TYPES()
     lazy_inputs = class_def.LAZY_INPUTS if hasattr(class_def, "LAZY_INPUTS") else []
-    reduce_inputs = class_def.REDUCE_INPUTS if hasattr(class_def, "REDUCE_INPUTS") else []
+    reduce_inputs = class_def.REDUCE_INPUTS if hasattr(class_def, "REDUCE_INPUTS") else []  # TODO
     
     input_data_all = {}
-    for node_id in inputs:
-        input_data = inputs[node_id]
+    for input_param_name in inputs:
+        input_data = inputs[input_param_name]
         
-        if isinstance(input_data, list):    # [from_node_id, from_node_output_slot_index]
-            input_unique_id = input_data[0]
-            output_index = input_data[1]
-            if input_unique_id not in outputs:
-                input_data_all[node_id] = (None,)
-                continue
-            obj = outputs[input_unique_id][output_index]
-            input_data_all[node_id] = obj
+        if isinstance(input_data, NodeBindingParam):    # [from_node_id, from_node_output_slot_index]
+            from_node_id = input_data[0]
+            output_slot_index = input_data[1]
+            
+            if input_param_name in lazy_inputs:
+                val = Lazy(from_node_id, output_slot_index)
+            elif from_node_id not in outputs:
+                val = (None,)
+            else:
+                val = outputs[from_node_id][output_slot_index]
+            
+            input_data_all[input_param_name] = val
             
         else:   # a value
-            if ("required" in valid_inputs and node_id in valid_inputs["required"]) or ("optional" in valid_inputs and node_id in valid_inputs["optional"]):
-                input_data_all[node_id] = [input_data]
+            if input_param_name in lazy_inputs:
+                input_data_all[input_param_name] = Lazy(input_data)
+                
+            elif ("required" in valid_inputs and input_param_name in valid_inputs["required"]) or ("optional" in valid_inputs and input_param_name in valid_inputs["optional"]):
+                input_data_all[input_param_name] = [input_data]
 
     if "hidden" in valid_inputs:
         h = valid_inputs["hidden"]
-        for node_id in h:
-            if h[node_id] == "PROMPT":
-                input_data_all[node_id] = [prompt]
-            if h[node_id] == "EXTRA_PNGINFO":
+        for input_param_name in h:
+            if h[input_param_name] == "PROMPT":
+                input_data_all[input_param_name] = [prompt]
+            if h[input_param_name] == "EXTRA_PNGINFO":
                 if "extra_pnginfo" in extra_data:
-                    input_data_all[node_id] = [extra_data['extra_pnginfo']]
-            if h[node_id] == "UNIQUE_ID":
-                input_data_all[node_id] = [unique_id]
+                    input_data_all[input_param_name] = [extra_data['extra_pnginfo']]
+            if h[input_param_name] == "UNIQUE_ID":
+                input_data_all[input_param_name] = [unique_id]
     return input_data_all
 
-def _map_node_over_list(node: Union[ComfyUINode, Type[ComfyUINode]], 
-                       input_data_all, 
+def _get_node_func_ret(node: Union[ComfyUINode, Type[ComfyUINode]], 
+                       func_params: dict,    # not `NodeInputs`, cuz values should already be resolved
                        func: str,   # the target function name of the node
                        allow_interrupt=False):
+    '''return the result of the given function name of the node.'''
+    
     # check if node wants the lists
     input_is_list = False
     if hasattr(node, "INPUT_IS_LIST"):
         input_is_list = node.INPUT_IS_LIST
 
-    if len(input_data_all) == 0:
+    if len(func_params) == 0:
         max_len_input = 0
     else:
-        max_len_input = max([len(x) for x in input_data_all.values()])
+        max_len_input = max([len(x) for x in func_params.values()])
     
     # get a slice of inputs, repeat last input when list isn't long enough
     def slice_dict(d, i):
@@ -91,20 +101,27 @@ def _map_node_over_list(node: Union[ComfyUINode, Type[ComfyUINode]],
             d_new[k] = v[i if len(v) > i else -1]
         return d_new
     
+    try:
+        func = getattr(node, func)
+        if not callable(func):
+            raise AttributeError(f"Node {node} has no function {func}.")
+    except AttributeError:
+        raise AttributeError(f"Node {node} has no function {func}.")
+    
     results = []
     if input_is_list:
         if allow_interrupt:
             nodes.before_node_execution()
-        results.append(getattr(node, func)(**input_data_all))
+        results.append(func(**func_params))
     elif max_len_input == 0:
         if allow_interrupt:
             nodes.before_node_execution()
-        results.append(getattr(node, func)())
+        results.append(func())
     else:
         for i in range(max_len_input):
             if allow_interrupt:
                 nodes.before_node_execution()
-            results.append(getattr(node, func)(**slice_dict(input_data_all, i)))
+            results.append(func(**slice_dict(func_params, i)))
     return results
 
 def _format_value(x):
@@ -151,7 +168,7 @@ class PromptExecutor:
         '''
         results = []
         uis = {}
-        return_values = _map_node_over_list(node, 
+        return_values = _get_node_func_ret(node, 
                                             input_data_all, 
                                             node.FUNCTION, 
                                             allow_interrupt=True)
@@ -220,15 +237,15 @@ class PromptExecutor:
         if unique_id in self.outputs:
             return (True, None, None)
         
-        for x in inputs:
-            input_data = inputs[x]
+        for param_name in inputs:
+            input_data = inputs[param_name]
 
-            if isinstance(input_data, list):
-                input_unique_id = input_data[0]
-                output_index = input_data[1]
-                if input_unique_id not in self.outputs:
+            if isinstance(input_data, NodeBindingParam):
+                node_id = input_data[0]
+                output_slot_index = input_data[1]
+                if node_id not in self.outputs:
                     result = self._recursive_execute(prompt, 
-                                                    input_unique_id, 
+                                                    node_id, 
                                                     extra_data, 
                                                     executed,
                                                     prompt_id)
@@ -323,7 +340,7 @@ class PromptExecutor:
                 if input_data_all is not None:
                     try:
                         #is_changed = class_def.IS_CHANGED(**input_data_all)
-                        is_changed = _map_node_over_list(class_def, input_data_all, "IS_CHANGED")
+                        is_changed = _get_node_func_ret(class_def, input_data_all, "IS_CHANGED")
                         prompt[unique_id]['is_changed'] = is_changed
                     except:
                         to_delete = True
@@ -342,7 +359,7 @@ class PromptExecutor:
                 for x in inputs:
                     input_data = inputs[x]
 
-                    if isinstance(input_data, list):
+                    if isinstance(input_data, NodeBindingParam):
                         input_unique_id = input_data[0]
                         output_index = input_data[1]
                         if input_unique_id in outputs:
@@ -447,22 +464,23 @@ class PromptExecutor:
         with torch.inference_mode():
             #delete cached outputs if nodes don't exist for them
             to_delete = []
-            for o in self.outputs:
-                if o not in prompt:
-                    to_delete += [o]
-            for o in to_delete:
-                d = self.outputs.pop(o)
+            for node_pool_key in self.outputs:
+                if node_pool_key not in prompt:
+                    to_delete += [node_pool_key]
+            for node_pool_key in to_delete:
+                d = self.outputs.pop(node_pool_key)
                 del d
-            to_delete = []
-            for o in self.node_pool:
-                if o[0] not in prompt:
-                    to_delete += [o]
+                
+            nodes_to_be_deleted: List[NodePool.NodePoolKey] = []
+            for node_pool_key in self.node_pool:
+                if node_pool_key.node_id not in prompt:
+                    nodes_to_be_deleted += [node_pool_key]
                 else:
-                    p = prompt[o[0]]
-                    if o[1] != p['class_type']:
-                        to_delete += [o]
-            for o in to_delete:
-                d = self.node_pool.pop(o)
+                    p = prompt[node_pool_key.node_id]
+                    if node_pool_key.node_type_name != p['class_type']:
+                        nodes_to_be_deleted += [node_pool_key]
+            for node_pool_key in nodes_to_be_deleted:
+                d = self.node_pool.pop(node_pool_key.node_id)
                 del d
 
             for node_id in prompt:
@@ -509,7 +527,6 @@ class PromptExecutor:
             
             if comfy.model_management.DISABLE_SMART_MEMORY:
                 comfy.model_management.unload_all_models()
-
 
 
 def validate_inputs(prompt, item, validated):
@@ -565,22 +582,36 @@ def validate_inputs(prompt, item, validated):
             o_id = val[0]
             o_class_type = prompt[o_id]['class_type']
             r = nodes.NODE_CLASS_MAPPINGS[o_class_type].RETURN_TYPES
-            if r[val[1]] != type_input:
-                received_type = r[val[1]]
-                details = f"{x}, {received_type} != {type_input}"
-                error = {
-                    "type": "return_type_mismatch",
-                    "message": "Return type mismatch between linked nodes",
-                    "details": details,
-                    "extra_info": {
-                        "input_name": x,
-                        "input_config": info,
-                        "received_type": received_type,
-                        "linked_node": val
-                    }
-                }
-                errors.append(error)
-                continue
+            
+            from_type_name = r[val[1]]
+            if from_type_name == 'ANY':
+                from_type_name = '*'
+            
+            if from_type_name != type_input:
+                key = (from_type_name, type_input)
+                if key in AdaptersMap:
+                    pass    # TODO
+                else:
+                    key = ('*', type_input) # default adapter
+                    if key in AdaptersMap:
+                        pass    # TODO
+                    else:
+                        received_type = r[val[1]]
+                        details = f"{x}, {received_type} != {type_input}"
+                        error = {
+                            "type": "return_type_mismatch",
+                            "message": "Return type mismatch between linked nodes",
+                            "details": details,
+                            "extra_info": {
+                                "input_name": x,
+                                "input_config": info,
+                                "received_type": received_type,
+                                "linked_node": val
+                            }
+                        }
+                        errors.append(error)
+                        continue
+                
             try:
                 r = validate_inputs(prompt, o_id, validated)
                 if r[0] is False:
@@ -695,7 +726,7 @@ def validate_inputs(prompt, item, validated):
                 input_filtered[x] = input_data_all[x]
 
         #ret = obj_class.VALIDATE_INPUTS(**input_filtered)
-        ret = _map_node_over_list(obj_class, input_filtered, "VALIDATE_INPUTS")
+        ret = _get_node_func_ret(obj_class, input_filtered, "VALIDATE_INPUTS")
         for x in input_filtered:
             for i, r in enumerate(ret):
                 if r is not True:
