@@ -2,11 +2,15 @@ from collections.abc import Iterator
 from torch import Tensor
 from typing import (Union, TypeAlias, Annotated, Literal, Optional, List, get_origin, get_args, ForwardRef, 
                     Any, TypeVar, Generic, Type, overload, Protocol, Dict, Tuple, TYPE_CHECKING,
-                    _ProtocolMeta, runtime_checkable, Sequence)
+                    _ProtocolMeta, runtime_checkable, Sequence, ClassVar, Set, Callable, TypeGuard)
+from types import NoneType
 from inspect import Parameter
 from enum import Enum
+from pathlib import Path
 from abc import ABC, abstractclassmethod
+from deprecated import deprecated
 
+from common_utils.type_utils import valueTypeCheck, get_cls_name
 from common_utils.decorators import singleton, class_property, class_or_ins_property
 from comfy.samplers import KSampler
 from comfy.sd import VAE as comfy_VAE, CLIP as comfy_CLIP
@@ -15,6 +19,7 @@ from comfy.model_base import BaseModel
 
 if TYPE_CHECKING:
     from comfyUI.execution import PromptExecutor
+    from comfyUI.stable_renderer.nodes.node_base import NodeBase
 
 
 _T = TypeVar('_T')
@@ -25,15 +30,32 @@ _SPECIAL_TYPE_NAMES = {
     bool: "BOOLEAN",
     int: "INT",
     float: "FLOAT",
+    Path: "PATH",
 }
 
-def _get_comfy_type_definition(tp: Union[type, str]):
+def _get_comfy_type_definition(tp: Union[type, str, TypeAlias], 
+                               inner_type: Optional[Union[type, str]]=None)->Union[str, list]:
     '''
     return the type name or list of value for COMBO type.
     e.g. int->"INT", Literal[1, 2, 3]->[1, 2, 3]
     '''
+    if inner_type is not None:
+        tp_definition = _get_comfy_type_definition(inner_type)
+        if not isinstance(tp_definition, str):
+            raise TypeError(f'This type {tp} is not supported for inner type.')
+        inner_type_definition = tp_definition
+        if not isinstance(inner_type_definition, str):
+            raise TypeError(f'This type {inner_type} is not supported for being as inner type.')
+        return f"{tp_definition}[{inner_type_definition}]"
+    
     if isinstance(tp, str): # string annotation
         return tp.upper()     # default return type name to upper case
+    
+    if isinstance(tp, (list, tuple)):   # COMBO type
+        for t in tp:
+            if not isinstance(t, (int, str, float, bool)):
+                raise TypeError(f'Unexpected type in COMBO type: {tp}. It should be one of int, str, float, bool.')
+        return list(tp)
     
     if tp in _SPECIAL_TYPE_NAMES:
         return _SPECIAL_TYPE_NAMES[tp]   # type: ignore
@@ -49,7 +71,7 @@ def _get_comfy_type_definition(tp: Union[type, str]):
             args = get_args(tp)
             for arg in args[1:]:
                 if isinstance(arg, AnnotatedParam):
-                    return arg._comfy_type_definition
+                    return arg._comfy_type
             raise TypeError(f'Unexpected Annotated type: {tp}')
         else:
             raise TypeError(f'Unexpected type annotation: {tp}')
@@ -60,123 +82,360 @@ def _get_comfy_type_definition(tp: Union[type, str]):
     if tp == Any or tp == Parameter.empty:
         return "*"  # '*' represents any type in litegraph
     
-    if hasattr(tp, '__qualname__'):
-        return tp.__qualname__.split('.')[-1].upper()
-    elif hasattr(tp, '__name__'):
-        return tp.__name__.split('.')[-1].upper()
-    else:
-        raise TypeError(f'Cannot get type name for {tp}')
+    try:
+        return get_cls_name(tp).upper()
+    except:
+        raise TypeError(f'Unexpected type: {tp}. Cannot get the type name.')
 
-def _get_comfy_type_name(tp: Union[type, str]):
-    type_name = _get_comfy_type_definition(tp)
+def _get_input_param_type(param: Parameter, 
+                          tags: Optional[Set[str]]=None)->Literal['required', 'optional', 'hidden']:
+    '''
+    Get the input parameter type for registration.
+    
+    Args:
+        * param: the parameter object
+        * tags: the tags of the parameter
+    
+    Returns:
+        * hidden: param name starts with '_', e.g. def f(_x:int)
+        * optional: param default is None, e.g. def f(x:int = None)
+        * required: others
+    '''
+    # 3 conditions for hidden
+    input_param_name = param.name
+    if input_param_name.startswith('_'): # 1. param name starts with '_'
+        return 'hidden'
+    
+    anno = param.annotation
+    anno_origin = get_origin(anno)
+    if anno_origin:
+        if anno_origin == Annotated:
+            args = get_args(anno)
+            if isinstance(args[0], str):
+                if args[0].lower() == 'hidden': # 2. type annotation is 'hidden' or is a subclass of HIDDEN
+                    return 'hidden'
+            if isinstance(args[0], type):
+                if issubclass(args[0], HIDDEN): 
+                    return 'hidden'
+    elif type(anno) == type:
+        if issubclass(anno, HIDDEN):
+            return 'hidden'
+    elif isinstance(anno, str):
+        if anno.lower() == 'hidden':
+            return 'hidden'
+    if tags:    # 3. tags contains 'hidden'
+        if 'hidden' in tags:
+            return 'hidden'
+    
+    if param.default != Parameter.empty:    # if has default value, it is optional
+        return 'optional'
+    
+    return 'required'  
+
+def _enum_convertor(cls: Type[Enum], val: str):
+    val = val.lower()
+    for member in cls:
+        if member.name.lower() == val:
+            return member
+    raise ValueError(f'Invalid value for {cls.__name__}: {val}. It should be one of {list(cls.__members__.keys())}.')
+
+def get_comfy_name(tp: Any, inner_type: Optional[Union[type, str]]=None)->str:
+    '''Get the type name for comfyUI. It can be any value or type, or name'''
+    type_name = _get_comfy_type_definition(tp, inner_type)
     if isinstance(type_name, list):
         type_name = 'COMBO'
     return type_name
 
-class AnnotatedParam:
-    '''Annotation of parameters for ComfyUI's node system.'''
+ParameterType: TypeAlias = Literal['required', 'optional', 'hidden']
+
+class _NameCheckCls(type):
+    def __instancecheck__(self, __instance: Any) -> bool:
+        '''Check if the object is AnnotatedParam.'''
+        type_name = get_cls_name(__instance)
+        this_cls_name = get_cls_name(self)
+        return type_name == this_cls_name    # due to complicated import dependencies, this will be used instead of isinstance(obj, AnnotatedParam)
+
+class _GetableFunc(metaclass=_NameCheckCls):
+    '''A special class to allow original function to be called when using `[]` syntax.'''
     
-    origin_type: Optional[Union[type, TypeAlias]] = None
+    origin_func: Callable
+    
+    def __init__(self, origin_func: Callable):
+        self.origin_func = origin_func
+    
+    def __getitem__(self, vals):
+        '''when using `INT[0, 10, 2]` syntax, INT(0, 10, 2) will be called.'''
+        if isinstance(vals, tuple):
+            return self.origin_func(*vals)
+        return self.origin_func(vals)
+    
+    def __call__(self, *args, **kwargs):
+        return self.origin_func(*args, **kwargs)
+
+class AnnotatedParam(metaclass=_NameCheckCls):
+    '''Annotation class for containing parameters' information for ComfyUI's node system.'''
+    
+    origin_type: Optional[Union[type, str, list, TypeAlias]] = None
     '''
-    The origin type of the parameter.
-    It is not necessary to specify this, but if `comfy_type_name` is not specified, this is required.
+    The origin type of the parameter. It can also be Literal for COMBO type.
+    It is not necessary to specify this, but if `comfy_name` is not specified, this is required.
     '''
-    extra_params: Optional[dict] = None
+    extra_params: Dict[str, Any]
     '''
     The extra parameters for the type, e.g. min, max, step for INT type, etc.
     This is usually for building special param setting in ComfyUI.
     '''
-    tags: Optional[List[str]] = None
-    '''special tags, for labeling special params, e.g. lazy, ui, reduce, ...'''
-    default: Optional[Any] = None
+    tags: Set[str]
+    '''special tags, for labeling special params, e.g. lazy, ui, ...'''
+    default: Any = Parameter.empty
     '''The default value for the parameter.'''
-    comfy_type_name: Optional[str] = None
-    '''The name for registering the type in ComfyUI's node system, e.g. INT for int, FLOAT for float, etc.'''
+    comfy_name: Optional[str] = None
+    '''Force to return this name when registering the type. It is not necessary to specify this.'''
+    
+    # for node input/return params
+    param_name: Optional[str] = None
+    '''The name of the parameter. It is not necessary to specify this, but it is recommended to specify this.'''
+    param_type: Optional[ParameterType] = None
+    '''The input type of the param. `None` is available for return types.'''
+   
+    value_formatter: Optional[Callable[[Any], Any]] = None
+    '''
+    The convertor for changing the input type to the real value. E.g. Tensor(input) -> LATENT(before calling the node)
+    It is not necessary to specify this.
+    '''
+    inner_type: Optional[Union[type, str]] = None
+    '''The inner type of this param type. This is for special types, e.g. Array'''
     
     def __init__(self,
-                origin_type: Optional[Union[type, TypeAlias, 'AnnotatedParam']] = None,
-                extra_params: Optional[dict] = None,
-                tags: Optional[List[str]] = None,
-                default: Optional[Any] = None,
-                comfy_type_name: Optional[str] = None):
+                 origin: Optional[Union[type, str, TypeAlias, Parameter, 'AnnotatedParam']],
+                 extra_params: Optional[dict] = None,
+                 tags: Optional[Union[List[str], Tuple[str, ...], Set[str]]] = None,
+                 default: Optional[Any] = Parameter.empty,
+                 param_name: Optional[str] = None,
+                 param_type: Optional[ParameterType] = None,
+                 comfy_name: Optional[str] = None,
+                 value_formatter: Optional[Callable[[Any], Any]] = None,
+                 inner_type: Optional[Union[type, TypeAlias, str]] = None):
         '''
         Args:
-            - origin_type: The origin type of the parameter. If you are using AnnotatedParam as type hint, 
-                           values will be inherited from the origin type, and all other parameters will be used to update/extending the origin type.
+            - origin: The origin type of the parameter. If you are using AnnotatedParam as type hint, 
+                      values will be inherited from the origin type, and all other parameters will be used to update/extending the origin type.
+                      You can pass parameter directly, information will be extracted from it.
             - extra_params: The extra parameters for the type, e.g. min, max, step for int type, etc.
-            - tags: special tags, for labeling special params, e.g. lazy, ui, reduce, ...
+            - tags: special tags, for labeling special params, e.g. lazy, ui, array, ...
             - default: The default value for the parameter.
-            - comfy_type_name: The name for registering the type in ComfyUI's node system, e.g. INT for int, FLOAT for float, etc.
+            - param_name: The name of the parameter. It is not necessary to specify this, but it is recommended to specify this.
+            - param_type: The input type of the param. `None` is available for return types.
         '''
-        if not origin_type and not comfy_type_name:
-            raise ValueError('Either origin_type or comfy_type_name should be specified.')
         
-        if isinstance(origin_type, AnnotatedParam):
-            param = origin_type
+        # checkings & type tidy up
+        if param_type is not None and not valueTypeCheck(param_type, ParameterType):   # type: ignore
+            raise TypeError(f'Unexpected type for param_type: {param_type}. It should be one of {ParameterType}.')
+        
+        if isinstance(origin, _GetableFunc):
+            try:
+                origin = origin()   # type: ignore
+            except TypeError as e:   # missing parameters
+                raise e
+        
+        tags = tags or []
+        if not isinstance(tags, list):
+            tags = list(tags)
+        extra_params = extra_params or {}
+        param: Optional[Parameter] = None
+        
+        # for case looks like `Annotated[int, AnnotatedParam(int, ...)]`, take out the AnnotatedParam
+        origin_origin = get_origin(origin)
+        if origin_origin:
             
-            origin_type = origin_type.origin_type
+            if origin_origin == Annotated:
+                origin_args = get_args(origin)
+                if len(origin_args)==2:
+                    if isinstance(origin_args[1], AnnotatedParam):  # e.g. Annotated[int, AnnotatedParam(int, ...)]
+                        origin = origin_args[1]
+                    elif isinstance(origin_args[1], str):   # e.g. Annotated[int, 'x']  to annotate the param name
+                        origin = origin_args[0]
+                        param_name = param_name if param_name is not None else origin_args[1]
+                    else:
+                        raise TypeError(f'Unexpected type for Annotated: {origin_args[1]}. It should be AnnotatedParam or str.')
+                else:
+                    raise TypeError(f'Annotated should only have 2 args, but got {origin_args}')
             
-            extra_params = extra_params or {}
-            extra_params.update(param.extra_params or {})
-            if not extra_params:
-                extra_params = None
-            
-            tags = tags or []
-            tags.extend(param.tags or [])
-            if tags:
-                tags = list(set(tags))
-            else:
-                tags = None
+            elif origin_origin == Union:
+                origin_args = get_args(origin)
+                if not (len(origin_args)==2 and (NoneType in origin_args)):
+                    raise TypeError(f'Unexpected type for Union: {origin_args}. Only Support Optional type.')
+                origin = origin_args[0] if origin_args[0] != NoneType else origin_args[1]
+                param_type = 'optional' # force to optional type
                 
-            default = default if default is not None else param.default
-            comfy_type_name = comfy_type_name or param.comfy_type_name
+            elif origin_origin == list:
+                origin = get_args(origin)[0]
+                tags.append('list') # treat as array
             
-        self.origin_type = origin_type
+            elif origin_origin == tuple:
+                origin_args = get_args(origin)
+                if not (len(origin_args) == 2 and origin_args[1] == Ellipsis):
+                    raise TypeError(f'Unexpected type for Tuple: {origin_args}. Only Support Tuple[type, ...].')
+                origin = origin_args[0]
+                tags.append('list') # treat as array also
+                            
+        if isinstance(origin, Parameter):
+            param = origin
+            annotation = origin.annotation
+            if annotation == Parameter.empty:   # no annotation
+                origin = Any
+            else:                               # has annotation
+                anno_origin = get_origin(annotation)
+                if anno_origin: # special types
+                    anno_args = get_args(annotation)
+                    
+                    if anno_origin == Annotated:
+                        if len(anno_args) != 2:
+                            raise TypeError(f'Annotated should only have 2 args, but got {anno_args}')
+                        if isinstance(anno_args[1], AnnotatedParam):    # e.g. Annotated[int, AnnotatedParam(int, ...)]
+                            origin = anno_args[1]
+                        elif isinstance(anno_args[1], str): # e.g. Annotated[int, 'x']  to annotate the param name
+                            origin = anno_args[0]
+                            param_name = param_name if param_name is not None else anno_args[1]
+                    
+                    elif anno_origin in (Any, Literal):
+                        origin = annotation
+                        
+                    elif anno_origin == Union:
+                        if not (len(anno_args)==2 and (NoneType in anno_args)):
+                            raise TypeError(f'Unexpected type for Union: {anno_args}. Only Support Optional type.')
+                        origin = anno_args[0] if anno_args[0] != NoneType else anno_args[1]
+                        param_type = 'optional' # force to optional type
+                        
+                    elif anno_origin == list:
+                        origin = anno_args[0]
+                        tags.append('list') # treat as array
+                    
+                    elif anno_origin == tuple:
+                        if not (len(anno_args) == 2 and anno_args[1] == Ellipsis):
+                            raise TypeError(f'Unexpected type for Tuple: {anno_args}. Only Support Tuple[type, ...].')
+                        origin = anno_args[0]
+                        tags.append('list') # treat as array also
+                        
+                    else:
+                        raise TypeError(f'Unexpected type for Annotated: {anno_args[1]}. It should be AnnotatedParam or str.')
+                else:   # normal types
+                    origin = annotation
+            
+            default = default if default != Parameter.empty else param.default
+            param_name = param_name if param_name is not None else param.name
+
+        # not elif, cuz origin may turns into AnnotatedParam from above
+        if isinstance(origin, AnnotatedParam):
+            annotation = origin
+            
+            origin = origin.origin_type
+            
+            extra_params.update(annotation.extra_params)
+            tags.extend(annotation.tags or [])
+            
+            default = default if default !=Parameter.empty else annotation.default
+            param_type = param_type if param_type is not None else annotation.param_type
+            param_name = param_name if param_name is not None else annotation.param_name
+            comfy_name = comfy_name if comfy_name is not None else annotation.comfy_name
+            value_formatter = value_formatter if value_formatter is not None else annotation.value_formatter
+            inner_type = inner_type if inner_type is not None else annotation.inner_type
+        
+        if isinstance(origin, (list, tuple)): # sequence of values, means COMBO type
+            for val in origin:
+                if not isinstance(val, (int, str, float, bool)):
+                    raise TypeError(f'Unexpected type in COMBO type: {val}. It should be one of int, str, float, bool.')
+            origin = DynamicLiteral(*origin)  # turn into COMBO
+        
+        if isinstance(origin, ForwardRef):
+            origin = origin.__forward_arg__.upper() # type name
+        
+        self.origin_type = origin
         self.extra_params = extra_params
-        self.tags = tags
+        self.tags = set(tags)
         self.default = default
-        self.comfy_type_name = comfy_type_name
+        self.param_name = param_name
+        self.comfy_name = comfy_name
+        if not self.comfy_name:
+            if hasattr(origin, '__ComfyName__') and isinstance(origin.__ComfyName__, str):  # type: ignore
+                self.comfy_name = origin.__ComfyName__  # type: ignore
+        self.inner_type = inner_type
+        
+        if isinstance(self.origin_type, type):
+            if issubclass(self.origin_type, Enum):
+                self.value_formatter = lambda val: _enum_convertor(self.origin_type, val)
+            else:
+                self.value_formatter = value_formatter
+                if not self.value_formatter and hasattr(self.origin_type, '__ComfyValueFormatter__'):
+                    formatter = self.origin_type.__dict__['__ComfyValueFormatter__']
+                    if formatter is not None:
+                        if not isinstance(formatter, (classmethod, staticmethod)):
+                            raise TypeError(f'__ComfyValueFormatter__ should be a class or static method, but got {formatter}.')
+                        self.value_formatter = formatter
+        else:
+            self.value_formatter = value_formatter
+        
+        self.param_type = param_type
+        if not self.param_type and param:
+            self.param_type = _get_input_param_type(param, self.tags)
 
     @property
-    def _comfy_type_definition(self)->Union[str, list]:
+    def _comfy_type(self)->Union[str, list]:
         '''
         Return the comfy type name(or list of value for COMBO type) for this param.
         For internal use only.
         '''
-        if self.comfy_type_name:
-            return self.comfy_type_name
-        
-        if not self.origin_type:
-            raise ValueError('The comfy_type_name is not specified and the origin_type is not specified either.')
-        return _get_comfy_type_definition(self.origin_type)
+        if self.comfy_name:
+            return self.comfy_name
+        return _get_comfy_type_definition(self.origin_type, self.inner_type)
 
     @property
-    def _clone(self)->'AnnotatedParam':
-        '''Clone this instance.'''
-        return AnnotatedParam(origin_type=self.origin_type, 
-                              extra_params=self.extra_params, 
-                              tags=self.tags, 
-                              default=self.default, 
-                              comfy_type_name=self.comfy_type_name)
-
-    @property
-    def _dict(self)->dict:
-        '''Return the dict representation of this instance'''
-        data = self.extra_params or {}
-        if self.default:
-            data['default'] = self.default
-        return data
+    def _comfy_name(self)->str:
+        '''Return the comfy name for this param. For internal use only.'''
+        if self.comfy_name:
+            return self.comfy_name
+        return get_comfy_name(self.origin_type, self.inner_type)
     
     @property
-    def _tuple(self)->tuple:
-        '''return the tuple form, e.g. ("INT", {...})'''
-        data_dict = self._dict
+    def proper_param_name(self)->Optional[str]:
+        '''Return the proper param name shown on UI.'''
+        if not self.param_name:
+            return self.param_name
+        name = self.param_name
+        while name.startswith('_'):
+            name = name[1:]
+        return name
+        
+    @property
+    def _comfyUI_definition(self)->tuple:
+        '''return the tuple form for registration, e.g. ("INT", {...})'''
+        data_dict = self.extra_params
+        if self.default != Parameter.empty:
+            data_dict['default'] = self.default
         if data_dict:
-            return (self._comfy_type_definition, data_dict)
+            return (self._comfy_type, data_dict)
         else:
-            return (self._comfy_type_definition, )
+            return (self._comfy_type, )
 
-__all__ = ['AnnotatedParam', ]
+    def format_value(self, val: Any):
+        '''format the value by the formatter'''
+        if not self.value_formatter:
+            return val
+        
+        need_convert = False
+        if isinstance(self.origin_type, str):
+            self_comfy_name = self._comfy_name
+            if self_comfy_name != "COMBO":  # no need to convert combo
+                val_comfy_name = get_comfy_name(val)
+                if val_comfy_name != self_comfy_name:
+                    need_convert = True
+        else:
+            if not valueTypeCheck(val, self.origin_type):
+                need_convert = True
+        
+        if need_convert:
+            return self.value_formatter(val)
+        return val
 
 class InferenceContext:
     
@@ -189,9 +448,16 @@ class InferenceContext:
     prompt: 'PROMPT'
     '''The prompt of current execution. It is a dict containing all nodes' input for execution.'''
     
-    def __init__(self, current_prompt: 'PROMPT'):
-        self.prompt = current_prompt
+    extra_data: dict
+    '''Extra data for the current execution.'''
     
+    current_node: Optional['ComfyUINode'] = None
+    '''The current node for this execution.'''
+    
+    def __init__(self, current_prompt: 'PROMPT', extra_data: dict):
+        self.prompt = current_prompt
+        self.extra_data = extra_data
+       
     @property
     def node_pool(self)-> 'NodePool':
         '''
@@ -214,7 +480,27 @@ class InferenceContext:
     def outputs(self)-> 'NodeOutputs':
         '''current outputs in this execution'''
         return self._executor.outputs
+
+
+_CT = TypeVar('_CT', bound='ComfyType')
+
+class ComfyType(Protocol, Generic[_CT]):
+    '''Protocol for hinting the special properties u can define in customized type for comfyUI.'''
     
+    @classmethod
+    def __ComfyValueFormatter__(cls, value)->Any:
+        '''Convert the value to the real value for the type.'''
+    
+    def __ComfyDump__(self)->Any:
+        '''You can define how this value should be dump to json when returning the response.'''
+    
+    @classmethod
+    def __ComfyLoad__(cls: Type[_CT], data: Any)->_CT:
+        '''You can define how to load the data from json to the object.'''
+    
+    __ComfyName__: ClassVar[str]
+    '''If you have set this field, it would be the comfy name for this type.'''
+
 class HIDDEN(ABC):
     '''
     The base class for all special hidden types. Class inherited from this class will must be treated as hidden type in node system.
@@ -224,29 +510,17 @@ class HIDDEN(ABC):
     so it is recommended to use this class to define hidden types.
     '''
     def __class_getitem__(cls, tp: type):
-        return Annotated[tp, AnnotatedParam(origin_type=tp, tags=['hidden'])]
+        return Annotated[tp, AnnotatedParam(origin=tp, tags=['hidden'])]
     
     @abstractclassmethod
-    def GetValue(cls: Type[_HT], context: InferenceContext)->_HT:   # type: ignore
+    def GetValue(cls: Type[_HT], context: InferenceContext)->Optional[_HT]:   # type: ignore
         '''All hidden types should implement this method to get the real value from current inference context.'''
         raise NotImplementedError
 
-__all__.extend(['HIDDEN'])
+__all__ = ['get_comfy_name', 'ParameterType', 'AnnotatedParam', 'InferenceContext', 'ComfyType', 'HIDDEN']
 
 
-class _GetableFunc:
-    '''
-    Special types to allow the origin function be called by using `[]`(but kwargs is not supported).
-    This helps to make TypeHints method more consistent, e.g. INT(0,10,2) is the same as INT[0,10,2].
-    '''
-    def __init__(self, real_func):
-        self.real_func = real_func
-    def __call__(self, *args: Any, **kwds: Any) -> Any:
-        return self.real_func(*args, **kwds)
-    def __getitem__(self, item: Tuple[Any]) -> Any:
-        return self.real_func(*item)
-    
-# region common types
+# region basic types
 def INT(min: int=0, max: int = 0xffffffffffffffff, step:int=1, display: Literal['number', 'slider', 'color']='number')->Annotated:
     '''
     This is the int type annotation for containing more information. 
@@ -267,10 +541,10 @@ def INT(min: int=0, max: int = 0xffffffffffffffff, step:int=1, display: Literal[
     if display not in ('number', 'slider', 'color'):
         raise ValueError(f'Invalid value for display: {display}. It should be one of "number", "slider", "color".')
     data = {"min": min, "max": max, "step": step, "display": display}
-    return Annotated[int, AnnotatedParam(origin_type=int, extra_params=data, comfy_type_name='INT')]
+    return Annotated[int, AnnotatedParam(origin=int, extra_params=data, comfy_name='INT')]
 globals()['INT'] = _GetableFunc(INT)    # trick for faking IDE to believe INT is a function
 
-def FLOAT(min=0, max=100, step=0.01, round=0.001, display: Literal['number', 'slider']='number')->Annotated:
+def FLOAT(min=0, max=100, step=0.01, round=0.01, display: Literal['number', 'slider']='number')->Annotated:
     '''
     This is the float type annotation for containing more information. 
     For default values, set by `=...`, e.g. def f(x: FLOAT(0, 10, 2)=0): ...
@@ -291,7 +565,7 @@ def FLOAT(min=0, max=100, step=0.01, round=0.001, display: Literal['number', 'sl
     if display not in ('number', 'slider'):
         raise ValueError(f'Invalid value for display: {display}, It should be one of "number", "slider".')
     data = {"min": min, "max": max, "step": step, "round": round, "display": display}
-    return Annotated[float, AnnotatedParam(origin_type=float, extra_params=data, comfy_type_name='FLOAT')]
+    return Annotated[float, AnnotatedParam(origin=float, extra_params=data, comfy_name='FLOAT')]
 globals()['FLOAT'] = _GetableFunc(FLOAT)    # trick for faking IDE to believe FLOAT is a function
 
 def STRING(multiline=False, forceInput: bool=False, dynamicPrompts: bool=False)->Annotated:
@@ -310,7 +584,7 @@ def STRING(multiline=False, forceInput: bool=False, dynamicPrompts: bool=False)-
         - dynamicPrompts: Whether to use dynamic prompts on UI
     '''
     data = {"multiline": multiline, "forceInput": forceInput, "dynamicPrompts": dynamicPrompts}
-    return Annotated[str, AnnotatedParam(origin_type=str, extra_params=data, comfy_type_name='STRING')]
+    return Annotated[str, AnnotatedParam(origin=str, extra_params=data, comfy_name='STRING')]
 globals()['STRING'] = _GetableFunc(STRING)    # trick for faking IDE to believe STRING is a function
 
 def BOOLEAN(label_on: str='True', label_off: str='False')->Annotated:
@@ -328,7 +602,7 @@ def BOOLEAN(label_on: str='True', label_off: str='False')->Annotated:
         - label_off: The text label for False on UI.
     '''
     data = {"label_on": label_on, "label_off": label_off}
-    return Annotated[bool, AnnotatedParam(origin_type=bool, extra_params=data, comfy_type_name='BOOLEAN')]
+    return Annotated[bool, AnnotatedParam(origin=bool, extra_params=data, comfy_name='BOOLEAN')]
 globals()['BOOLEAN'] = _GetableFunc(BOOLEAN)    # trick for faking IDE to believe BOOLEAN is a function
 
 def PATH(accept_types: Union[List[str], str, Tuple[str, ...], None] = None,
@@ -351,9 +625,16 @@ def PATH(accept_types: Union[List[str], str, Tuple[str, ...], None] = None,
     else:
         if isinstance(accept_types, (list, tuple)):
             accept_types = ','.join(accept_types)
-    return Annotated[str, AnnotatedParam(origin_type=str, extra_params={'accept_types': accept_types, 'accept_folder': accept_folder}, comfy_type_name='PATH')]
+    return Annotated[Path, AnnotatedParam(origin=Path, 
+                                         extra_params={'accept_types': accept_types, 'accept_folder': accept_folder}, 
+                                         comfy_name='PATH',
+                                         value_formatter=Path)]
 globals()['PATH'] = _GetableFunc(PATH)    # trick for faking IDE to believe PATH is a function
 
+__all__.extend(['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'PATH', ])
+# endregion
+
+# region common types
 class LATENT(dict):
     '''Special type for wrapping the origin `LATENT` type.'''
     
@@ -374,79 +655,140 @@ class LATENT(dict):
         if 'batch_index' in self:
             return self['batch_index']
         return None
+    
+    @classmethod
+    def __ComfyValueFormatter__(cls, value):    # for converting the normal dict type to LATENT
+        return cls(value)
 
-CLIP: TypeAlias = Annotated[comfy_CLIP, AnnotatedParam(origin_type=comfy_CLIP, comfy_type_name='CLIP')]
+CLIP: TypeAlias = Annotated[comfy_CLIP, AnnotatedParam(origin=comfy_CLIP, comfy_name='CLIP')]
 '''type hint for ComfyUI's built-in type `CLIP`.'''
 
-VAE: TypeAlias = Annotated[comfy_VAE, AnnotatedParam(origin_type=comfy_VAE, comfy_type_name='VAE')]
+VAE: TypeAlias = Annotated[comfy_VAE, AnnotatedParam(origin=comfy_VAE, comfy_name='VAE')]
 '''type hint for ComfyUI's built-in type `VAE`.'''
 
-CONTROL_NET: TypeAlias = Annotated[comfy_ControlNetBase, AnnotatedParam(origin_type=comfy_ControlNetBase, comfy_type_name='CONTROL_NET')]
+CONTROL_NET: TypeAlias = Annotated[comfy_ControlNetBase, AnnotatedParam(origin=comfy_ControlNetBase, comfy_name='CONTROL_NET')]
 '''
 Type hint for ComfyUI's built-in type `CONTROL_NET`.
 This type includes all control networks in ComfyUI, including `ControlNet`, `T2IAdapter`, and `ControlLora`.
 '''
 
-MODEL: TypeAlias = Annotated[BaseModel, AnnotatedParam(origin_type=BaseModel, comfy_type_name='MODEL')]
+MODEL: TypeAlias = Annotated[BaseModel, AnnotatedParam(origin=BaseModel, comfy_name='MODEL')]
 '''type hint for ComfyUI's built-in type `MODEL`.'''
 
-IMAGE: TypeAlias = Annotated[Tensor, AnnotatedParam(origin_type=Tensor, comfy_type_name='IMAGE')]
+IMAGE: TypeAlias = Annotated[Tensor, AnnotatedParam(origin=Tensor, comfy_name='IMAGE')]
 '''Type hint for ComfyUI's built-in type `IMAGE`.
 When multiple imgs are given, they will be concatenated as 1 tensor by ComfyUI.'''
 
-MASK: TypeAlias = Annotated[Tensor, AnnotatedParam(origin_type=Tensor, comfy_type_name='MASK')]
+MASK: TypeAlias = Annotated[Tensor, AnnotatedParam(origin=Tensor, comfy_name='MASK')]
 '''Type hint for ComfyUI's built-in type `MASK`.
 Similar to `IMAGE`, when multiple masks are given, they will be concatenated as 1 tensor by ComfyUI.'''
 
-__all__.extend(['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'PATH', 'LATENT', 'VAE', 'CLIP', 'CONTROL_NET', 'MODEL', 'IMAGE', 'MASK'])
+__all__.extend(['LATENT', 'VAE', 'CLIP', 'CONTROL_NET', 'MODEL', 'IMAGE', 'MASK'])
 # endregion
 
 # region comfyUI built-in options
-COMFY_SCHEDULERS: TypeAlias = Literal[""]
+def DynamicLiteral(*args: Union[str, int, float, bool])->TypeAlias:
+    '''Literal annotation for dynamic options.'''
+    literal_args = tuple(args)
+    for option in literal_args:
+        if not isinstance(option, (str, int, float, bool)):
+            raise TypeError(f'Unexpected type: {option}. It should be one of str, int, float, bool.')
+    t = Literal[""]
+    t.__args__ = literal_args  # type: ignore
+    return t
+globals()['DynamicLiteral'] = _GetableFunc(DynamicLiteral)    # trick for faking IDE to believe DynamicLiteral is a function
+
+COMFY_SCHEDULERS = DynamicLiteral(*KSampler.SCHEDULERS)
 '''Literal annotation for choosing comfyUI's built-in schedulers.'''
-COMFY_SCHEDULERS.__args__ = tuple(KSampler.SCHEDULERS)  # type: ignore
 
-COMFY_SAMPLERS: TypeAlias = Literal[""]
+COMFY_SAMPLERS = DynamicLiteral(*KSampler.SAMPLERS)
 '''Literal annotation for choosing comfyUI's built-in samplers.'''
-COMFY_SAMPLERS.__args__ = tuple(KSampler.SAMPLERS)  # type: ignore
 
-__all__.extend(['COMFY_SCHEDULERS', 'COMFY_SAMPLERS',])
+__all__.extend(['DynamicLiteral', 'COMFY_SCHEDULERS', 'COMFY_SAMPLERS',])
 # endregion
 
-# region special types for comfyUI
-def UI(tp: Union[type, TypeAlias, AnnotatedParam], extra_params: Optional[Dict[str, Any]]=None)->AnnotatedParam:
+
+# region return types
+def Named(tp: Union[type, TypeAlias, AnnotatedParam], return_name: str):
+    '''Type hint for specifying a named return value.'''
+    return AnnotatedParam(tp, param_name=return_name)
+globals()['Named'] = _GetableFunc(Named)    # trick for faking IDE to believe ReturnType is a function
+
+class UI(Generic[_T]):
     '''
-    To define a output type that should be shown in UI.
-    Obviously not all types are supported for UI, but I can't find a document for that.
+    The class for annotation the return value should be shown on comfy's web UI.
+    The final data dict will be like:
+        {ui":{_ui_name: _value, ...}, result:(value1, ..), extra_params1: {...}, extra_params2: {...}}
     
-    Note:
-        You can use UI[type, {...}] to label. It is same as UI(type, {...}).
+    # TODO: Since the ui return design of ComfyUI is too messy(and only support some types), 
+    # TODO: we should do a general solution which returns HTML directly from here, and shows on the web UI.
     '''
-    if isinstance(tp, AnnotatedParam):
-        if tp.tags is None:
-            tp.tags = []
-        tp.tags.append('ui')
-        if extra_params is not None:
-            tp.extra_params = tp.extra_params or {}
-            tp.extra_params.update(extra_params)
-    else:
-        extra_params = extra_params or {}
-        tp = AnnotatedParam(tp, tags=['ui'], extra_params=extra_params)
-    return tp
-globals()['UI'] = _GetableFunc(UI)    # trick for faking IDE to believe UI is a function
+    
+    def __class_getitem__(cls, tp: Type[_T]):
+        '''Annotation for return value'''
+        return Annotated[tp, AnnotatedParam(origin=tp, tags=['ui'])]
 
-UI_IMAGE: TypeAlias = Annotated['IMAGE', AnnotatedParam(comfy_type_name='IMAGE', extra_params={'animated': False}, tags=['ui'])]
-'''Specify the return image should be shown in UI.'''
+    _ui_name: str
+    '''the main key for putting in the UI return dict's "ui"'''    
+    _value: _T
+    '''The real return value'''
+    _params: Dict[str, Any]
+    '''Those params inside the "ui" dict.'''
+    _extra_params: Dict[str, Any]
+    '''extra params for passing to comfyUI's ui return dict.'''
+    
+    @property
+    def ui_name(self)->str:
+        '''The main key for putting in the UI return dict's "ui".'''
+        return self._ui_name
+    @property
+    def value(self)->Any:
+        '''The real return value.'''
+        return self._value
+    @property
+    def extra_params(self)->Dict[str, Any]:
+        '''Extra params for passing to comfyUI's ui return dict.'''
+        return self._extra_params
+    
+    def __init__(self, ui_name:str, value: _T, **params):
+        self._ui_name = ui_name
+        self._value = value
+        self._params = params
+        self._extra_params = {}
+        
+    def add_extra_param(self, key, value):
+        '''add extra param for the return dict.'''
+        self._extra_params[key] = value
 
-UI_ANIMATION: TypeAlias = Annotated['IMAGE', AnnotatedParam(comfy_type_name='IMAGE', tags=['ui', 'animated'])]
-'''Specify the return animated image should be shown in UI.'''
+class UIImage(UI[IMAGE]):
+       
+    def __init__(self, 
+                 value: IMAGE, 
+                 filename: str, 
+                 subfolder:str,
+                 type: Literal['output', 'temp']='output', 
+                 animated: bool=False):
+        '''
+        Args:
+            - value: the original image
+            - filename: the filename of the image(under the `output` folder)
+            - subfolder: the subfolder of the image(under the `output` folder)
+            - type: (output/temp) `output` means the image is saved under the output folder, `temp` means the image is saved under the temp folder.
+            - animated: whether the image is animated(e.g. gif)
+            - extra_params: extra params for putting in UI return dict.
+        '''
+        
+        super().__init__('images', value, filename=filename, type=type, subfolder=subfolder)
+        self.add_extra_param('animated', animated)
 
-UI_LATENT: TypeAlias = Annotated[LATENT, AnnotatedParam(comfy_type_name='LATENT', tags=['ui'])]
-'''Specify the return latent should be shown in UI.'''
+class UILatent(UI[LATENT]):
+    def __init__(self, value: LATENT, **params):
+        super().__init__('latents', value, **params)
 
-__all__.extend(['UI', 'UI_IMAGE', 'UI_ANIMATION', 'UI_LATENT'])
+__all__.extend(['Named', 'UI', 'UIImage', 'UILatent'])
+# endregion
 
-
+# region special types
 class Lazy(Generic[_T]):
     '''
     Mark the type as lazy, for lazy loading in ComfyUI.
@@ -459,6 +801,7 @@ class Lazy(Generic[_T]):
         return Annotated[real_type, AnnotatedParam(tp, tags=['lazy'])]
     
     _value: _T = None    # type: ignore
+    
     _from_node_id: str = None   # type: ignore
     _from_slot: str = None  # type: ignore
     
@@ -478,36 +821,41 @@ class Lazy(Generic[_T]):
             self._from_node_id, self._from_slot = args
     
     def _get_value(self)->_T:   # type: ignore
-        if self._value is not None:
-            return self._value
-        else:
-            pool: NodePool = NodePool.Instance  # type: ignore
-            node = pool[self._from_node_id]
-            
-            
+        if self._value is None:
+            if not self._from_node_id or not self._from_slot:
+                raise ValueError(f'Invalid lazy type: {self}. It should be created from another node.')
+            self._value = PromptExecutor.Instance._get_node_output(self._from_node_id, self._from_slot) # type: ignore
+        return self._value
+    
     @property
     def value(self)->_T:
         '''The real value of the lazy type. The value will only be resolved when it is accessed.'''
         return self._get_value()
 
-class Reduce(list, Generic[_T]):
+class Array(list, Generic[_T]):
     '''
-    Mark the type as reduce, to allow the param accept multiple values and pack as a list.
+    Mark the type as array, to allow the param accept multiple values and pack as a list.
     This could only be used in input parameters.
     '''
     
     def __class_getitem__(cls, tp: Union[type, TypeAlias, AnnotatedParam]) -> Annotated:
         '''
-        Mark the type as reduce, to allow the param accept multiple values and pack as a list.
+        Mark the type as array, to allow the param accept multiple values and pack as a list.
         This could only be used in input parameters.
         '''
         real_type = tp.origin_type if isinstance(tp, AnnotatedParam) else tp
-        return Annotated[real_type, AnnotatedParam(tp, tags=['reduce'])]    # type: ignore
+        return Annotated[real_type, AnnotatedParam('ARRAY', inner_type=tp, tags=['list'])]    # type: ignore
 
+    @classmethod
+    def __ComfyValueFormatter__(cls, value):
+        '''Convert the value to array type.'''
+        raise NotImplementedError   # TODO: implement this
 
-__all__.extend(['Lazy', 'Reduce'])
+__all__.extend(['Lazy', 'Array'])
 # endregion
 
+
+# region ComfyNode
 class _ComfyUINodeMeta(_ProtocolMeta):
     def __instancecheck__(cls, instance: Any) -> bool:
         if hasattr(instance, '__IS_COMFYUI_NODE__') and instance.__IS_COMFYUI_NODE__:
@@ -527,7 +875,17 @@ class ComfyUINode(Protocol, metaclass=_ComfyUINodeMeta):
     '''
     
     # region internal attributes
-    __IS_COMFYUI_NODE__: bool
+    __IS_COMFYUI_NODE__: ClassVar[bool]
+    '''internal flag for identifying comfyUI nodes.'''
+    
+    __IS_ADVANCED_COMFYUI_NODE__: ClassVar[bool] = False
+    '''if u create nodes by inheriting from `NodeBase`, this flag will be set to True.'''
+    
+    __ADVANCED_NODE_CLASS__: ClassVar[Optional[Type['NodeBase']]] = None
+    '''If u create nodes by inheriting from `NodeBase`, this will be the real node class.'''
+    
+    __real_node_instance__: 'NodeBase'
+    '''real node instance after creation.'''
     
     _ID: str
     '''The unique id of the node. This will be assigned in runtime.'''
@@ -552,12 +910,9 @@ class ComfyUINode(Protocol, metaclass=_ComfyUINodeMeta):
     '''whether the input is a list'''
     OUTPUT_IS_LIST: Tuple[bool, ...]
     '''whether the output is a list'''
-    
     LAZY_INPUTS: Tuple[str, ...]
-    '''the input names which are lazy'''
-    REDUCE_INPUTS: Tuple[str, ...]
-    '''the input names which are reduce'''
-
+    '''the lazy input params of the node'''
+    
     OUTPUT_NODE: bool
     '''
     Means the node have values that shown on UI.
@@ -584,7 +939,7 @@ class ComfyUINode(Protocol, metaclass=_ComfyUINodeMeta):
         '''
 
 __all__.extend(['ComfyUINode'])
-
+# endregion
 
 # region type aliases for comfyUI's origin codes
 NodeInputDict: TypeAlias = Dict[Literal['required', 'optional', 'hidden'], Dict[str, Any]]
@@ -651,7 +1006,7 @@ class NodePool(Dict[Union[str, Tuple[str, Union[str, Type[ComfyUINode]]]], Comfy
                     node_type = NODE_CLASS_MAPPINGS[node_type]
                 node = node_type()
                 setattr(node, '_ID', node_id)
-                setattr(node, '__IS_COMFYUI_NODE__', True)
+                # '__IS_COMFYUI_NODE__' should already be set in `nodes.py`
                 self[node_id] = node
         else:
             node_id = __key
@@ -748,6 +1103,13 @@ class NodeBindingParam(Tuple[str, int]):
         '''The output slot index of the source node. Wrapper for the second element of the tuple.'''
         return self[1]
 
+    @staticmethod
+    def InstanceCheck(value: Any)->TypeGuard['NodeBindingParam']:
+        if not isinstance(value, type):
+            value = type(value)
+        type_name = get_cls_name(value)
+        return type_name == 'NodeBindingParam'  # due to complicated importing & compatibility issues, we use name checking here.
+
 class NodeInputs(Dict[str, Union[NodeBindingParam, Any]]):
     '''
     {param_name: input_value, ...}
@@ -756,11 +1118,23 @@ class NodeInputs(Dict[str, Union[NodeBindingParam, Any]]):
         - [node_id(str), output_slot_index(int)]: the input is from another node
         - Any: the input is a value
     '''
+    
+    def _should_convert_to_bind_type(self, value: list)->bool:
+        if NodeBindingParam.InstanceCheck(value):
+            return False    # already binding
+        if len(value)!=2 or not isinstance(value[0], str) or not isinstance(value[1], int): 
+            return False # not binding
+        return True     # seems like a binding, e.g. ['1', 0] means from node_id=1 and output_slot_index=0
+    
     def _format_values(self):
-        for key, value in self.items():
-            if not isinstance(value, str):
-                if isinstance(value, list) and len(value)==2 and not isinstance(value, NodeBindingParam):
+        for key, value in tuple(self.items()):
+            if isinstance(value, list):
+                if self._should_convert_to_bind_type(value):
                     self[key] = NodeBindingParam(value)
+    
+    
+    node_id: Optional[str] = None
+    '''The node id of the source node. It is only available when the input is from another node.'''
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -775,6 +1149,41 @@ class NodeInputs(Dict[str, Union[NodeBindingParam, Any]]):
             
             __value = NodeBindingParam(*__value)
         super().__setitem__(__key, __value)
+
+    @staticmethod
+    def InstanceCheck(value: Any)->TypeGuard['NodeInputs']:
+        if not isinstance(value, type):
+            value = type(value)
+        type_name = get_cls_name(value)
+        return type_name == 'NodeInputs'
+
+class NodeType(str):
+    
+    _real_cls: type = None
+    
+    def __hash__(self):
+        return super().__hash__()
+
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return super().__eq__(other)
+        elif isinstance(other, ComfyUINode):
+            return super().__eq__(type(other).__qualname__.split('.')[-1])
+        return super().__eq__(other)
+    
+    @property
+    def real_node_cls(self)->Type[ComfyUINode]:
+        if not self._real_cls:
+            from comfyUI.nodes import NODE_CLASS_MAPPINGS
+            self._real_cls = NODE_CLASS_MAPPINGS[self]
+        return self._real_cls
+    
+    @staticmethod
+    def InstanceCheck(value: Any)->TypeGuard['NodeType']:
+        if not isinstance(value, type):
+            value = type(value)
+        type_name = get_cls_name(value)
+        return type_name == 'NodeType'
 
 class PROMPT(Dict[str, Dict[Literal['inputs', 'class_type', 'is_changed'], Any]], HIDDEN):
     '''
@@ -791,9 +1200,12 @@ class PROMPT(Dict[str, Dict[Literal['inputs', 'class_type', 'is_changed'], Any]]
         '''Make sure all node inputs are set as value/NodeBindingParam'''
         for _, node_info_dict in self.items():
             if 'inputs' in node_info_dict:
-                if not isinstance(node_info_dict['inputs'], NodeInputs):
+                if not NodeInputs.InstanceCheck(node_info_dict['inputs']):
                     node_info_dict['inputs'] = NodeInputs(node_info_dict['inputs'])
-    
+            if 'class_type' in node_info_dict:
+                if not NodeType.InstanceCheck(node_info_dict['class_type']):
+                    node_info_dict['class_type'] = NodeType(node_info_dict['class_type']) 
+            
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._format_prompt() # tidy up types
@@ -838,6 +1250,28 @@ class PROMPT(Dict[str, Dict[Literal['inputs', 'class_type', 'is_changed'], Any]]
             node = node.ID
         return self[node].get('is_changed', None)
 
+class EXTRA_PNG_INFO(Dict[str, Any], HIDDEN):
+    '''Extra information for saving png file.'''
+    
+    __ComfyName__: ClassVar[str] = 'EXTRA_PNGINFO'
+    
+    @classmethod
+    def GetValue(cls: Type[_HT], context: InferenceContext)->Optional[_HT]:   # type: ignore
+        '''All hidden types should implement this method to get the real value from current inference context.'''
+        if 'extra_pnginfo' in context.extra_data:
+            return context.extra_data['extra_pnginfo']
+        return None
+
+@deprecated(reason='unique id of node can be gotten by node.ID directly. It is not necessary to use this type anymore.')
+class UNIQUE_ID(str, HIDDEN):
+    '''The unique ID of current running node.'''
+    
+    @classmethod
+    def GetValue(cls: Type[_HT], context: InferenceContext)->Optional[_HT]:
+        cur_node = context.current_node
+        if cur_node is not None:
+            return cur_node.ID  # type: ignore
+        return None
 
 StatusMsg: TypeAlias = List[Tuple[str, Dict[str, Any]]]
 '''
@@ -865,12 +1299,8 @@ Items:
 '''
 
 
-__all__.extend(['NodeInputDict', 
-                
-                'NodePool', 'NodeBindingParam', 'NodeInputs', 'PROMPT', 
-                
-                'StatusMsg', 
-                
-                'NodeOutputs_UI', 'NodeOutputs', 'QueueTask'])
+__all__.extend(['NodeInputDict', 'NodePool', 'NodeBindingParam', 'NodeInputs', 
+                'PROMPT', 'EXTRA_PNG_INFO', 'UNIQUE_ID', 
+                'StatusMsg', 'NodeOutputs_UI', 'NodeOutputs', 'QueueTask'])
 # endregion
 

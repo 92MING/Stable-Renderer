@@ -108,6 +108,13 @@ def is_game_mode()->bool:
         return not GetEnv('EDITOR_MODE', False, bool)
     return True # default is game mode
 
+def should_run_web_server()->bool:
+    '''Indicates whether the comfyUI's web server should be started.'''
+    should_run = GetEnv('COMFYUI_DIRECT_RUN', False, bool)
+    if not should_run:
+        should_run = not is_game_mode()
+    return should_run
+
 def is_editor_mode():
     '''
     Editor mode means the engine in running with editor window.
@@ -148,7 +155,7 @@ def is_dev_mode():
     '''
     return not is_release_mode()
 
-__all__ = ['GetEnv', 'is_game_mode', 'is_editor_mode', 'is_release_mode', 'is_dev_mode']
+__all__ = ['GetEnv', 'should_run_web_server', 'is_game_mode', 'is_editor_mode', 'is_release_mode', 'is_dev_mode']
 # endregion
 
 # region global values

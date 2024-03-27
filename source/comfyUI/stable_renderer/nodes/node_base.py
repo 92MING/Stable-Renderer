@@ -4,74 +4,17 @@ All sub classes will be registered automatically.
 '''
 
 import re
+
 from inspect import isabstract, signature, Parameter, Signature
-from abc import ABC, abstractmethod
-from typing import (ClassVar, Optional, Literal, Any, Tuple, Annotated, TypeAlias, Union, Dict, 
-                    get_args, overload, TypeVar, Generic, List)
-from enum import Enum
+from abc import abstractmethod
+from typing import ClassVar, Optional, Any, Tuple, Union, Dict, get_args, List
 from collections import OrderedDict
-from common_utils.type_utils import get_origin, get_cls_name
+
+from common_utils.base_clses import CrossModuleABC
+from common_utils.debug_utils import ComfyUILogger
+from common_utils.type_utils import get_origin, is_empty_method
 from comfyUI.types import *
 
-
-NT = TypeVar('NT', bound='NodeBase')
-
-class SRComfyNode(ComfyUINode, Generic[NT]):
-    '''Type hints for advanced comfyUI nodes defined by `NodeBase`.'''
-
-    CATEGORY: Optional[str]
-    '''The category of this node. This is for grouping nodes in the UI.'''
-    DESCRIPTION: str
-    '''The description of this node. This is for registration.'''
-    RETURN_TYPES: Tuple[str, ...]
-    '''The return types of this node. This is for registration.'''
-    
-    __real_node_instance__: NT
-    '''The real instance of the node class.'''
-
-__all__ = ['SRComfyNode']
-
-def _get_input_param_type(key: str, param: Parameter, tags: Optional[List[str]]=None)->Literal['required', 'optional', 'hidden']:
-    '''
-    Get the input parameter type for registration.
-    
-    Conditions:
-        * hidden: param name starts with '_', e.g. def f(_x:int)
-        * optional: param default is None, e.g. def f(x:int = None)
-        * required: others
-    '''
-    # 3 conditions for hidden
-    if key.startswith('_'):
-        return 'hidden'
-    anno = param.annotation
-    anno_origin = get_origin(anno)
-    if anno_origin:
-        if anno_origin == Annotated:
-            args = get_args(anno)
-            if isinstance(args[0], str):
-                if args[0].lower() == 'hidden':
-                    return 'hidden'
-            if isinstance(args[0], type):
-                if issubclass(args[0], HIDDEN):
-                    return 'hidden'
-    elif type(anno) == type:
-        if issubclass(anno, HIDDEN):
-            return 'hidden'
-    elif isinstance(anno, str):
-        if anno.lower() == 'hidden':
-            return 'hidden'
-    if tags:
-        if 'hidden' in tags:
-            return 'hidden'
-    
-    if param.default is None:
-        return 'optional'   # only when default=None will be considered as optional
-    return 'required'  
-
-def _get_proper_param_name(param_name:str):
-    while param_name.startswith('_'):
-        param_name = param_name[1:]
-    return param_name
 
 def _pack_param(sig: Signature, args, kwargs)-> OrderedDict[str, Any]:
     '''Pack the args and kwargs into a dict, according to the signature of the function. Return None if not suitable.'''
@@ -100,6 +43,7 @@ def _pack_param(sig: Signature, args, kwargs)-> OrderedDict[str, Any]:
             packed_params[var_kwargs_field_name][k] = v
     
     args_copy = list(args)
+    kwargs_copy = dict(kwargs)
     for name, param in parameters.items():
         if param.kind == Parameter.VAR_POSITIONAL:  # *args param
             for arg in args_copy:
@@ -109,7 +53,9 @@ def _pack_param(sig: Signature, args, kwargs)-> OrderedDict[str, Any]:
             for (k, v) in tuple(packed_params.items()):
                 packed_params[name][k] = v  # already created a dict in the first step, i.e. name == self.var_kwargs_field_name
         else:   # normal param
-            if len(args_copy)>0:
+            if name in kwargs:
+                packed_params[name] = kwargs_copy.pop(name)
+            elif len(args_copy)>0:
                 packed_params[name] = args_copy[0]
                 args_copy = args_copy[1:]
             else:
@@ -125,94 +71,7 @@ def _pack_param(sig: Signature, args, kwargs)-> OrderedDict[str, Any]:
         
     return packed_params
 
-def _return_proper_value(values: Tuple[Any, ...])->List[Any]:
-    '''Proper the return types to be suitable for ComfyUI.'''
-    vals = []
-    for val in values:
-        if isinstance(val, Enum):
-            vals.append(val.name)
-        else:
-            vals.append(val)
-    return vals   
-
-
-class _NodeField:
-    '''Data class for containing the field info of a node.'''
-    
-    origin_param_name: Optional[str]
-    '''The original name of the param. `None` is only for return types.'''
-    param_name: Optional[str]
-    '''The name of the param. `None` is only for return types.'''
-    param: AnnotatedParam
-    '''infos'''
-    param_type: Optional[Literal['required', 'optional', 'hidden']]
-    '''The type of the param. `None` is only for return types.'''
-    
-    @overload
-    def __init__(self, param: Parameter): '''input field info'''
-    
-    @overload
-    def __init__(self, param: Union[type, TypeAlias]): '''return field info'''
-    
-    def __init__(self, param: Union[type, TypeAlias, Parameter]):
-        if isinstance(param, Parameter):    # input field info
-            self.origin_param_name = param.name
-            self.param_name = _get_proper_param_name(self.origin_param_name)
-            
-            anno = param.annotation
-            origin = get_origin(anno)
-            
-            if origin:
-                if origin == Annotated:
-                    args = get_args(anno)
-                    if len(args) != 2:
-                        raise TypeError(f'Annotated should have 2 args, but got {args}')
-                    second_param_cls_name = get_cls_name(args[1])
-                    if second_param_cls_name != 'AnnotatedParam':   # due to some import problem, must be checked by class name
-                        raise TypeError(f'Annotated should have AnnotatedParam as the second arg, but got {args[1]}')
-                    self.param = args[1]
-                elif origin in (Literal, Any):
-                    annotated_param = AnnotatedParam(origin_type=anno)
-                    self.param = annotated_param
-                else:
-                    raise TypeError(f'Unsupported origin type {origin}')
-            else:   # type annotation
-                annotated_param = AnnotatedParam(origin_type=anno)
-                self.param = annotated_param
-                
-            if param.default != Parameter.empty:
-                self.param.default = param.default
-            
-            tags = self.param.tags
-            self.param_type = _get_input_param_type(self.origin_param_name, param, tags)
-            
-        else:   # return fields' info
-            self.origin_param_name = None   # return type may has no name
-            self.param_name = None  
-            self.param_type = None  # return type has no type
-            
-            if param == Parameter.empty:
-                param = Any # type: ignore
-            origin = get_origin(param)
-            if origin:
-                if origin == Annotated:
-                    args = get_args(param)
-                    if len(args) != 2 or not isinstance(args[1], (AnnotatedParam, str)):
-                        raise TypeError(f'Annotated should have 2 args, but got {args}')
-                    if isinstance(args[1], str):    # e.g. Annotated[int, 'MyInt'] means you have a return value named 'MyInt'
-                        self.origin_param_name = args[1]
-                        self.param_name = _get_proper_param_name(self.origin_param_name)
-                        self.param = AnnotatedParam(origin_type=args[0])
-                    else:
-                        self.param = args[1]
-                elif origin in (Literal, Any):
-                    self.param = AnnotatedParam(origin_type=param)
-                else:
-                    raise TypeError(f'Unsupported origin type {origin}')
-            else:
-                self.param = AnnotatedParam(origin_type=param)
-
-class NodeBase(ABC):
+class NodeBase(CrossModuleABC):
     '''
     This is an advance base class for customizing nodes.
     As ComfyUI is lack of documents on customization, inheritance from this class helps you to define nodes easily and correctly.
@@ -236,17 +95,31 @@ class NodeBase(ABC):
     
     _CallSig: ClassVar[Signature]
     '''The signature of `__call__` method. This is for registration.'''
-    _InputFields: ClassVar[Dict[str, _NodeField]]
+    
+    _InputFields: ClassVar[Dict[str, AnnotatedParam]]
     '''
     The input fields of this node. This is for registration.
     {origin_param_name: _NodeField, ...}
     '''
-    _ReturnFields: ClassVar[Tuple[Tuple[Union[str, None], _NodeField], ...]]
+    _ReturnFields: ClassVar[Tuple[Tuple[Union[str, None], AnnotatedParam], ...]]
     '''The return fields of this node. This is for registration.'''
+    _LazyInputs: ClassVar[Tuple[str, ...]]
+    '''input param names that are lazy evaluated. This is for registration.'''
+    _ListInputs: ClassVar[Tuple[str, ...]]
+    '''input param names that are list. For internal use only.'''
     _ParamNameMap: ClassVar[Dict[str, str]]
     '''Dict for mapping the shown param name to the original param name(for hidden params)'''
+    _ComfyInputParamDict: ClassVar[dict]
+    '''The real input type dictionary for registration in ComfyUI.'''
+    _ComfyOutputTypes: ClassVar[Tuple[str, ...]]
+    '''The real tuple containing output type names for registration in ComfyUI.'''
+    _ComfyOutputNames: ClassVar[Tuple[Union[str, None], ...]]
+    '''The real tuple containing output names for registration in ComfyUI.'''
+    
     _ReadableName: ClassVar[str]
     '''The real user friendly class name for registration.'''
+    _RealClsName: ClassVar[str]
+    '''The real class name for registration.'''
     _Description: ClassVar[str]
     '''The real description for registration.'''
     _Category: ClassVar[Optional[str]]
@@ -256,7 +129,12 @@ class NodeBase(ABC):
     '''Whether this node has override `IsChanged` method or not. This is for registration.'''
     _HasValidateInputMethod: ClassVar[bool]
     '''Whether this node has override `ValidateInput` method or not. This is for registration.'''
-    
+    _HasUIReturn: ClassVar[bool]
+    '''Whether this node has UI return value or not. This is for registration.'''
+    _HasListInput: ClassVar[bool]
+    '''Whether this node has list input or not. This is for registration.'''
+    _ListTypeReturns: ClassVar[Tuple[bool, ...]]
+    '''Which return value is a list or not. This is for registration.'''
     _IsAbstract: ClassVar[bool]
     '''Real value for `IsAbstract`.'''
     
@@ -266,39 +144,79 @@ class NodeBase(ABC):
 
     @classmethod
     def _InitFields(cls):
-        cls._InputFields = {param_name: _NodeField(param) for param_name, param in cls._CallSig.parameters.items()}
+        # init input fields
+        cls._InputFields = {param_name: AnnotatedParam(param) for param_name, param in cls._CallSig.parameters.items()}
         
+        # init return fields
         return_anno = cls._CallSig.return_annotation
         if return_anno == Parameter.empty:
             return_anno = Any
         origin = get_origin(return_anno)
         
-        return_field_names = []
-        return_fields = []
+        return_field_names: List[Optional[str]] = []
+        return_fields: List[AnnotatedParam] = []
         
         if origin:  # special types, e.g. Annotated, Literal
-            if origin in (Annotated, Literal, Any):
-                field = _NodeField(return_anno)
-                return_field_names.append(field.param_name) # can append `None`
-                return_fields.append(field)
-            elif origin in (Tuple, tuple):   # multiple return values
-                args = get_args(return_anno)
-                for arg in args:
-                    field = _NodeField(arg)
-                    return_field_names.append(field.param_name)
-                    return_fields.append(field)
+
+            if origin == tuple:   # possible: multiple return values/ 1 named return value / tuple[type, ...](means array)
+                return_types = get_args(return_anno)
+                if len(return_types) == 1:
+                    raise TypeError(f'Unexpected return annotation: {return_anno}')
+                
+                if len(return_types) == 2 and return_types[1] == Ellipsis:  # treat as array return values
+                    real_type = return_types[0]
+                    if isinstance(real_type, AnnotatedParam):
+                        real_type.tags.add('list')
+                        return_fields.append(real_type)
+                        return_field_names.append(real_type.param_name or "")
+                    else:
+                        return_fields.append(AnnotatedParam(real_type, tags=['list']))
+                        return_field_names.append("")
+                
+                else:   # several return values
+                    for ret_type in return_types:
+                        return_fields.append(AnnotatedParam(ret_type))
+                        return_field_names.append(return_fields[-1].param_name or "")
             else:
-                raise TypeError(f'Unexpected return annotation: {return_anno}')
+                return_fields.append(AnnotatedParam(return_anno))   # type: ignore
+                return_field_names.append(return_fields[-1].param_name or "")
         else:
-            field = _NodeField(return_anno)
-            return_field_names.append(field.param_name) # can append `None`
-            return_fields.append(field)
+            return_fields.append(AnnotatedParam(return_anno))   # type: ignore
+            return_field_names.append(return_fields[-1].param_name or "")
         
+        cls._HasUIReturn = any(('ui' in field.tags) for field in return_fields)
+        cls._ListInputs = tuple([name for name, field in cls._InputFields.items() if 'list' in field.tags])
+        cls._HasListInput = bool(cls._ListInputs)
         cls._ReturnFields = tuple(zip(return_field_names, return_fields))   # named return values
+        cls._ListTypeReturns = tuple([('list' in t.tags) for _, t in cls._ReturnFields])
 
     @classmethod
-    def _InitCategory(cls):
-        '''Return the real category for registration.'''
+    def _InitBasicInfo(cls):
+        '''init cls name, readable name, category, description for registration.'''
+        # readable name
+        readable_name = cls.__qualname__
+        if readable_name.lower().endswith('node') and len(readable_name) > 4:
+            readable_name = readable_name[:-4]
+        if readable_name.lower().startswith('stablerenderer') and len(readable_name) > 13:
+            readable_name = readable_name[13:]
+
+        readable_name_chunks = readable_name.split('_')   # split by underscore first
+        readable_name = ""
+        for chunk in readable_name_chunks:
+            # find camel case, e.g. "MyNode" -> "My Node"
+            chunked_name = re.sub(r'([a-z])([A-Z])', r'\1 \2', chunk)
+            readable_name += chunked_name
+            readable_name += " "
+        cls._ReadableName = readable_name.strip()
+        
+        # class name
+        real_clsname = cls.__qualname__
+        if real_clsname.lower().endswith('node') and len(real_clsname) > 4:
+            real_clsname = real_clsname[:-4]
+        if real_clsname.lower().startswith('stablerenderer') and len(real_clsname) > 13:
+            real_clsname = real_clsname[13:]
+        cls._RealClsName = real_clsname
+        
         cls_category = cls.Category
         if cls_category:
             super_cls = cls.__bases__[0]
@@ -310,152 +228,141 @@ class NodeBase(ABC):
                     cls_category = cls_category[1:]
                 cls_category = f"{super_cls.Category}/{cls_category}"
         cls._Category = cls_category
-    
-    @classmethod
-    def _InitReadableName(cls):
-        '''Return the real user friendly class name for registration.'''
-        name = cls.Name
-        if not name:
-            name = ""
-            cls_name = cls.__qualname__
-            if cls_name.endswith('Node') and len(name) > 4:
-                cls_name = cls_name[:-4]
-
-            name_chunks = cls_name.split('_')   # split by underscore first
-            for i in range(len(name_chunks)):
-                # find camel case, e.g. "MyNode" -> "My Node"
-                if camel_chunks := re.findall(r'[A-Z][a-z]*', name_chunks[i]):
-                    name += ' '.join(camel_chunks) + ' '
-                else:
-                    name += name_chunks[i] + ' '
-        cls._ReadableName = name
-    
-    @classmethod
-    def _InitDescription(cls):
-        '''Return the real description for registration.'''
+        
+        # description
         desc = cls.Description
         if not desc:
             if hasattr(cls, '__doc__'):
                 desc = cls.__doc__ or ''
-            else:
-                desc = ''
-        cls._Description = desc
+            elif hasattr(cls.__call__, '__doc__'):
+                desc = cls.__call__.__doc__ or ''
+        cls._Description = desc # type: ignore
     
+    @classmethod
+    def _InitTypesForComfy(cls):
+        '''Real input type dictionary for registration.'''
+        # input types
+        require_types = {}
+        optional_types = {}
+        hidden_types = {}
+        
+        for i, (_, field) in enumerate(cls._InputFields.items()):
+            if i == 0:
+                continue    # skip `self`
+            param_type = field.param_type
+            param_info = field._comfyUI_definition
+            if param_type == 'required':
+                require_types[field.proper_param_name] = param_info
+            elif param_type == 'optional':
+                optional_types[field.proper_param_name] = param_info
+            elif param_type == 'hidden':
+                hidden_types[field.proper_param_name] = param_info
+        
+        input_param_dict = {}
+        if require_types:
+            input_param_dict['required'] = require_types
+        if optional_types:
+            input_param_dict['optional'] = optional_types
+        if hidden_types:
+            input_param_dict['hidden'] = hidden_types
+        cls._ComfyInputParamDict = input_param_dict    
+        
+        # return types
+        return_names = [name for name, _ in cls._ReturnFields]
+        return_types = [field._comfy_type for (_, field) in cls._ReturnFields]   # not sure ComfyUI support COMBO return? maybe error in future
+        cls._ComfyOutputTypes = tuple(return_types) # type: ignore
+        cls._ComfyOutputNames = tuple(return_names)
+        
+        # lazy inputs
+        lazy_inputs = [name for name, field in cls._InputFields.items() if 'lazy' in field.tags]
+        cls._LazyInputs = tuple(lazy_inputs)
+        
     @classmethod
     def _InitRealComfyUINode(cls):
         '''Return the real registration node class for ComfyUI'''
         if cls._IsAbstract:
             raise TypeError(f'Abstract node {cls} cannot be registered. `_RealComfyUINode` should not be called on abstract nodes.')
         
-        newcls_name = cls.__qualname__
-        if newcls_name.endswith('Node') and len(newcls_name) > 4:
-            newcls_name = newcls_name[:-4]
+        newcls: ComfyUINode = type(cls._RealClsName, (), {}) # type: ignore
         
-        newcls: SRComfyNode = type(newcls_name, (), {}) # type: ignore
+        setattr(newcls, '__IS_COMFYUI_NODE__', True)
+        setattr(newcls, '__IS_ADVANCED_COMFYUI_NODE__', True)
+        setattr(newcls, '__ADVANCED_NODE_CLASS__', cls)
         
         def newcls_init(newcls_self):
             newcls_self.__real_node_instance__ = cls()  # create the real instance of this node cls when the newcls instance is created
         setattr(newcls, '__init__', newcls_init)
         
-        category = cls._Category
-        if category:
-            setattr(newcls, 'CATEGORY', category)
+        if cls._Category:
+            setattr(newcls, 'CATEGORY', cls._Category)
         
-        setattr(newcls, 'DESCRIPTION', cls._Description)
+        if cls._Description:
+            setattr(newcls, 'DESCRIPTION', cls._Description)
 
-        has_ui_ret = any((field.param.tags and 'ui' in field.param.tags) for (_, field) in cls._ReturnFields)
-        setattr(newcls, 'OUTPUT_NODE', has_ui_ret)    # `OUTPUT_NODE` is a flag for ComfyUI to shown on UI
+        if cls._HasUIReturn:
+            setattr(newcls, 'OUTPUT_NODE', cls._HasUIReturn)    # `OUTPUT_NODE` is a flag for ComfyUI to shown on UI
         
-        return_names = [name for name, _ in cls._ReturnFields if name]
-        return_types = [field.param._comfy_type_definition for (_, field) in cls._ReturnFields]   # not sure ComfyUI support COMBO return? maybe error in future
-        setattr(newcls, 'RETURN_TYPES', tuple(return_types))
+        setattr(newcls, 'RETURN_TYPES', tuple(cls._ComfyOutputTypes))
         
-        if return_names and return_names[0]:    # just check the first name is not None is enough(should be all or none)
-            setattr(newcls, 'RETURN_NAMES', return_names)
+        if any(cls._ComfyOutputNames):    # just check the first name is not None is enough(should be all or none)
+            setattr(newcls, 'RETURN_NAMES', cls._ComfyOutputNames)
         
-        output_is_list_types = []
-        for (_, field) in cls._ReturnFields:
-            if field.param.origin_type in (list, List):
-                output_is_list_types.append(True)
-            else:
-                output_is_list_types.append(False)
-        if any(output_is_list_types):
+        if cls._HasListInput:
+            setattr(newcls, 'INPUT_IS_LIST', True)
+        
+        if any(cls._ListTypeReturns):
             # for comfyUI to know whether the output is a list
-            setattr(newcls, 'OUTPUT_IS_LIST', tuple(output_is_list_types))  
-            
-        enum_fields = {k: v for k, v in cls._InputFields.items() if (type(v.param.origin_type) == type and issubclass(v.param.origin_type, Enum))}
-        latent_fields = {k: v for k, v in cls._InputFields.items() if v.param.origin_type == LATENT}
+            setattr(newcls, 'OUTPUT_IS_LIST', cls._ListTypeReturns)  
+        
+        setattr(newcls, 'LAZY_INPUTS', cls._LazyInputs)
         
         hidden_params = {}
         for proper_name, real_name in cls._ParamNameMap.items():
             if cls._InputFields[real_name].param_type == 'hidden':
                 hidden_params[proper_name] = real_name
         
-        def proper_input(*args, **kwargs):            
+        def proper_input(ins, *args, **kwargs):            
             for k, v in hidden_params.items():
                 if k in kwargs:
                     kwargs[v] = kwargs.pop(k)   # change the shown name to the real name
 
-            if enum_fields or latent_fields: # find the real enum value
-                packed_params = _pack_param(cls._CallSig, args, kwargs)
-                for _, field in enum_fields.items():
-                    input_enum_name = packed_params[k]
-                    for enum_name, enum_val in field.param.origin_type.__members__.items(): # type: ignore
-                        if enum_name == input_enum_name:
-                            packed_params[k] = enum_val
-                            break
-                for _, field in latent_fields.items():
-                    if not isinstance(packed_params[k], LATENT):
-                        packed_params[k] = LATENT(packed_params[k])
-                return tuple(), packed_params
-            else:
-                return args, kwargs
+            packed_params = _pack_param(cls._CallSig, (ins, *args), kwargs)
+            for param_name, val in packed_params.items():
+                packed_params[param_name] = cls._InputFields[param_name].format_value(val)
+            return packed_params
         
         def real_calling(ins, *args, **kwargs):
-            proper_args, proper_kwargs = proper_input(*args, **kwargs)
-            result = ins.__real_node_instance__.__call__(*proper_args, **proper_kwargs)
+            proper_kwargs = proper_input(ins, *args, **kwargs)
+            result = cls.__call__(**proper_kwargs)  # 'self' is included in the `proper_kwargs`
 
-            if len(return_types) == 1 and not isinstance(result, tuple):
+            if len(cls._ComfyOutputTypes) == 1 and not isinstance(result, tuple):
                 result = (result,)
+            if cls._HasUIReturn:
+                return cls._MakeUIRetDict(result)
             else:
-                result = tuple(result)
-            vals = _return_proper_value(result)
-            if has_ui_ret:
-                return cls._MakeUIRetDict(vals)
-            else:
-                return vals
+                return result
             
         setattr(newcls, '_real_calling', real_calling)
         setattr(newcls, 'FUNCTION', '_real_calling') # comfyUI will call `real_calling` method
         
         @classmethod
         def INPUT_TYPES(s):
-            return cls._InputTypesForComfy()
+            return cls._ComfyInputParamDict
         setattr(newcls, 'INPUT_TYPES', INPUT_TYPES)
-        
-        lazy_inputs = []
-        reduce_inputs = []
-        for name, field in cls._InputFields.items():
-            if field.param.tags is not None:
-                if 'lazy' in field.param.tags:
-                    lazy_inputs.append(name)
-                if 'reduce' in field.param.tags:
-                    reduce_inputs.append(name)
-        if lazy_inputs:
-            setattr(newcls, 'LAZY_INPUTS', tuple(lazy_inputs))
-        if reduce_inputs:
-            setattr(newcls, 'REDUCE_INPUTS', tuple(reduce_inputs))
         
         if cls._HasIsChangedMethod:
             def IS_CHANGED(self, *args, **kwargs):
-                proper_args, proper_kws = proper_input(*args, **kwargs)
-                return cls.IsChanged(*proper_args, **proper_kws)
+                proper_kws = proper_input(*args, **kwargs)
+                return cls.IsChanged(**proper_kws)
             setattr(newcls, 'IS_CHANGED', IS_CHANGED)
         
         if cls._HasValidateInputMethod:
-            def VALIDATE_INPUTS(self, *args, **kwargs):
-                proper_args, proper_kws = proper_input(*args, **kwargs)
-                return cls.ValidateInput(*proper_args, **proper_kws)
+            @classmethod
+            def VALIDATE_INPUTS(cls, *args, **kwargs):
+                proper_kws = proper_input(*args, **kwargs)
+                first_key = list(proper_kws.keys())[0]
+                proper_kws.pop(first_key)  # remove the first key(self), cuz this is a classmethod
+                return cls.ValidateInput(**proper_kws)
             setattr(newcls, 'VALIDATE_INPUTS', VALIDATE_INPUTS)
             
         cls._RealComfyUINode = newcls
@@ -466,68 +373,59 @@ class NodeBase(ABC):
         else:
             cls._IsAbstract = isabstract(cls)
         
-        cls._InitCategory()
+        cls._InitBasicInfo()
         
         if not cls._IsAbstract:
             cls._CallSig = signature(cls.__call__)
-            cls._InitReadableName()
-            cls._InitDescription()
+            
             cls._InitFields()
             
             cls._ParamNameMap = {}
-            for param_name in cls._InputFields:
-                cls._ParamNameMap[_get_proper_param_name(param_name)] = param_name
+            for param_name, param in cls._InputFields.items():
+                proper_name = param.proper_param_name or param_name
+                cls._ParamNameMap[proper_name] = param_name
             
             cls._HasIsChangedMethod = cls.IsChanged != NodeBase.IsChanged
             if cls._HasIsChangedMethod:
-                onchanged_method_sig = signature(cls.IsChanged)
-                for i, (_, param) in enumerate(onchanged_method_sig.parameters.items()):
-                    if i == 0:
-                        continue    # skip `self`
-                    if param.kind not in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD):
-                        break   # has args except `*args` and `**kwargs`, should be overridden
-                    if i == len(onchanged_method_sig.parameters) - 1:
-                        cls._HasIsChangedMethod = False # only `*args` and `**kwargs`, not overridden
-            
-            if cls._HasIsChangedMethod: # TODO: more strict check
-                if len(onchanged_method_sig.parameters) != len(cls._CallSig.parameters):
-                    raise TypeError(f'`IsChanged` method should have the same signature as `__call__` method. {cls.__name__}')
-            
+                cls._HasIsChangedMethod = not is_empty_method(cls.IsChanged)
+                
             cls._HasValidateInputMethod = cls.ValidateInput != NodeBase.ValidateInput
             if cls._HasValidateInputMethod:
-                onvalidate_method_sig = signature(cls.ValidateInput)
-                for i, (_, param) in enumerate(onvalidate_method_sig.parameters.items()):
-                    if i == 0:
-                        continue    # skip `cls`
-                    if param.kind not in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD):
-                        break
-                    if i == len(onvalidate_method_sig.parameters) - 1:
-                        cls._HasValidateInputMethod = False
+                cls._HasValidateInputMethod = not is_empty_method(cls.ValidateInput)
             
-            if cls._HasValidateInputMethod:
-                if len(onvalidate_method_sig.parameters) != len(cls._CallSig.parameters):
-                    raise TypeError(f'`ValidateInput` method should have the same signature as `__call__` method. {cls.__name__}')
+            cls._InitTypesForComfy()
             
             cls._InitRealComfyUINode()
     
     # region internal use
     @classmethod
-    def _MakeUIRetDict(cls, values: List[Any]):
+    def _MakeUIRetDict(cls, values: Tuple[Any]):
         '''return a dictionary for comfyUI to show the return values labeled with "UI"'''
-        ui_rets = {}
-        animated = []
-        for i, (name, field) in enumerate(cls._ReturnFields):
-            if field.param.tags is not None:
-                if 'ui' in field.param.tags:
-                    ui_rets[name] = values[i]
-                
-                if 'animated' in field.param.tags:
-                    animated.append(True)
+        ret = {"ui":{}, "result": values}
+        ui_dict = {}
+        ui_ret_count = 0
+        for i, (_, field) in enumerate(cls._ReturnFields):
+            if 'ui' in field.tags:
+                ui_val = values[i]
+                if isinstance(ui_val, UI):
+                    if not ui_val.ui_name in ui_dict:
+                        ui_dict[ui_val.ui_name] = []
+                    while len(ui_dict[ui_val.ui_name]) < ui_ret_count:
+                        ui_dict[ui_val.ui_name].append(None)
+                    ui_dict[ui_val.ui_name].append(ui_val._params)  # e.g. {'ui': {images: [{...}]}}    
+                    
+                    for extra_param_key, extra_param_val in ui_val._extra_params.items():
+                        if not extra_param_key in ui_dict:
+                            ui_dict[extra_param_key] = []
+                        while len(ui_dict[extra_param_key]) < ui_ret_count:
+                            ui_dict[extra_param_key].append(None)
+                        ui_dict[extra_param_key].append(extra_param_val)
                 else:
-                    animated.append(False)
-        if any(animated):
-            ui_rets['animated'] = tuple(animated)   # not wrong, comfyUI put `animated` in the `ui` dict
-        ret = {'ui': ui_rets, 'result': tuple(values)}
+                    ComfyUILogger.warning(f'UI return value should be instance of `UI`, got {values[i]}')
+                    
+                ui_ret_count += 1
+        
+        ret['ui'].update(ui_dict)
         return ret
         
     @staticmethod
@@ -541,35 +439,6 @@ class NodeBase(ABC):
                 subclses.add(cls)
             all_clses.extend(cls.__subclasses__())
         return tuple(subclses)
-    
-    @classmethod
-    def _InputTypesForComfy(cls):
-        '''Real input type dictionary for registration.'''
-        
-        require_types = {}
-        optional_types = {}
-        hidden_types = {}
-        
-        for i, (key, field) in enumerate(cls._InputFields.items()):
-            if i == 0:
-                continue    # skip `self`
-            param_type = field.param_type
-            param_info = field.param._tuple
-            if param_type == 'required':
-                require_types[_get_proper_param_name(key)] = param_info
-            elif param_type == 'optional':
-                optional_types[_get_proper_param_name(key)] = param_info
-            elif param_type == 'hidden':
-                hidden_types[_get_proper_param_name(key)] = param_info
-                
-        ret_dict = {}
-        if require_types:
-            ret_dict['required'] = require_types
-        if optional_types:
-            ret_dict['optional'] = optional_types
-        if hidden_types:
-            ret_dict['hidden'] = hidden_types
-        return ret_dict
     # endregion
     
     @abstractmethod
@@ -627,4 +496,4 @@ class StableRendererNodeBase(NodeBase):
 
 
 
-__all__.extend(['NodeBase', 'StableRendererNodeBase'])
+__all__ = ['NodeBase', 'StableRendererNodeBase']

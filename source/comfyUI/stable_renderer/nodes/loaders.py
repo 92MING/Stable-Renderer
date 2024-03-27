@@ -1,7 +1,8 @@
 import os
 import re
-
 import torch
+
+from pathlib import Path
 from torchvision.io import read_image, ImageReadMode
 
 from comfyUI.types import *
@@ -10,18 +11,22 @@ from stable_renderer.src.data_classes import CorrespondenceMap, ImageFrames
 
 
 class CorrespondenceMapLoader(StableRendererNodeBase):
+
     Category = "loader"
+
     def __call__(self,
-                 directory: STRING(forceInput=True),  # type: ignore
+                 directory: Path,
                  num_frames: INT(min=0),  # type: ignore
         ) -> CorrespondenceMap:
         return CorrespondenceMap.from_existing(directory, num_frames)
 
 
 class ImageSequenceLoader(StableRendererNodeBase):
+    
     Category = "loader"
+    
     def __call__(self, 
-                 directory: STRING(forceInput=True),
+                 directory: Path,
                  frame_start: INT(min=0) = 0,
                  num_frames: INT(min=1) = 16
     ) -> IMAGE:

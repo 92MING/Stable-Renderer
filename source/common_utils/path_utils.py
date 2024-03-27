@@ -1,9 +1,21 @@
-import os, datetime
-
+import os
+from datetime import datetime
 from typing import Optional
-from pathlib import Path
+from pathlib import Path as _Path
 
+_PathType = type(_Path())
 
+class Path(_PathType):
+    '''String comparable Path object.'''
+    
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return str(self.absolute()) == other or str(self) == other
+        elif isinstance(other, _PathType):
+            return str(self.absolute()) == str(other.absolute())
+        return super().__eq__(other)
+
+__all__ = ['Path',]
 
 PROJECT_DIR = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 '''project directory, the root directory of the project.'''
@@ -19,7 +31,7 @@ COMFYUI_DIR = SOURCE_DIR / 'comfyui'
 UI_DIR = SOURCE_DIR / 'ui'
 '''ui directory, for ui interface source code.'''
 
-__all__ = ['PROJECT_DIR', 'SOURCE_DIR', 'ENGINE_DIR', 'SHADER_DIR', 'COMFYUI_DIR', 'UI_DIR',]
+__all__.extend(['PROJECT_DIR', 'SOURCE_DIR', 'ENGINE_DIR', 'SHADER_DIR', 'COMFYUI_DIR', 'UI_DIR',])
 
 RESOURCES_DIR = PROJECT_DIR / 'resources'
 '''resources directory, for obj, shader, texture, etc.'''
@@ -30,6 +42,10 @@ EXAMPLE_MAP_OUTPUT_DIR = RESOURCES_DIR / 'example-map-outputs'
 
 __all__.extend(['RESOURCES_DIR', 'EXAMPLE_3D_MODEL_DIR', 'EXAMPLE_MAP_OUTPUT_DIR',])
 
+TEMP_DIR = PROJECT_DIR / 'temp'
+'''temp directory, for temporary files/ test codes. This folder will not be pushed to git.'''
+COMFYUI_TEMP_DIR = TEMP_DIR / 'comfyui'
+'''comfyui temp directory, for temporary files/ test codes. This folder will not be pushed to git.'''
 
 OUTPUT_DIR = PROJECT_DIR / 'output'
 '''output directory, for runtime map, etc.'''
@@ -37,22 +53,20 @@ CACHE_DIR = OUTPUT_DIR / '.cache'
 '''cache directory, for caching corr map'''
 MAP_OUTPUT_DIR = OUTPUT_DIR / 'runtime_map'
 '''runtime map output directory, for saving normal map, pos map, id map, etc., during runtime.'''
-GIF_OUTPUT_DIR = OUTPUT_DIR / 'gif'
-'''gif output directory, for saving gif result by StableDiffusion'''
-TEMP_OUTPUT_DIR = OUTPUT_DIR / 'tmp'
-'''temp output directory. For any usage.'''
+COMFYUI_OUTPUT_DIR = OUTPUT_DIR / 'comfyui'
 
+INPUT_DIR = PROJECT_DIR / 'input'
 
-__all__.extend(['OUTPUT_DIR', 'CACHE_DIR', 'MAP_OUTPUT_DIR', 'GIF_OUTPUT_DIR', 'TEMP_OUTPUT_DIR',])
+__all__.extend(['TEMP_DIR', 'COMFYUI_TEMP_DIR', 'OUTPUT_DIR', 'CACHE_DIR', 'MAP_OUTPUT_DIR', 'COMFYUI_OUTPUT_DIR', 'INPUT_DIR',])
 
 
 def get_new_map_output_dir(create_if_not_exists:bool=True):
     '''Return a dir under MAP_OUTPUT_DIR with current time as its name. Will create one with a unique index.'''
     count = 0
-    cur_time = datetime.datetime.now().strftime('%Y-%m-%d') + f'_{count}'
+    cur_time = datetime.now().strftime('%Y-%m-%d') + f'_{count}'
     while os.path.exists(os.path.join(MAP_OUTPUT_DIR, cur_time)):
         count += 1
-        cur_time = datetime.datetime.now().strftime('%Y-%m-%d') + f'_{count}'
+        cur_time = datetime.now().strftime('%Y-%m-%d') + f'_{count}'
     cur_map_output_dir = os.path.join(MAP_OUTPUT_DIR, cur_time)
     if create_if_not_exists:
         os.makedirs(cur_map_output_dir, exist_ok=True)
@@ -74,4 +88,22 @@ def get_map_output_dir(day:int, index:int, month:Optional[int]=None, year:Option
     return cur_subdir
 
 
-__all__.extend(['get_new_map_output_dir', 'get_map_output_dir',])
+
+_comfy_output_dir = None
+
+def get_comfyUI_output_dir(time: Optional[datetime] = None)->Path:
+    '''
+    Get output dir for comfyUI. 
+    Folder is named with the time. If not specified, use current time.
+    '''
+    global _comfy_output_dir
+    if not time:
+        time = datetime.now()
+    if not _comfy_output_dir:
+        _comfy_output_dir = Path(os.path.join(COMFYUI_OUTPUT_DIR, time.strftime('%Y-%m-%d_%H-%M-%S')))
+        os.makedirs(_comfy_output_dir, exist_ok=True)
+    return _comfy_output_dir
+
+
+
+__all__.extend(['get_new_map_output_dir', 'get_map_output_dir', 'get_comfyUI_output_dir'])

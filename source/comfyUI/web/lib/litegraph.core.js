@@ -9998,7 +9998,7 @@ LGraphNode.prototype.executeAction = function(action)
                         // draw field name
                         ctx.fillStyle = secondary_text_color;
                         let field_name = w.label || w.name;
-						let maxLength = 80;
+						let maxLength = (widget_width - margin * 2) * 0.4;
 						let metrics = ctx.measureText(field_name);
 						let field_name_width = metrics.width;
 						
@@ -10032,7 +10032,7 @@ LGraphNode.prototype.executeAction = function(action)
 								if(values && values.constructor !== Array)
 									v = values[ w.value ];
 							}
-                            let maxLength = 120;
+                            let maxLength = (widget_width - margin *2) * 0.6;
                             let metrics = ctx.measureText(v);
                             let v_width = metrics.width;
                             
@@ -10097,7 +10097,7 @@ LGraphNode.prototype.executeAction = function(action)
                         // draw the field name
                         ctx.fillStyle = secondary_text_color;
                         let field_name = w.label || w.name;
-						let maxLength = 80;
+						let maxLength = (widget_width - margin * 2) * 0.4;
 						let metrics = ctx.measureText(field_name);
 						let field_name_width = metrics.width;
 						
@@ -10114,7 +10114,7 @@ LGraphNode.prototype.executeAction = function(action)
                         var path = w.value;
                         var filename = path.split("\\").pop().split("/").pop();
                         
-                        let max_filename_length = 120;
+                        let max_filename_length = (widget_width - margin * 2) * 0.6;
                         let metrics_filename = ctx.measureText(filename);
                         let filename_width = metrics_filename.width;
                         if (filename_width > max_filename_length) {

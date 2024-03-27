@@ -4,6 +4,8 @@ import re
 import pickle
 import random
 import numpy as np
+
+from pathlib import Path
 from tqdm import tqdm
 from typing import Callable, Tuple, Union, List, TypeVar, Type, Optional
 
@@ -70,7 +72,7 @@ class CorrespondenceMap:
 
     @classmethod
     def from_existing(cls,
-                     directory: Optional[str] = None,
+                     directory: Union[str, Path, None] = None,
                      num_frames: Optional[int] = None,
                      get_pixel_position_callback: Optional[Callable[[int, int], Tuple[int, int]]] = None,
                      enable_strict_checking: bool = True,):

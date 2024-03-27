@@ -17,7 +17,7 @@ import comfy.utils
 import comfy.model_management
 
 from multidict import MultiDict
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Dict, Any
 from PIL import Image, ImageOps
 from PIL.PngImagePlugin import PngInfo
 from io import BytesIO
@@ -38,20 +38,20 @@ class BinaryEventTypes:
     PREVIEW_IMAGE = 1
     UNENCODED_PREVIEW_IMAGE = 2
 
-async def send_socket_catch_exception(function, message):
+async def _send_socket_catch_exception(function, message):
     try:
         await function(message)
     except (aiohttp.ClientError, aiohttp.ClientPayloadError, ConnectionResetError) as err:
         ComfyUILogger.warning("send error:", err)
 
 @web.middleware
-async def cache_control(request: web.Request, handler):
+async def _cache_control(request: web.Request, handler):
     response: web.Response = await handler(request)
     if request.path.endswith('.js') or request.path.endswith('.css'):
         response.headers.setdefault('Cache-Control', 'no-cache')
     return response
 
-def create_cors_middleware(allowed_origin: str):
+def _create_cors_middleware(allowed_origin: str):
     @web.middleware
     async def cors_middleware(request: web.Request, handler):
         if request.method == "OPTIONS":
@@ -68,6 +68,24 @@ def create_cors_middleware(allowed_origin: str):
 
     return cors_middleware
 
+def _validate_response(data, *args, **kwargs):
+    '''check if the data contains any object that has a __ComfyDump__ method, if so, call it to get the json serializable data.'''
+    if isinstance(data, dict):
+        for key, val in data.items():
+            if hasattr(val, '__ComfyDump__'):
+                data[key] = val.__ComfyDump__()
+    else:
+        if isinstance(data, tuple):
+            data = list(data)
+        if isinstance(data, list):
+            for i, val in enumerate(data):
+                if hasattr(val, '__ComfyDump__'):
+                    data[i] = val.__ComfyDump__()
+    
+        else:
+            if hasattr(data, '__ComfyDump__'):
+                data = data.__ComfyDump__()
+    return web.json_response(data, *args, **kwargs)
 
 @singleton(cross_module_singleton=True)
 class PromptServer:
@@ -91,9 +109,9 @@ class PromptServer:
         self.messages = asyncio.Queue()
         self.number = 0
 
-        middlewares = [cache_control]
+        middlewares = [_cache_control]
         if args.enable_cors_header:
-            middlewares.append(create_cors_middleware(args.enable_cors_header))
+            middlewares.append(_create_cors_middleware(args.enable_cors_header))
 
         max_upload_size = round(args.max_upload_size * 1024 * 1024)
         self.app = web.Application(client_max_size=max_upload_size, middlewares=middlewares)
@@ -141,7 +159,7 @@ class PromptServer:
         @routes.get("/embeddings")
         async def get_embeddings(self):
             embeddings = folder_paths.get_filename_list("embeddings")
-            return web.json_response(list(map(lambda a: os.path.splitext(a)[0], embeddings)))
+            return _validate_response(list(map(lambda a: os.path.splitext(a)[0], embeddings)))
 
         @routes.get("/extensions")
         async def get_extensions(request):
@@ -155,7 +173,7 @@ class PromptServer:
                 extensions.extend(list(map(lambda f: "/extensions/" + urllib.parse.quote(
                     name) + "/" + os.path.relpath(f, dir).replace("\\", "/"), files)))
 
-            return web.json_response(extensions)
+            return _validate_response(extensions)
 
         def get_dir_by_type(dir_type):
             if dir_type is None:
@@ -215,7 +233,7 @@ class PromptServer:
                 
                 relative_path = os.path.relpath(filepath, upload_dir)
                 abs_path = os.path.abspath(filepath)
-                return web.json_response({
+                return _validate_response({
                     "name" : filename, 
                     "subfolder": subfolder, 
                     "type": upload_type, 
@@ -391,7 +409,7 @@ class PromptServer:
             dt = json.loads(out)
             if not "__metadata__" in dt:
                 return web.Response(status=404)
-            return web.json_response(dt["__metadata__"])
+            return _validate_response(dt["__metadata__"])
 
         @routes.get("/system_stats")
         async def get_queue(request):
@@ -417,27 +435,30 @@ class PromptServer:
                     }
                 ]
             }
-            return web.json_response(system_stats)
+            return _validate_response(system_stats)
 
         @routes.get("/prompt")
         async def get_prompt(request):
-            return web.json_response(self.get_queue_info())
+            return _validate_response(self.get_queue_info())
 
-        def node_info(node_class):
-            obj_class = nodes.NODE_CLASS_MAPPINGS[node_class]
+        def node_info(node_class_name: str)->Dict[str, Any]:
+            obj_class = nodes.NODE_CLASS_MAPPINGS[node_class_name]
             info = {}
             info['input'] = obj_class.INPUT_TYPES()
             info['output'] = obj_class.RETURN_TYPES
             info['output_is_list'] = obj_class.OUTPUT_IS_LIST if hasattr(obj_class, 'OUTPUT_IS_LIST') else [False] * len(obj_class.RETURN_TYPES)
             info['output_name'] = obj_class.RETURN_NAMES if hasattr(obj_class, 'RETURN_NAMES') else info['output']
-            info['name'] = node_class
-            info['display_name'] = nodes.NODE_DISPLAY_NAME_MAPPINGS[node_class] if node_class in nodes.NODE_DISPLAY_NAME_MAPPINGS.keys() else node_class
+            info['name'] = node_class_name
+            info['display_name'] = nodes.NODE_DISPLAY_NAME_MAPPINGS[node_class_name] if node_class_name in nodes.NODE_DISPLAY_NAME_MAPPINGS.keys() else node_class_name
             info['description'] = obj_class.DESCRIPTION if hasattr(obj_class,'DESCRIPTION') else ''
-            info['reduce_inputs'] = obj_class.REDUCE_INPUTS if hasattr(obj_class, 'REDUCE_INPUTS') else tuple()
-            
+            info['lazy_inputs'] = obj_class.LAZY_INPUTS if hasattr(obj_class, 'LAZY_INPUTS') else []
+                
             if not info['description']:
                 if hasattr(obj_class, '__doc__') and obj_class.__doc__:
                     info['description'] = obj_class.__doc__
+                elif hasattr(getattr(obj_class, obj_class.FUNCTION), '__doc__') and getattr(obj_class, obj_class.FUNCTION).__doc__: 
+                    info['description'] = getattr(obj_class, obj_class.FUNCTION).__doc__
+                    
             info['category'] = 'sd'
             if hasattr(obj_class, 'OUTPUT_NODE') and obj_class.OUTPUT_NODE == True:
                 info['output_node'] = True
@@ -457,7 +478,7 @@ class PromptServer:
                 except Exception as e:
                     ComfyUILogger.warning(f"[ERROR] An error occurred while retrieving information for the '{x}' node.", file=sys.stderr)
                     traceback.print_exc()
-            return web.json_response(out)
+            return _validate_response(out)
 
         @routes.get("/object_info/{node_class}")
         async def get_object_info_node(request):
@@ -465,19 +486,19 @@ class PromptServer:
             out = {}
             if (node_class is not None) and (node_class in nodes.NODE_CLASS_MAPPINGS):
                 out[node_class] = node_info(node_class)
-            return web.json_response(out)
+            return _validate_response(out)
 
         @routes.get("/history")
         async def get_history(request):
             max_items = request.rel_url.query.get("max_items", None)
             if max_items is not None:
                 max_items = int(max_items)
-            return web.json_response(self.prompt_queue.get_history(max_items=max_items))
+            return _validate_response(self.prompt_queue.get_history(max_items=max_items))
 
         @routes.get("/history/{prompt_id}")
         async def get_history(request):
             prompt_id = request.match_info.get("prompt_id", None)
-            return web.json_response(self.prompt_queue.get_history(prompt_id=prompt_id))
+            return _validate_response(self.prompt_queue.get_history(prompt_id=prompt_id))
 
         @routes.get("/queue")
         async def get_queue(request):
@@ -485,7 +506,7 @@ class PromptServer:
             current_queue = self.prompt_queue.get_current_queue()
             queue_info['queue_running'] = current_queue[0]
             queue_info['queue_pending'] = current_queue[1]
-            return web.json_response(queue_info)
+            return _validate_response(queue_info)
 
         @routes.post("/prompt")
         async def post_prompt(request):
@@ -517,17 +538,17 @@ class PromptServer:
 
                 if "client_id" in json_data:
                     extra_data["client_id"] = json_data["client_id"]
-                if valid[0]:
+                if valid.result:
                     prompt_id = str(uuid.uuid4())
-                    outputs_to_execute = valid[2]
-                    self.prompt_queue.put((number, prompt_id, prompt, extra_data, outputs_to_execute))
+                    outputs_to_execute = valid.good_outputs
+                    self.prompt_queue.put((number, prompt_id, valid.formatted_prompt, extra_data, outputs_to_execute))
                     response = {"prompt_id": prompt_id, "number": number, "node_errors": valid[3]}
-                    return web.json_response(response)
+                    return _validate_response(response)
                 else:
                     ComfyUILogger.warning("invalid prompt:", valid[1])
-                    return web.json_response({"error": valid[1], "node_errors": valid[3]}, status=400)
+                    return _validate_response({"error": valid[1], "node_errors": valid[3]}, status=400)
             else:
-                return web.json_response({"error": "no prompt", "node_errors": []}, status=400)
+                return _validate_response({"error": "no prompt", "node_errors": []}, status=400)
 
         @routes.post("/queue")
         async def post_queue(request):
@@ -639,9 +660,9 @@ class PromptServer:
         if sid is None:
             sockets = list(self.sockets.values())
             for ws in sockets:
-                await send_socket_catch_exception(ws.send_bytes, message)
+                await _send_socket_catch_exception(ws.send_bytes, message)
         elif sid in self.sockets:
-            await send_socket_catch_exception(self.sockets[sid].send_bytes, message)
+            await _send_socket_catch_exception(self.sockets[sid].send_bytes, message)
 
     async def send_json(self, event, data, sid=None):
         message = {"type": event, "data": data}
@@ -649,13 +670,12 @@ class PromptServer:
         if sid is None:
             sockets = list(self.sockets.values())
             for ws in sockets:
-                await send_socket_catch_exception(ws.send_json, message)
+                await _send_socket_catch_exception(ws.send_json, message)
         elif sid in self.sockets:
-            await send_socket_catch_exception(self.sockets[sid].send_json, message)
+            await _send_socket_catch_exception(self.sockets[sid].send_json, message)
 
     def send_sync(self, event, data, sid=None):
-        self.loop.call_soon_threadsafe(
-            self.messages.put_nowait, (event, data, sid))
+        self.loop.call_soon_threadsafe(self.messages.put_nowait, (event, data, sid))
 
     def queue_updated(self):
         self.send_sync("status", { "status": self.get_queue_info() })

@@ -1,11 +1,10 @@
 from .node_base import NodeBase
 
 from .maths import *
-from .logics import *
 from .io import *
 from .loaders import *
 from .samplers import *
-from .overlap_scheduler import *
+from .schedulers import *
 from .processing import *
 
 

@@ -10,12 +10,14 @@ import uuid
 
 from typing import (List, Literal, NamedTuple, Optional, TYPE_CHECKING, Tuple,
                     Set, Dict, Union, Any, Type)
+from dataclasses import dataclass
 
 import nodes
 import comfy.model_management
-from common_utils.decorators import singleton
+
+from common_utils.decorators import singleton, class_property
 from comfyUI.types import *
-from comfyUI.adapters import AdaptersMap
+from comfyUI.adapters import find_adapter, Adapter
 
 if TYPE_CHECKING:
     from comfyUI.server import PromptServer
@@ -36,11 +38,9 @@ def _get_input_data(inputs: NodeInputs,
             * a value
         - class_def: the class of the node
         - unique_id: the id of this node
-        
     '''
     valid_inputs = class_def.INPUT_TYPES()
     lazy_inputs = class_def.LAZY_INPUTS if hasattr(class_def, "LAZY_INPUTS") else []
-    reduce_inputs = class_def.REDUCE_INPUTS if hasattr(class_def, "REDUCE_INPUTS") else []  # TODO
     
     input_data_all = {}
     for input_param_name in inputs:
@@ -66,6 +66,26 @@ def _get_input_data(inputs: NodeInputs,
             elif ("required" in valid_inputs and input_param_name in valid_inputs["required"]) or ("optional" in valid_inputs and input_param_name in valid_inputs["optional"]):
                 input_data_all[input_param_name] = [input_data]
 
+    def get_proper_hidden_keys(key: str):
+        keys = set()
+        keys.add(key)
+        no_bottom_bar_key = key
+        while no_bottom_bar_key.startswith("_"):
+            no_bottom_bar_key = key[1:]
+        keys.add(no_bottom_bar_key)
+        for k in keys.copy():
+            keys.add(k.lower())
+            keys.add(k.upper())
+        return keys
+    def try_put_hidden_value(origin_param_name: str):
+        if not extra_data:
+            return
+        possible_keys = get_proper_hidden_keys(origin_param_name)
+        for k in possible_keys:
+            if k in extra_data:
+                input_data_all[origin_param_name] = [extra_data[k]]
+                break
+    
     if "hidden" in valid_inputs:
         h = valid_inputs["hidden"]
         for input_param_name in h:
@@ -76,6 +96,8 @@ def _get_input_data(inputs: NodeInputs,
                     input_data_all[input_param_name] = [extra_data['extra_pnginfo']]
             if h[input_param_name] == "UNIQUE_ID":
                 input_data_all[input_param_name] = [unique_id]
+            else:
+                try_put_hidden_value(input_param_name)
     return input_data_all
 
 def _get_node_func_ret(node: Union[ComfyUINode, Type[ComfyUINode]], 
@@ -83,6 +105,9 @@ def _get_node_func_ret(node: Union[ComfyUINode, Type[ComfyUINode]],
                        func: str,   # the target function name of the node
                        allow_interrupt=False):
     '''return the result of the given function name of the node.'''
+    node_type = node.__class__ if not isinstance(node, type) else node
+    if not hasattr(node_type, func):
+        raise AttributeError(f"Node {node} has no function {func}.")
     
     # check if node wants the lists
     input_is_list = False
@@ -101,27 +126,24 @@ def _get_node_func_ret(node: Union[ComfyUINode, Type[ComfyUINode]],
             d_new[k] = v[i if len(v) > i else -1]
         return d_new
     
-    try:
-        func = getattr(node, func)
-        if not callable(func):
-            raise AttributeError(f"Node {node} has no function {func}.")
-    except AttributeError:
+    real_func = getattr(node, func)
+    if not callable(real_func):
         raise AttributeError(f"Node {node} has no function {func}.")
     
     results = []
     if input_is_list:
         if allow_interrupt:
             nodes.before_node_execution()
-        results.append(func(**func_params))
+        results.append(real_func(**func_params))
     elif max_len_input == 0:
         if allow_interrupt:
             nodes.before_node_execution()
-        results.append(func())
+        results.append(real_func())
     else:
         for i in range(max_len_input):
             if allow_interrupt:
                 nodes.before_node_execution()
-            results.append(func(**slice_dict(func_params, i)))
+            results.append(real_func(**slice_dict(func_params, i)))
     return results
 
 def _format_value(x):
@@ -132,6 +154,10 @@ def _format_value(x):
     else:
         return str(x)
 
+class RecursiveExecuteResult(NamedTuple):
+    success: bool
+    error_details: Optional[dict]
+    exception: Optional[Exception]
 
 @singleton(cross_module_singleton=True)
 class PromptExecutor:
@@ -154,10 +180,14 @@ class PromptExecutor:
     success: bool
     '''whether the execution is successful or not'''
     
+    @class_property
+    def Instance(cls)->'PromptExecutor':
+        return cls()    # type: ignore
+    
     def __init__(self, server: Optional['PromptServer']=None):
         self.server = server
         self.reset()
-
+    
     def _get_output_data(self, node: ComfyUINode, input_data_all)->Tuple[List[Any], Dict[str, Any]]:
         '''
         Get the output data of the given node.
@@ -176,7 +206,10 @@ class PromptExecutor:
         for r in return_values:
             if isinstance(r, dict):
                 if 'ui' in r:
-                    uis.update(r['ui'])
+                    for key, val in r['ui'].items():
+                        if key not in uis:
+                            uis[key] = []
+                        uis[key].extend(val)    # val is a list or tuple
                 if 'result' in r:
                     results.append(r['result'])
             else:
@@ -221,21 +254,24 @@ class PromptExecutor:
 
         memo[unique_id] = will_execute + [unique_id]
         return memo[unique_id]
-        
+    
+    def _get_node_output(self, node_id: str, slot_index: int):
+        '''special method for "Lazy" type values, to get the real value from a binding'''
+        pass
+    
     def _recursive_execute(self,
-                        prompt: PROMPT, 
-                        current_node_id: str, 
-                        extra_data, 
-                        executed: Set[str],   # set of node ids that have been executed 
-                        prompt_id: str,   # just a random string by uuid4
-                        ):
-        unique_id = current_node_id
-        inputs = prompt[unique_id]['inputs']
-        class_type = prompt[unique_id]['class_type']
+                           prompt: PROMPT, 
+                           current_node_id: str, 
+                           extra_data, 
+                           executed: Set[str],   # set of node ids that have been executed 
+                           prompt_id: str,   # just a random string by uuid4
+                           )->RecursiveExecuteResult:
+        inputs = prompt[current_node_id]['inputs']
+        class_type = prompt[current_node_id]['class_type']
         class_def = nodes.NODE_CLASS_MAPPINGS[class_type]
         
-        if unique_id in self.outputs:
-            return (True, None, None)
+        if current_node_id in self.outputs:
+            return RecursiveExecuteResult(True, None, None)
         
         for param_name in inputs:
             input_data = inputs[param_name]
@@ -257,38 +293,39 @@ class PromptExecutor:
         try:
             input_data_all = _get_input_data(inputs,
                                             class_def, 
-                                            unique_id,
+                                            current_node_id,
                                             self.outputs, 
                                             prompt, 
                                             extra_data)
             if self.server:
                 if self.server.client_id is not None:
-                    self.server.last_node_id = unique_id
+                    self.server.last_node_id = current_node_id
                     self.server.send_sync("executing",
-                                        { "node": unique_id, "prompt_id": prompt_id }, 
+                                        { "node": current_node_id, "prompt_id": prompt_id }, 
                                         self.server.client_id)
 
-            node = self.get_node(unique_id, class_type)
+            node = self.get_node(current_node_id, class_type)
 
             output_data, output_ui = self._get_output_data(node, input_data_all)
-            self.outputs[unique_id] = output_data
+            self.outputs[current_node_id] = output_data
             if len(output_ui) > 0:
-                self.outputs_ui[unique_id] = output_ui
+                self.outputs_ui[current_node_id] = output_ui
                 if self.server:
                     if self.server.client_id is not None:
                         self.server.send_sync("executed", 
-                                            { "node": unique_id, "output": output_ui, "prompt_id": prompt_id }, 
-                                            self.server.client_id)
+                                              { "node": current_node_id, "output": output_ui, "prompt_id": prompt_id }, 
+                                              self.server.client_id)
         
         except comfy.model_management.InterruptProcessingException as iex:
             logging.info("Processing interrupted")
 
             # skip formatting inputs/outputs
             error_details = {
-                "node_id": unique_id,
+                "node_id": current_node_id,
             }
 
-            return (False, error_details, iex)
+            return RecursiveExecuteResult(False, error_details, iex)
+        
         except Exception as ex:
             typ, _, tb = sys.exc_info()
             exception_type = _get_full_type_name(typ)
@@ -306,18 +343,18 @@ class PromptExecutor:
             logging.error(traceback.format_exc())
 
             error_details = {
-                "node_id": unique_id,
+                "node_id": current_node_id,
                 "exception_message": str(ex),
                 "exception_type": exception_type,
                 "traceback": traceback.format_tb(tb),
                 "current_inputs": input_data_formatted,
                 "current_outputs": output_data_formatted
             }
-            return (False, error_details, ex)
+            return RecursiveExecuteResult(False, error_details, ex)
 
-        executed.add(unique_id)
+        executed.add(current_node_id)
 
-        return (True, None, None)
+        return RecursiveExecuteResult(True, None, None)
 
     def _recursive_output_delete_if_changed(self, 
                                             prompt: PROMPT, 
@@ -528,14 +565,39 @@ class PromptExecutor:
             if comfy.model_management.DISABLE_SMART_MEMORY:
                 comfy.model_management.unload_all_models()
 
+@dataclass
+class ValidateInputsResult:
+    '''dataclass for the result of `validate_inputs` function.'''
+    
+    result: bool
+    '''whether the validation is successful or not'''
+    errors: List[dict]
+    '''list of error messages'''
+    node_id: str
+    '''the node id that is being validated'''
+    adapter: Optional[Adapter] = None
+    '''the adapter that is used to convert the input'''
+    
+    def __getitem__(self, item: int):
+        if item not in (0, 1, 2, 3):
+            raise IndexError(f"Index out of range: {item}")
+        if item == 0:
+            return self.result
+        if item == 1:
+            return self.errors
+        if item == 2:
+            return self.node_id
+        if item == 3:
+            return self.adapter
 
-def validate_inputs(prompt, item, validated):
-    unique_id = item
-    if unique_id in validated:
-        return validated[unique_id]
+def validate_inputs(prompt: PROMPT, 
+                    node_id: str, 
+                    validated: Dict[str, ValidateInputsResult])->ValidateInputsResult:
+    if node_id in validated:
+        return validated[node_id]
 
-    inputs = prompt[unique_id]['inputs']
-    class_type = prompt[unique_id]['class_type']
+    inputs = prompt[node_id]['inputs']
+    class_type = prompt[node_id]['class_type']
     obj_class = nodes.NODE_CLASS_MAPPINGS[class_type]
 
     class_inputs = obj_class.INPUT_TYPES()
@@ -543,11 +605,16 @@ def validate_inputs(prompt, item, validated):
 
     errors = []
     valid = True
+    adapter = None
 
     validate_function_inputs = []
     if hasattr(obj_class, "VALIDATE_INPUTS"):
         validate_function_inputs = inspect.getfullargspec(obj_class.VALIDATE_INPUTS).args
-
+        if isinstance(obj_class.__dict__['VALIDATE_INPUTS'], classmethod):
+            validate_function_inputs = validate_function_inputs[1:] # classmethod, remove 'cls'
+        elif not isinstance(obj_class.__dict__['VALIDATE_INPUTS'], staticmethod):
+            validate_function_inputs = validate_function_inputs[1:] # normal method, remove 'self'
+        
     for x in required_inputs:
         if x not in inputs:
             error = {
@@ -564,7 +631,7 @@ def validate_inputs(prompt, item, validated):
         val = inputs[x]
         info = required_inputs[x]
         type_input = info[0]
-        if isinstance(val, list):
+        if isinstance(val, list) and isinstance(val[0], str) and isinstance(val[1], int):   # [str, int] means binding 
             if len(val) != 2:
                 error = {
                     "type": "bad_linked_input",
@@ -587,30 +654,23 @@ def validate_inputs(prompt, item, validated):
             if from_type_name == 'ANY':
                 from_type_name = '*'
             
-            if from_type_name != type_input:
-                key = (from_type_name, type_input)
-                if key in AdaptersMap:
-                    pass    # TODO
-                else:
-                    key = ('*', type_input) # default adapter
-                    if key in AdaptersMap:
-                        pass    # TODO
-                    else:
-                        received_type = r[val[1]]
-                        details = f"{x}, {received_type} != {type_input}"
-                        error = {
-                            "type": "return_type_mismatch",
-                            "message": "Return type mismatch between linked nodes",
-                            "details": details,
-                            "extra_info": {
-                                "input_name": x,
-                                "input_config": info,
-                                "received_type": received_type,
-                                "linked_node": val
-                            }
+            if '*' not in (from_type_name, type_input) and from_type_name != type_input:
+                adapter = find_adapter(from_type_name, type_input)
+                if adapter is None:
+                    details = f"{x}, {from_type_name} != {type_input}"
+                    error = {
+                        "type": "return_type_mismatch",
+                        "message": "Return type mismatch between linked nodes",
+                        "details": details,
+                        "extra_info": {
+                            "input_name": x,
+                            "input_config": info,
+                            "received_type": from_type_name,
+                            "linked_node": val
                         }
-                        errors.append(error)
-                        continue
+                    }
+                    errors.append(error)
+                    continue
                 
             try:
                 r = validate_inputs(prompt, o_id, validated)
@@ -635,7 +695,7 @@ def validate_inputs(prompt, item, validated):
                         "linked_node": val
                     }
                 }]
-                validated[o_id] = (False, reasons, o_id)
+                validated[o_id] = ValidateInputsResult(False, reasons, o_id)
                 continue
         else:
             try:
@@ -719,13 +779,12 @@ def validate_inputs(prompt, item, validated):
                         continue
 
     if len(validate_function_inputs) > 0:
-        input_data_all = _get_input_data(inputs, obj_class, unique_id)
+        input_data_all = _get_input_data(inputs, obj_class, node_id)
         input_filtered = {}
         for x in input_data_all:
             if x in validate_function_inputs:
                 input_filtered[x] = input_data_all[x]
 
-        #ret = obj_class.VALIDATE_INPUTS(**input_filtered)
         ret = _get_node_func_ret(obj_class, input_filtered, "VALIDATE_INPUTS")
         for x in input_filtered:
             for i, r in enumerate(ret):
@@ -748,11 +807,11 @@ def validate_inputs(prompt, item, validated):
                     continue
 
     if len(errors) > 0 or valid is not True:
-        ret = (False, errors, unique_id)
+        ret = ValidateInputsResult(result=False, errors=errors, node_id=node_id, adapter=adapter)
     else:
-        ret = (True, [], unique_id)
-
-    validated[unique_id] = ret
+        ret = ValidateInputsResult(result=True, errors=[], node_id=node_id, adapter=adapter)
+    
+    validated[node_id] = ret
     return ret
 
 def _get_full_type_name(klass):
@@ -761,7 +820,45 @@ def _get_full_type_name(klass):
         return klass.__qualname__
     return module + '.' + klass.__qualname__
 
-def validate_prompt(prompt: PROMPT):
+@dataclass
+class ValidatePromptResult:
+    '''dataclass for the result of `validate_prompt` function.'''
+    
+    result: bool
+    '''whether the validation is successful or not'''
+    errors: Optional[dict]
+    '''the error messages if the validation failed'''
+    good_outputs: List[str]
+    '''list of output node ids that passed the validation.'''
+    node_errors: Dict[str, dict]
+    '''dict of node_id: error messages'''
+    
+    _prompt: dict
+    '''The real input prompt, a dictionary (converted from json)'''
+    _formatted_prompt: PROMPT = None     # type: ignore
+    '''The properly formatted prompt, in `PROMPT` type'''
+    
+    @property
+    def formatted_prompt(self):
+        if not self._formatted_prompt:
+            self._formatted_prompt = PROMPT(self._prompt)
+        return self._formatted_prompt
+    
+    def __getitem__(self, item: int):
+        if item not in (0, 1, 2, 3, 4):
+            raise IndexError(f"Index out of range: {item}. It should be in [0, 1, 2, 3, 4]")
+        if item == 0:
+            return self.result
+        if item == 1:
+            return self.errors
+        if item == 2:
+            return self.good_outputs
+        if item == 3:
+            return self.node_errors
+        if item == 4:
+            return self.formatted_prompt
+            
+def validate_prompt(prompt: PROMPT) -> ValidatePromptResult:
     outputs = set()
     for x in prompt:
         class_ = nodes.NODE_CLASS_MAPPINGS[prompt[x]['class_type']]
@@ -775,7 +872,7 @@ def validate_prompt(prompt: PROMPT):
             "details": "",
             "extra_info": {}
         }
-        return (False, error, [], [])
+        return ValidatePromptResult(result=False, errors=error, good_outputs=[], node_errors={}, _prompt=prompt)
 
     good_outputs = set()
     errors = []
@@ -846,9 +943,9 @@ def validate_prompt(prompt: PROMPT):
             "extra_info": {}
         }
 
-        return (False, error, list(good_outputs), node_errors)
+        return ValidatePromptResult(result=False, errors=error, good_outputs=list(good_outputs), node_errors=node_errors, _prompt=prompt)
 
-    return (True, None, list(good_outputs), node_errors)
+    return ValidatePromptResult(result=True, errors=None, good_outputs=list(good_outputs), node_errors=node_errors, _prompt=prompt)
 
 MAXIMUM_HISTORY_SIZE = 10000
 

@@ -16,7 +16,7 @@ import safetensors.torch
 
 from typing import Dict, Type, TYPE_CHECKING
 
-from common_utils.global_utils import GetGlobalValue, SetGlobalValue
+from common_utils.global_utils import GetGlobalValue, SetGlobalValue, is_dev_mode
 from common_utils.debug_utils import ComfyUILogger
 
 sys.path.insert(2, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
@@ -1748,7 +1748,6 @@ class ImagePadForOutpaint:
 
         return (new_image, mask)
 
-
 NODE_CLASS_MAPPINGS: Dict[str, Type['ComfyUINode']] = GetGlobalValue("__COMFYUI_NODE_CLASS_MAPPINGS__", None) # type: ignore
 '''Node class mappings for all nodes. This dictionary will be updated on init.'''
 if NODE_CLASS_MAPPINGS is None:
@@ -1889,8 +1888,13 @@ EXTENSION_WEB_DIRS = GetGlobalValue("__COMFYUI_EXTENSION_WEB_DIRS__", None) # ty
 if EXTENSION_WEB_DIRS is None:
     EXTENSION_WEB_DIRS = {}
     SetGlobalValue("__COMFYUI_EXTENSION_WEB_DIRS__", EXTENSION_WEB_DIRS)
+
+def _init_node_clses():
+    for _, node_cls in NODE_CLASS_MAPPINGS.items():
+        setattr(node_cls, '__IS_COMFYUI_NODE__', True)
+_init_node_clses()
     
-def _load_custom_node(module_path, ignore=set()):
+def _load_custom_node(module_path, ignore=set(), raise_err=False):
     module_name = os.path.basename(module_path)
     if os.path.isfile(module_path):
         sp = os.path.splitext(module_path)
@@ -1920,12 +1924,19 @@ def _load_custom_node(module_path, ignore=set()):
                 NODE_DISPLAY_NAME_MAPPINGS.update(module.NODE_DISPLAY_NAME_MAPPINGS)
             return True
         else:
-            ComfyUILogger.warning(f"Skip {module_path} module for custom nodes due to the lack of NODE_CLASS_MAPPINGS.")
-            return False
+            if not raise_err:
+                ComfyUILogger.warning(f"Skip {module_path} module for custom nodes due to the lack of NODE_CLASS_MAPPINGS.")
+                return False
+            else:
+                raise ValueError(f"Cannot find NODE_CLASS_MAPPINGS in {module_path}")
+            
     except Exception as e:
-        ComfyUILogger.warning(f"Cannot import {module_path} module for custom nodes with error: {e}. Traceback: {traceback.format_exc()}")
-        return False
-
+        if not raise_err:
+            ComfyUILogger.warning(f"Cannot import {module_path} module for custom nodes with error: {e}. Traceback: {traceback.format_exc()}")
+            return False
+        else:
+            raise e
+            
 def load_custom_nodes():
     '''
     Load all custom nodes from:
@@ -1960,13 +1971,17 @@ def load_custom_nodes():
             ComfyUILogger.debug("{:6.1f} seconds{}:".format(n[0], import_message) + n[1])
     
     ComfyUILogger.debug('loading stable-renderer nodes...')
+    
     stable_renderer_nodes_path = os.path.join(folder_paths.base_path, 'stable_renderer', 'nodes')
-    success = _load_custom_node(stable_renderer_nodes_path, )
+    raise_err = is_dev_mode()
+    success = _load_custom_node(stable_renderer_nodes_path, raise_err=raise_err)
 
     if not success:
         ComfyUILogger.warning('failed to load stable-renderer nodes.')
     else:
         ComfyUILogger.debug('successfully loaded stable-renderer nodes.')
+
+    _init_node_clses()
 
 def init_custom_nodes():
     extras_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy_extras")
