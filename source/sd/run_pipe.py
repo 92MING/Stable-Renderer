@@ -18,7 +18,7 @@ from datetime import datetime
 from common_utils.image_utils import save_images_as_gif
 from common_utils.global_utils import GetEnv
 from common_utils.debug_utils import DefaultLogger
-from common_utils.path_utils import GIF_OUTPUT_DIR, MAP_OUTPUT_DIR, RESOURCES_DIR, EXAMPLE_MAP_OUTPUT_DIR
+from common_utils.path_utils import OUTPUT_DIR as GIF_OUTPUT_DIR, MAP_OUTPUT_DIR, EXAMPLE_MAP_OUTPUT_DIR
 
 
 @dataclass
@@ -32,7 +32,7 @@ class RunPipeConfig:
     '''Path(real path or HG's name) to the Stable Diffusion model. Default is `runwayml/stable-diffusion-v1-5`.'''
     prompt: str = GetEnv('DEFAULT_SD_PROMPT', "Golden boat on a calm lake") # type: ignore
     '''Prompt for the diffusion model. This is the main prompt for the model.'''
-    neg_prompt: str = GetEnv('DEFAULT_SD_NEG_PROMPT', "low quality, bad anatomy")   # type: 
+    neg_prompt: str = GetEnv('DEFAULT_SD_NEG_PROMPT', "low quality, bad anatomy")   # type: ignore 
     '''Negative prompt for the diffusion model. This is the negative prompt for the model.'''
     width: int = GetEnv('DEFAULT_IMG_WIDTH', None)  # type: ignore
     '''Width of the generated image. Default is 512. If None, will use the width of the first frame.'''

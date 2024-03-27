@@ -1,9 +1,16 @@
 import os
 import time
 
+from typing import Dict, List, Tuple, Union, Set
+
+from common_utils.path_utils import Path, COMFYUI_TEMP_DIR, get_comfyUI_output_dir, INPUT_DIR
+
+
+
 supported_pt_extensions = set(['.ckpt', '.pt', '.bin', '.pth', '.safetensors'])
 
-folder_names_and_paths = {}
+folder_names_and_paths:Dict[str, Tuple[List[str], Union[Tuple[str, ...], List[str], Set[str]]]] = {}
+'''{name, ([folder_paths], {supported_extensions})}'''
 
 base_path = os.path.dirname(os.path.realpath(__file__))
 models_dir = os.path.join(base_path, "models")
@@ -35,10 +42,13 @@ folder_names_and_paths["classifiers"] = ([os.path.join(models_dir, "classifiers"
 
 folder_names_and_paths['stable_renderer'] = ([os.path.join(base_path, "stable_renderer")], [])
 
-output_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), "output")
-temp_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), "temp")
-input_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), "input")
-user_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), "user")
+
+output_directory:Path = None    # type: ignore 
+# will be initialized later
+
+temp_directory:Path = COMFYUI_TEMP_DIR
+input_directory:Path = INPUT_DIR
+user_directory:Path = Path(os.path.join(os.path.dirname(os.path.realpath(__file__)), "user"))  # TODO: change to other path
 
 filename_list_cache = {}
 
@@ -60,8 +70,10 @@ def set_input_directory(input_dir):
     global input_directory
     input_directory = input_dir
 
-def get_output_directory():
+def get_output_directory()->Path:
     global output_directory
+    if output_directory is None:
+        output_directory = get_comfyUI_output_dir() # create a new folder with current time as name
     return output_directory
 
 def get_temp_directory():

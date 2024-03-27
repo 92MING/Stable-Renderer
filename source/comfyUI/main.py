@@ -15,6 +15,9 @@ import importlib.util
 import folder_paths
 import time
 
+if __name__ == '__main__':
+    os.environ['COMFYUI_DIRECT_RUN'] = 'True'   # indicate that comfyUI's main.py is running directly
+    
 should_run_web_server = (__name__ == '__main__')
 if not should_run_web_server:
     should_run_web_server = not is_game_mode()  # web server only run in editor mode

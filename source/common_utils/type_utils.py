@@ -7,6 +7,9 @@ if __name__ == '__main__':  # for debugging
     sys.path.append(_proj_path)
     __package__ = 'common_utils'
 
+import inspect
+import re
+
 from dataclasses import dataclass
 from inspect import Parameter, signature, _empty, getmro
 from collections import OrderedDict
@@ -58,7 +61,7 @@ def _direct_check_sub_cls(sub_cls:Union[TypeAlias, str], super_cls:Union[TypeAli
         except Exception as e:
             raise e
 
-def valueTypeCheck(value:Any, types: Union[str, TypeAlias, Sequence[Union[TypeAlias, str]]]):
+def valueTypeCheck(value:Any, types: Union[str, type, TypeAlias, Sequence[Union[TypeAlias, str]]]):
     '''
     Check value with given types:
     E.g.:
@@ -122,13 +125,32 @@ def valueTypeCheck(value:Any, types: Union[str, TypeAlias, Sequence[Union[TypeAl
                 return False
 
 @cache  
-def subClassCheck(sub_cls:Union[TypeAlias, Any], super_cls: Union[str, TypeAlias, Any, Sequence[Union[TypeAlias, str]]])->bool:
+def subClassCheck(sub_cls:Union[str, type, TypeAlias, Any], super_cls: Union[str, type, TypeAlias, Any, Sequence[Union[TypeAlias, str]]])->bool:
     '''
     Check if sub_cls is a subclass of super_cls.
     You could use `|` to represent Union, e.g.: `subClassCheck(sub_cls, int | str)`
     You could also use list to represent Union, e.g.: `subClassCheck(sub_cls, [int, str])`
     Class name is also supported, e.g.: `subClassCheck(sub_cls, 'A')`
     '''
+    if isinstance(sub_cls, str):
+        if isinstance(super_cls, str):
+            return sub_cls.split('.')[-1] == super_cls.split('.')[-1]
+        else:
+            all_super_cls_names = []
+            if isinstance(super_cls, Sequence):
+                for c in super_cls:
+                    if hasattr(c, '__subclasses__'):
+                        all_super_cls_names.extend([get_cls_name(cls) for cls in c.__subclasses__()])   # type: ignore
+                    else:
+                        all_super_cls_names.append(get_cls_name(c))
+            else:
+                if hasattr(super_cls, '__subclasses__'):
+                    all_super_cls_names = [get_cls_name(cls) for cls in super_cls.__subclasses__()] # type: ignore
+                else:
+                    all_super_cls_names = [get_cls_name(super_cls),]
+            
+            return sub_cls.split('.')[-1] in all_super_cls_names
+        
     if not isinstance(super_cls, str) and isinstance(super_cls, Sequence):
         return any(_direct_check_sub_cls(sub_cls, t) for t in super_cls)
     try:
@@ -137,7 +159,6 @@ def subClassCheck(sub_cls:Union[TypeAlias, Any], super_cls: Union[str, TypeAlias
         return False
 
 __all__ = ['subClassCheck', 'valueTypeCheck']
-
 # endregion
 
 
@@ -185,7 +206,7 @@ def get_cls_name(cls_or_ins: Any):
     else:
         cls = cls_or_ins
     if hasattr(cls, '__qualname__'):
-        return cls.__qualname__
+        return cls.__qualname__.split('.')[-1]
     else:
         return cls.__name__.split('.')[-1]
 
@@ -237,7 +258,6 @@ def get_mro_distance(cls:Any, super_cls:Union[type, str, None])->int:
         except ValueError:  # not found
             return MAX_MRO_DISTANCE
 
-
 def get_proper_module_name(t: Any):
     '''
     Get the proper module name of the type.
@@ -257,8 +277,25 @@ def get_proper_module_name(t: Any):
             module = '__main__' # not in source dir, use __main__ instead
     return module
 
-__all__.extend(['get_origin', 'get_args', 'get_cls_name', 'get_mro_distance', 'get_proper_module_name'])
+def get_attr(obj: Any, attr_name: str)->Union[Any, None]:
+    '''
+    Get the origin attribute by finding in obj's __dict__.
+    This method will not trigger `__get__`
+    '''
+    if not isinstance(obj, type):
+        if attr_name in obj.__dict__:
+            return obj.__dict__[attr_name]
+    
+    obj_type = type(obj) if not isinstance(obj, type) else obj
+    clses = list(getmro(obj_type))
+    for cls in clses[::-1]:
+        if attr_name in cls.__dict__:
+            return cls.__dict__[attr_name]
+    
+    return None
+    
 
+__all__.extend(['get_origin', 'get_args', 'get_cls_name', 'get_mro_distance', 'get_proper_module_name', 'get_attr'])
 # endregion
 
 
@@ -371,7 +408,24 @@ def func_param_type_check(func:Callable, *args, **kwargs)->bool:
     
     return True
 
-__all__.extend(['pack_param', 'func_param_type_check'])
+def is_empty_method(method):
+    '''check if a method is totally empty, i.e. no code in the method, except for docstring and pass statement.'''
+    if hasattr(method, '__doc__'):
+        doc_str = method.__doc__
+    else:
+        doc_str = None
+    source = inspect.getsource(method)
+    if doc_str:
+        source = source.replace(doc_str, '')
+    
+    func_def_pattern = re.compile(r'(async)?\s*def\s+\w+\s*\(.*\).*?:', re.MULTILINE|re.DOTALL)
+    source = re.sub(func_def_pattern, '', source, count=1)
+    lines = source.split('\n')
+    lines = [line.strip() for line in lines if line.strip()]
+    lines = [line for line in lines if not line.startswith(('#', '"""',"'''")) and not line == 'pass']
+    return not lines
+
+__all__.extend(['pack_param', 'func_param_type_check', 'is_empty_method'])
 # endregion
 
 
@@ -384,4 +438,3 @@ AsyncFunc = Callable[..., Awaitable[Any]]
 
 __all__.extend(['BasicType', 'AsyncFunc'])
 # endregion
-
