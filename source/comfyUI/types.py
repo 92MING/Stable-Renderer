@@ -148,7 +148,7 @@ class AnnotatedParam:
         
         if not self.origin_type:
             raise ValueError('The comfy_type_name is not specified and the origin_type is not specified either.')
-        return _get_comfy_type_definition(self.origin_type)
+        return _get_comfy_type_definition(self.origin_type) # type: ignore
 
     @property
     def _clone(self)->'AnnotatedParam':
