@@ -4,7 +4,6 @@ from typing import Tuple, Union, Dict, List, Any, TYPE_CHECKING
 from pathlib import Path
 if TYPE_CHECKING:
     from engine.runtime.runtime_prompt import RuntimePrompt
-    from comfyUI.types import NodeInputs
 
 
 class WorkflowNodeLink(Tuple[int, int, int, int, int, str]):
@@ -59,12 +58,12 @@ class WorkflowNodeInfo(Dict[str, Any]):
                 del self[attr]
     
     @property
-    def inputs(self)->'NodeInputs':
+    def inputs(self)->'WorkflowNodeInputsInfo':
         '''inputs information of the node.'''
         return self['inputs']
     
     @property
-    def outputs(self):
+    def outputs(self)->'WorkflowNodeOutputsInfo':
         '''outputs information of the node.'''
         return self['outputs']
     
