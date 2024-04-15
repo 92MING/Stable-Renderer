@@ -1,10 +1,17 @@
 import torch
+import math
+import numpy as np
+
+from typing import List, Tuple, Optional, Dict, Any
+from comfyUI.types import CONDITIONING as Conditioning, ConvertedConditioning
+
 import comfy.model_management
+import comfy.model_patcher
 import comfy.samplers
 import comfy.conds
 import comfy.utils
-import math
-import numpy as np
+
+SelfDefinedModelPatcher = Any
 
 def prepare_noise(latent_image, seed, noise_inds=None):
     """
@@ -33,14 +40,42 @@ def prepare_mask(noise_mask, shape, device):
     noise_mask = noise_mask.to(device)
     return noise_mask
 
-def get_models_from_cond(cond, model_type):
+def get_models_from_cond(cond: Conditioning, model_type):
     models = []
     for c in cond:
         if model_type in c:
             models += [c[model_type]]
     return models
 
-def convert_cond(cond):
+def convert_cond(cond: Conditioning) -> ConvertedConditioning:
+    """
+    Transforms the conditioning to a format that can be used by the model.
+
+    Original format:
+    [
+        [cond_tensor_a, {"some_output_a": Any}],
+        [cond_tensor_b, {"some_output_b": Any}], 
+        ...
+    ] 
+
+    Transformed format:
+    [
+        {
+            "some_output_a": Any, 
+            "cross_attn": cond_tensor_a,
+            "model_conds": {
+                "c_crossattn": comfy.conds.CONDCrossAttn(cond_tensor_a)
+            }
+        },
+        {
+            "some_output_b": Any, 
+            "cross_attn": cond_tensor_b,
+            "model_conds": {
+                "c_crossattn": comfy.conds.CONDCrossAttn(cond_tensor_b)
+            }
+        },  
+    ]
+    """
     out = []
     for c in cond:
         temp = c[1].copy()
@@ -73,7 +108,18 @@ def cleanup_additional_models(models):
         if hasattr(m, 'cleanup'):
             m.cleanup()
 
-def prepare_sampling(model, noise_shape, positive, negative, noise_mask):
+def prepare_sampling(model: comfy.model_patcher.ModelPatcher,
+                     noise_shape: torch.Size,
+                     positive: Conditioning,
+                     negative: Conditioning,
+                     noise_mask: Optional[torch.Tensor]
+    ) -> Tuple[
+        comfy.model_base.BaseModel,
+        Conditioning,
+        Conditioning,
+        Optional[torch.Tensor],
+        List[comfy.model_patcher.ModelPatcher | SelfDefinedModelPatcher]
+    ]:
     device = model.load_device
     positive = convert_cond(positive)
     negative = convert_cond(negative)
@@ -89,7 +135,32 @@ def prepare_sampling(model, noise_shape, positive, negative, noise_mask):
     return real_model, positive, negative, noise_mask, models
 
 
-def sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise=1.0, disable_noise=False, start_step=None, last_step=None, force_full_denoise=False, noise_mask=None, sigmas=None, callback=None, disable_pbar=False, seed=None):
+def sample(model: comfy.model_patcher.ModelPatcher,
+           noise: torch.Tensor,
+           steps: int,
+           cfg: float,
+           sampler_name: str,
+           scheduler: str,
+           positive: Conditioning,
+           negative: Conditioning,
+           latent_image: torch.Tensor,
+           denoise: float = 1.0,
+           disable_noise: bool = False,
+           start_step: int = None,
+           last_step: int = None,
+           force_full_denoise: bool = False,
+           noise_mask: torch.Tensor = None,
+           sigmas: torch.Tensor = None,
+           callbacks: List[callable] = [],
+           disable_pbar: bool = False,
+           seed: int = None,
+           **kwargs
+) -> torch.Tensor:
+    if "callback" in kwargs:
+        print("Warning: 'callback' is deprecated, use 'callbacks' instead")
+        legacy_callback = kwargs.pop("callback")
+        callbacks.append(legacy_callback)
+
     real_model, positive_copy, negative_copy, noise_mask, models = prepare_sampling(model, noise.shape, positive, negative, noise_mask)
 
     noise = noise.to(model.load_device)
@@ -97,7 +168,7 @@ def sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative
 
     sampler = comfy.samplers.KSampler(real_model, steps=steps, device=model.load_device, sampler=sampler_name, scheduler=scheduler, denoise=denoise, model_options=model.model_options)
 
-    samples = sampler.sample(noise, positive_copy, negative_copy, cfg=cfg, latent_image=latent_image, start_step=start_step, last_step=last_step, force_full_denoise=force_full_denoise, denoise_mask=noise_mask, sigmas=sigmas, callback=callback, disable_pbar=disable_pbar, seed=seed)
+    samples = sampler.sample(noise, positive_copy, negative_copy, cfg=cfg, latent_image=latent_image, start_step=start_step, last_step=last_step, force_full_denoise=force_full_denoise, denoise_mask=noise_mask, sigmas=sigmas, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)
     samples = samples.to(comfy.model_management.intermediate_device())
 
     cleanup_additional_models(models)
@@ -110,7 +181,7 @@ def sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, latent
     latent_image = latent_image.to(model.load_device)
     sigmas = sigmas.to(model.load_device)
 
-    samples = comfy.samplers.sample(real_model, noise, positive_copy, negative_copy, cfg, model.load_device, sampler, sigmas, model_options=model.model_options, latent_image=latent_image, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=seed)
+    samples = comfy.samplers.sample(real_model, noise, positive_copy, negative_copy, cfg, model.load_device, sampler, sigmas, model_options=model.model_options, latent_image=latent_image, denoise_mask=noise_mask, callbacks=callback, disable_pbar=disable_pbar, seed=seed)
     samples = samples.to(comfy.model_management.intermediate_device())
     cleanup_additional_models(models)
     cleanup_additional_models(set(get_models_from_cond(positive_copy, "control") + get_models_from_cond(negative_copy, "control")))

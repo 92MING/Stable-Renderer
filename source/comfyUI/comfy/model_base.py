@@ -1,4 +1,5 @@
 import torch
+import sys
 from comfy.ldm.modules.diffusionmodules.openaimodel import UNetModel, Timestep
 from comfy.ldm.cascade.stage_c import StageC
 from comfy.ldm.cascade.stage_b import StageB
@@ -10,6 +11,14 @@ import comfy.ops
 from enum import Enum
 from . import utils
 
+from comfy.model_sampling import (
+    EPS, V_PREDICTION, EDM, 
+    ModelSamplingProtocol,
+    ModelSamplingDiscrete, ModelSamplingContinuousEDM, StableCascadeSampling
+)
+
+from typing import TypeAlias
+
 class ModelType(Enum):
     EPS = 1
     V_PREDICTION = 2
@@ -17,12 +26,11 @@ class ModelType(Enum):
     STABLE_CASCADE = 4
     EDM = 5
 
+ModelSamplingType = TypeAlias[ModelSamplingProtocol, EPS] \
+    if sys.version_info >= (3, 11) else ModelSamplingProtocol
 
-from comfy.model_sampling import EPS, V_PREDICTION, EDM, ModelSamplingDiscrete, ModelSamplingContinuousEDM, StableCascadeSampling
-
-
-def model_sampling(model_config, model_type):
-    s = ModelSamplingDiscrete
+def model_sampling(model_config, model_type) -> ModelSamplingType:
+    s: ModelSamplingProtocol = ModelSamplingDiscrete
 
     if model_type == ModelType.EPS:
         c = EPS

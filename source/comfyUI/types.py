@@ -9,11 +9,11 @@ from enum import Enum
 from pathlib import Path
 from abc import ABC, abstractmethod
 from deprecated import deprecated
-
+from functools import partial
+from comfy.samplers import KSampler
 from common_utils.global_utils import GetOrCreateGlobalValue
 from common_utils.type_utils import valueTypeCheck, get_cls_name
 from common_utils.decorators import singleton, class_property, class_or_ins_property, prevent_re_init
-from comfy.samplers import KSampler
 from comfy.sd import VAE as comfy_VAE, CLIP as comfy_CLIP
 from comfy.controlnet import ControlBase as comfy_ControlNetBase
 from comfy.model_base import BaseModel
@@ -372,7 +372,10 @@ class AnnotatedParam(metaclass=_NameCheckCls):
                     if formatter is not None:
                         if not isinstance(formatter, (classmethod, staticmethod)):
                             raise TypeError(f'__ComfyValueFormatter__ should be a class or static method, but got {formatter}.')
-                        self.value_formatter = formatter
+                        if isinstance(formatter, classmethod):
+                            self.value_formatter = partial(formatter.__func__, self.origin_type)
+                        else:
+                            self.value_formatter = formatter
         else:
             self.value_formatter = value_formatter
         
@@ -711,7 +714,22 @@ MASK: TypeAlias = Annotated[Tensor, AnnotatedParam(origin=Tensor, comfy_name='MA
 '''Type hint for ComfyUI's built-in type `MASK`.
 Similar to `IMAGE`, when multiple masks are given, they will be concatenated as 1 tensor by ComfyUI.'''
 
-__all__.extend(['LATENT', 'VAE', 'CLIP', 'CONTROL_NET', 'MODEL', 'IMAGE', 'MASK'])
+CONDITIONING: TypeAlias = Annotated[
+    List[Tuple[Tensor, Dict[str, Any]]], 
+    AnnotatedParam(origin=List[List[Tuple[Tensor, Dict[str, Any]]]], comfy_name='CONDITIONING')
+]
+"""
+The Conditioning datatype is a list of tuples, where the first element in the 
+tuple is the regular Tensor output from a node, and the second element is a dictionary containing
+other non-tensor outputs from the node. Refer to the docstrings of convert_cond() for more information.
+An example structure of conditioning
+[
+    [cond_tensor_a, {"some_output_a": Any}],
+    [cond_tensor_b, {"some_output_b": Any}], 
+    ...
+] 
+"""
+__all__.extend(['LATENT', 'VAE', 'CLIP', 'CONTROL_NET', 'MODEL', 'IMAGE', 'MASK', 'CONDITIONING'])
 # endregion
 
 # region comfyUI built-in options
@@ -1379,9 +1397,33 @@ Items:
     - outputs_to_execute
 '''
 
+ConvertedConditioning: TypeAlias = List[Dict[str, Any]]
+"""
+The ConvertedConditioning datatype is a return representation from convert_cond() function in sample.py
+It has the following structure:
+[
+    {
+        "some_output_a": Any, 
+        "cross_attn": cond_tensor_a,
+        "model_conds": {
+            "c_crossattn": comfy.conds.CONDCrossAttn(cond_tensor_a)
+        }
+    },
+    {
+        "some_output_b": Any, 
+        "cross_attn": cond_tensor_b,
+        "model_conds": {
+            "c_crossattn": comfy.conds.CONDCrossAttn(cond_tensor_b)
+        }
+    },  
+]
+Refer to CONDITIONING datatype or convert_cond() docstrings for more information.
+"""
+
 
 __all__.extend(['NodeInputParamDict', 'NodePool', 'NodeBindingParam', 'NodeInputs', 
                 'PROMPT', 'EXTRA_PNG_INFO', 'UNIQUE_ID', 
-                'StatusMsgs', 'NodeOutputs_UI', 'NodeOutputs', 'QueueTask'])
+                'StatusMsgs', 'NodeOutputs_UI', 'NodeOutputs', 'QueueTask',
+                'ConvertedConditioning'])
 # endregion
 

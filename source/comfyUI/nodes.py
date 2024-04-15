@@ -14,7 +14,10 @@ from PIL.PngImagePlugin import PngInfo
 import numpy as np
 import safetensors.torch
 
-from typing import Dict, Type, TYPE_CHECKING
+from typing import (
+    Dict, Tuple, List, Any, Optional, Callable,
+    Type, TYPE_CHECKING
+)
 
 from common_utils.global_utils import GetGlobalValue, SetGlobalValue, is_dev_mode
 from common_utils.debug_utils import ComfyUILogger
@@ -35,9 +38,10 @@ import latent_preview
 from comfy.cli_args import args
 
 if TYPE_CHECKING:
-    from comfyUI.types import ComfyUINode
+    from comfyUI.types import ComfyUINode, CONDITIONING as Conditioning, COMFY_SCHEDULERS as Schedulers
     from comfy.sd import VAE, CLIP
     from comfy.controlnet import ControlNet, T2IAdapter, ControlLora, ControlBase
+    from comfy.model_base import BaseModel
 
 
 
@@ -771,7 +775,9 @@ class ControlNetApply:
             return (conditioning, )
 
         c = []
+        print("image dims", image.shape)
         control_hint = image.movedim(-1,1)
+        print("control hint dim", control_hint.shape)
         for t in conditioning:
             n = [t[0], t[1].copy()]
             c_net = control_net.copy().set_cond_hint(control_hint, strength)
@@ -1340,11 +1346,48 @@ def common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, 
     if "noise_mask" in latent:
         noise_mask = latent["noise_mask"]
 
-    callback = latent_preview.prepare_callback(model, steps)
+    callbacks = []
+    callbacks.append(latent_preview.prepare_callback(model, steps))
     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
                                   denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step,
-                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=seed)
+                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)
+    out = latent.copy()
+    out["samples"] = samples
+    return (out, )
+
+def custom_ksampler(model: "BaseModel",
+                    seed: int,
+                    steps: int,
+                    cfg: float,
+                    sampler_name: str,
+                    scheduler: "Schedulers",
+                    positive: "Conditioning",
+                    negative: "Conditioning",
+                    latent: Dict[str, Any],
+                    denoise: float = 1.0,
+                    disable_noise: bool = False,
+                    start_step: Optional[int] = None,
+                    last_step: Optional[int] = None,
+                    force_full_denoise: bool = False,
+                    callbacks: List[Callable] = []) -> Tuple[Dict[str, Any]]:
+    latent_image = latent["samples"]
+    if disable_noise:
+        noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
+    else:
+        batch_inds = latent["batch_index"] if "batch_index" in latent else None
+        noise = comfy.sample.prepare_noise(latent_image, seed, batch_inds)
+
+    noise_mask = None
+    if "noise_mask" in latent:
+        noise_mask = latent["noise_mask"]
+
+    callbacks = []
+    callbacks.append(latent_preview.prepare_callback(model, steps))
+    disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
+    samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
+                                  denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step,
+                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)
     out = latent.copy()
     out["samples"] = samples
     return (out, )
