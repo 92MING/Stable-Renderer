@@ -13,6 +13,7 @@ rendered_frames/
 venv/
 /logs/
 **.git/
+/input/
 
 # files
 *.env

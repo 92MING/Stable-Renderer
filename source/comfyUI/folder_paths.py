@@ -4,12 +4,12 @@ import time
 from typing import Dict, List, Tuple, Union, Set
 
 from common_utils.path_utils import Path, COMFYUI_TEMP_DIR, get_comfyUI_output_dir, INPUT_DIR
-
+from common_utils.global_utils import GetOrCreateGlobalValue
 
 
 supported_pt_extensions = set(['.ckpt', '.pt', '.bin', '.pth', '.safetensors'])
 
-folder_names_and_paths:Dict[str, Tuple[List[str], Union[Tuple[str, ...], List[str], Set[str]]]] = {}
+folder_names_and_paths:Dict[str, Tuple[List[str], Union[Tuple[str, ...], List[str], Set[str]]]] = GetOrCreateGlobalValue("__COMFY_FOLDER_PATHS__", dict)  # type: ignore
 '''{name, ([folder_paths], {supported_extensions})}'''
 
 base_path = os.path.dirname(os.path.realpath(__file__))
