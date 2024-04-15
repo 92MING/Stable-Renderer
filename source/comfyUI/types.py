@@ -1223,7 +1223,7 @@ class NodeInputs(Dict[str, Union[NodeBindingParam, Any]]):
         type_name = get_cls_name(value)
         return type_name == 'NodeInputs'
 
-class NodeOutputs(Tuple[]):
+class NodeOutputs(Tuple):
     pass
 
 class NodeType(str):
