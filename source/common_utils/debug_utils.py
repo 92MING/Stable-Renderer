@@ -150,6 +150,10 @@ def _logger_modify(logger: logging.Logger)->_SuccessLogger:
     return logger   # type: ignore
 # endregion
 
+def get_log_level_by_name(name:str)->int:
+    '''Get log level by name'''
+    return getattr(logging, name.upper())
+
 EngineEditorLogger: _SuccessLogger = _logger_modify(logging.getLogger("Engine.Editor"))
 '''Logger which is active during editor mode. Will be ignore in release mode.'''
 
@@ -167,4 +171,4 @@ DefaultLogger: _SuccessLogger = _logger_modify(_root_logger)
 '''Default logger. You can use it for any purpose.'''
 
 
-__all__ = ['EngineEditorLogger', 'EngineRuntimeLogger', 'ComfyUILogger', 'DefaultLogger']
+__all__ = ['get_log_level_by_name', 'EngineEditorLogger', 'EngineRuntimeLogger', 'ComfyUILogger', 'DefaultLogger']

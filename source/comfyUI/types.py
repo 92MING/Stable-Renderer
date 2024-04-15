@@ -7,11 +7,12 @@ from types import NoneType
 from inspect import Parameter
 from enum import Enum
 from pathlib import Path
-from abc import ABC, abstractclassmethod
+from abc import ABC, abstractmethod
 from deprecated import deprecated
 
+from common_utils.global_utils import GetOrCreateGlobalValue
 from common_utils.type_utils import valueTypeCheck, get_cls_name
-from common_utils.decorators import singleton, class_property, class_or_ins_property
+from common_utils.decorators import singleton, class_property, class_or_ins_property, prevent_re_init
 from comfy.samplers import KSampler
 from comfy.sd import VAE as comfy_VAE, CLIP as comfy_CLIP
 from comfy.controlnet import ControlBase as comfy_ControlNetBase
@@ -146,7 +147,7 @@ def get_comfy_name(tp: Any, inner_type: Optional[Union[type, str]]=None)->str:
         type_name = 'COMBO'
     return type_name
 
-ParameterType: TypeAlias = Literal['required', 'optional', 'hidden']
+NodeInputParamType: TypeAlias = Literal['required', 'optional', 'hidden']
 
 class _NameCheckCls(type):
     def __instancecheck__(self, __instance: Any) -> bool:
@@ -195,7 +196,7 @@ class AnnotatedParam(metaclass=_NameCheckCls):
     # for node input/return params
     param_name: Optional[str] = None
     '''The name of the parameter. It is not necessary to specify this, but it is recommended to specify this.'''
-    param_type: Optional[ParameterType] = None
+    param_type: Optional[NodeInputParamType] = None
     '''The input type of the param. `None` is available for return types.'''
    
     value_formatter: Optional[Callable[[Any], Any]] = None
@@ -212,7 +213,7 @@ class AnnotatedParam(metaclass=_NameCheckCls):
                  tags: Optional[Union[List[str], Tuple[str, ...], Set[str]]] = None,
                  default: Optional[Any] = Parameter.empty,
                  param_name: Optional[str] = None,
-                 param_type: Optional[ParameterType] = None,
+                 param_type: Optional[NodeInputParamType] = None,
                  comfy_name: Optional[str] = None,
                  value_formatter: Optional[Callable[[Any], Any]] = None,
                  inner_type: Optional[Union[type, TypeAlias, str]] = None):
@@ -229,8 +230,8 @@ class AnnotatedParam(metaclass=_NameCheckCls):
         '''
         
         # checkings & type tidy up
-        if param_type is not None and not valueTypeCheck(param_type, ParameterType):   # type: ignore
-            raise TypeError(f'Unexpected type for param_type: {param_type}. It should be one of {ParameterType}.')
+        if param_type is not None and not valueTypeCheck(param_type, NodeInputParamType):   # type: ignore
+            raise TypeError(f'Unexpected type for param_type: {param_type}. It should be one of {NodeInputParamType}.')
         
         if isinstance(origin, _GetableFunc):
             try:
@@ -430,7 +431,7 @@ class AnnotatedParam(metaclass=_NameCheckCls):
                 if val_comfy_name != self_comfy_name:
                     need_convert = True
         else:
-            if not valueTypeCheck(val, self.origin_type):
+            if not valueTypeCheck(val, self.origin_type):   # type: ignore
                 need_convert = True
         
         if need_convert:
@@ -445,18 +446,25 @@ class InferenceContext:
         from comfyUI.execution import PromptExecutor
         return PromptExecutor() # since the PromptExecutor is a singleton, it is safe to create a new instance here
     
+    @property
+    def prompt_id(self)->str:
+        '''The prompt id for current execution.'''
+        return self.prompt.id
+    
     prompt: 'PROMPT'
     '''The prompt of current execution. It is a dict containing all nodes' input for execution.'''
-    
     extra_data: dict
     '''Extra data for the current execution.'''
-    
     current_node: Optional['ComfyUINode'] = None
     '''The current node for this execution.'''
     
-    def __init__(self, current_prompt: 'PROMPT', extra_data: dict):
+    def __init__(self, 
+                 current_prompt: 'PROMPT', 
+                 extra_data: dict, 
+                 current_node: Optional['ComfyUINode']=None):
         self.prompt = current_prompt
         self.extra_data = extra_data
+        self.current_node = current_node
        
     @property
     def node_pool(self)-> 'NodePool':
@@ -467,9 +475,9 @@ class InferenceContext:
         return self._executor.node_pool
     
     @property
-    def old_prompt(self)-> 'PROMPT':
+    def old_prompt(self)-> Optional['PROMPT']:
         '''prompt from last execution'''    
-        return self._executor.old_prompt
+        return self._executor.prompt
     
     @property
     def outputs_ui(self)-> 'NodeOutputs_UI':
@@ -512,12 +520,32 @@ class HIDDEN(ABC):
     def __class_getitem__(cls, tp: type):
         return Annotated[tp, AnnotatedParam(origin=tp, tags=['hidden'])]
     
-    @abstractclassmethod
+    @classmethod
+    def _SubClses(cls):
+        sub_clses = [cls, ]
+        for subcls in cls.__subclasses__():
+            sub_clses.extend(subcls._SubClses())
+        return sub_clses
+    
+    @classmethod
+    def _ClsName(cls):
+        return get_comfy_name(cls)
+    
+    @staticmethod
+    def FindHiddenClsByName(cls_name: str):
+        all_subclses = HIDDEN._SubClses()[1:]   # exclude the base class itself
+        for subcls in all_subclses:
+            if subcls._ClsName() == cls_name:
+                return subcls
+        return None
+    
+    @classmethod
+    @abstractmethod
     def GetValue(cls: Type[_HT], context: InferenceContext)->Optional[_HT]:   # type: ignore
         '''All hidden types should implement this method to get the real value from current inference context.'''
         raise NotImplementedError
 
-__all__ = ['get_comfy_name', 'ParameterType', 'AnnotatedParam', 'InferenceContext', 'ComfyType', 'HIDDEN']
+__all__ = ['get_comfy_name', 'NodeInputParamType', 'AnnotatedParam', 'InferenceContext', 'ComfyType', 'HIDDEN']
 
 
 # region basic types
@@ -804,27 +832,34 @@ class Lazy(Generic[_T]):
     
     _from_node_id: str = None   # type: ignore
     _from_slot: str = None  # type: ignore
+    _to_type_name: str = None
     
     @overload
-    def __init__(self, from_node_id: str, from_slot: int):
+    def __init__(self, from_node_id: str, from_slot: int, to_type: Union[type, str]):
         '''Create a lazy type from another node's output.'''
     @overload
     def __init__(self, value: _T):
         '''Create a lazy type from a real value.'''
     
     def __init__(self, *args):  # type: ignore
-        if len(args) not in (1, 2):
+        if len(args) not in (1, 3):
             raise ValueError(f'Invalid arguments: {args}. It should be `value` or `(from_node_id, from_slot)`.')
         if len(args) == 1:
             self._value = args[0]
         else:
-            self._from_node_id, self._from_slot = args
+            self._from_node_id, self._from_slot = args[0], args[1]
+            to_type = args[2]
+            if isinstance(to_type, type):
+                to_type_name = get_comfy_name(to_type)
+            else:
+                to_type_name = to_type
+            self._to_type_name = to_type_name
     
     def _get_value(self)->_T:   # type: ignore
         if self._value is None:
             if not self._from_node_id or not self._from_slot:
                 raise ValueError(f'Invalid lazy type: {self}. It should be created from another node.')
-            self._value = PromptExecutor.Instance._get_node_output(self._from_node_id, self._from_slot) # type: ignore
+            self._value = PromptExecutor.Instance._get_node_output(self._from_node_id, self._from_slot, self._to_type_name) # type: ignore
         return self._value
     
     @property
@@ -860,8 +895,11 @@ class _ComfyUINodeMeta(_ProtocolMeta):
     def __instancecheck__(cls, instance: Any) -> bool:
         if hasattr(instance, '__IS_COMFYUI_NODE__') and instance.__IS_COMFYUI_NODE__:
             return True
-        return super().__instancecheck__(instance)
-
+        return False
+    
+    def __subclasscheck__(cls, subclass: Type) -> bool:
+        return hasattr(subclass, '__IS_COMFYUI_NODE__') and subclass.__IS_COMFYUI_NODE__
+        
 @runtime_checkable
 class ComfyUINode(Protocol, metaclass=_ComfyUINodeMeta):
     '''
@@ -920,7 +958,7 @@ class ComfyUINode(Protocol, metaclass=_ComfyUINodeMeta):
     '''
 
     @classmethod
-    def INPUT_TYPES(cls) -> 'NodeInputDict':  # type: ignore
+    def INPUT_TYPES(cls) -> 'NodeInputParamDict':  # type: ignore
         '''All nodes for comfyUI should have this class method to define the input types.'''
     
     RETURN_TYPES: Tuple[str, ...]
@@ -942,11 +980,24 @@ __all__.extend(['ComfyUINode'])
 # endregion
 
 # region type aliases for comfyUI's origin codes
-NodeInputDict: TypeAlias = Dict[Literal['required', 'optional', 'hidden'], Dict[str, Any]]
-'''
-{input_type: {param_name: param_info, ...}, ...}
-The dictionary containing input params' information of a node.
-'''
+class NodeInputParamDict(Dict[NodeInputParamType, Dict[str, Tuple[str, dict]]]):        
+    '''
+    {input_type: {param_name: param_info, ...}, ...}
+    The dictionary containing input params' information of a node.
+    '''
+    
+    @property
+    def required_fields(self):
+        return self.get('required', {})
+    
+    @property
+    def optional_fields(self):
+        return self.get('optional', {})
+    
+    @property
+    def hidden_fields(self):
+        return self.get('hidden', {})
+    
 
 @singleton(cross_module_singleton=True)
 class NodePool(Dict[Union[str, Tuple[str, Union[str, Type[ComfyUINode]]]], ComfyUINode]):
@@ -964,7 +1015,7 @@ class NodePool(Dict[Union[str, Tuple[str, Union[str, Type[ComfyUINode]]]], Comfy
         '''Get the global instance of the node pool.'''
         return cls.__instance__  # type: ignore
     
-    def __setitem__(self, __key: Union[str, Tuple[str, Union[str, Type[ComfyUINode]]]], __value: ComfyUINode) -> None:
+    def __setitem__(self, __key: Union[int, str, Tuple[str, Union[str, Type[ComfyUINode]]]], __value: ComfyUINode) -> None:
         '''
         possible key:
             - node_id: the unique id of the node
@@ -975,15 +1026,17 @@ class NodePool(Dict[Union[str, Tuple[str, Union[str, Type[ComfyUINode]]]], Comfy
             if not len(__key) == 2:
                 raise ValueError(f'Invalid key: {__key}, it should be a tuple with 2 elements(node_id, node_cls_name or node_cls).' )
             key = __key[0]
+            if isinstance(key, int):
+                key = str(key)
             node_type_name = __key[1] if isinstance(__key[1], str) else __key[1].__qualname__
             if key in self and type(self[key]).__qualname__ != node_type_name:
                 raise ValueError(f'The node id {key} is already used by another node type {type(self[key]).__qualname__}.')
         else:
-            key = __key
+            key = str(__key) if isinstance(__key, int) else __key
             
         return super().__setitem__(key, __value)    
     
-    def __getitem__(self, __key: Union[str, Tuple[str, Union[str, Type[ComfyUINode]]]]) -> ComfyUINode:
+    def __getitem__(self, __key: Union[int, str, Tuple[str, Union[str, Type[ComfyUINode]]]]) -> ComfyUINode:
         '''
         possible key:
             - node_id: the unique id of the node
@@ -995,7 +1048,7 @@ class NodePool(Dict[Union[str, Tuple[str, Union[str, Type[ComfyUINode]]]], Comfy
         if isinstance(__key, tuple):
             if not len(__key) == 2:
                 raise ValueError(f'Invalid key: {__key}, it should be a tuple with 2 elements(node_id, node_cls_name or node_cls).' )
-            node_id = __key[0]
+            node_id = str(__key[0]) if isinstance(__key[0], int) else __key[0]
             node_type_name = __key[1] if isinstance(__key[1], str) else __key[1].__qualname__
             if node_id in self and type(self[node_id]).__qualname__ != node_type_name:
                 raise ValueError(f'The node id {node_id} is already used by another node type {type(self[node_id]).__qualname__}.')
@@ -1009,16 +1062,26 @@ class NodePool(Dict[Union[str, Tuple[str, Union[str, Type[ComfyUINode]]]], Comfy
                 # '__IS_COMFYUI_NODE__' should already be set in `nodes.py`
                 self[node_id] = node
         else:
-            node_id = __key
+            node_id = str(__key) if isinstance(__key, int) else __key
         
         return super().__getitem__(node_id)
     
-    def get_node(self, node_id: Union[str, int], node_cls: Union[str, type])->ComfyUINode:
+    @overload
+    def get_node(self, node_id: Union[str, int])->ComfyUINode:
+        '''Get the node instance by node_id.'''
+    
+    @overload
+    def get_node(self, node_id: Union[str, int], node_cls: Union[str, Type[ComfyUINode]])->ComfyUINode:
         '''
         Get the node instance by node_id and node_cls_name.
         If the node is not found, create a new one and return it.
         '''
-        return self[(node_id, node_cls)]   # type: ignore
+    
+    def get_node(self, node_id: Union[str, int], node_cls=None)->ComfyUINode:
+        if node_cls is None:
+            return self[node_id]    # type: ignore
+        else:
+            return self[(node_id, node_cls)]   # type: ignore
 
     class NodePoolKey(str):
         '''
@@ -1157,7 +1220,11 @@ class NodeInputs(Dict[str, Union[NodeBindingParam, Any]]):
         type_name = get_cls_name(value)
         return type_name == 'NodeInputs'
 
+class NodeOutputs(Tuple[]):
+    pass
+
 class NodeType(str):
+    '''Wrapper for ComfyUI's node name, i.e. class_def'''
     
     _real_cls: type = None
     
@@ -1185,6 +1252,9 @@ class NodeType(str):
         type_name = get_cls_name(value)
         return type_name == 'NodeType'
 
+
+_all_prompts: dict = GetOrCreateGlobalValue('_all_prompts', dict)
+@prevent_re_init
 class PROMPT(Dict[str, Dict[Literal['inputs', 'class_type', 'is_changed'], Any]], HIDDEN):
     '''
     {node_id: info_dict}
@@ -1205,10 +1275,27 @@ class PROMPT(Dict[str, Dict[Literal['inputs', 'class_type', 'is_changed'], Any]]
             if 'class_type' in node_info_dict:
                 if not NodeType.InstanceCheck(node_info_dict['class_type']):
                     node_info_dict['class_type'] = NodeType(node_info_dict['class_type']) 
-            
-    def __init__(self, *args, **kwargs):
+    
+    def __new__(cls, id, *args, **kwargs):
+        if id is not None and id in _all_prompts:
+            val = _all_prompts[id]
+        else:
+            val = super().__new__(cls)
+        return val
+    
+    def __init__(self, id:Optional[str], *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._id = id
         self._format_prompt() # tidy up types
+    
+    _id: Optional[str]
+    '''a unique random id generated by uuid4. This can be None, so as to compatible with old code.'''
+    
+    @property
+    def id(self)->str:
+        if not hasattr(self, 'id') or not self._id:
+            raise ValueError('The id of the prompt is not set. It should be set by the executor.')
+        return self._id
     
     @classmethod
     def GetValue(cls, context: InferenceContext):
@@ -1273,7 +1360,7 @@ class UNIQUE_ID(str, HIDDEN):
             return cur_node.ID  # type: ignore
         return None
 
-StatusMsg: TypeAlias = List[Tuple[str, Dict[str, Any]]]
+StatusMsgs: TypeAlias = List[Tuple[str, Dict[str, Any]]]
 '''
 The status message type for PromptExecutor.
 [(event, {msg_key: msg_value, ...}), ...]
@@ -1299,8 +1386,8 @@ Items:
 '''
 
 
-__all__.extend(['NodeInputDict', 'NodePool', 'NodeBindingParam', 'NodeInputs', 
+__all__.extend(['NodeInputParamDict', 'NodePool', 'NodeBindingParam', 'NodeInputs', 
                 'PROMPT', 'EXTRA_PNG_INFO', 'UNIQUE_ID', 
-                'StatusMsg', 'NodeOutputs_UI', 'NodeOutputs', 'QueueTask'])
+                'StatusMsgs', 'NodeOutputs_UI', 'NodeOutputs', 'QueueTask'])
 # endregion
 

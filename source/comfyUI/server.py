@@ -527,9 +527,10 @@ class PromptServer:
                 self.number += 1
 
             if "prompt" in json_data:
+                prompt_id = str(uuid.uuid4())
                 prompt = json_data["prompt"]
                 import execution
-                valid = execution.validate_prompt(prompt)   
+                valid = execution.validate_prompt(prompt, prompt_id)   
                 # valid = (is_valid:bool, error: dict, good_outputs: list, node_errors: dict)
                 
                 extra_data = {}
@@ -539,7 +540,6 @@ class PromptServer:
                 if "client_id" in json_data:
                     extra_data["client_id"] = json_data["client_id"]
                 if valid.result:
-                    prompt_id = str(uuid.uuid4())
                     outputs_to_execute = valid.good_outputs
                     self.prompt_queue.put((number, prompt_id, valid.formatted_prompt, extra_data, outputs_to_execute))
                     response = {"prompt_id": prompt_id, "number": number, "node_errors": valid[3]}

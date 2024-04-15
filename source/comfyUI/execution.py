@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import nodes
 import comfy.model_management
 
+from common_utils.debug_utils import ComfyUILogger, get_log_level_by_name
 from common_utils.decorators import singleton, class_property
 from comfyUI.types import *
 from comfyUI.adapters import find_adapter, Adapter
@@ -22,7 +23,18 @@ from comfyUI.adapters import find_adapter, Adapter
 if TYPE_CHECKING:
     from comfyUI.server import PromptServer
 
-
+def _get_comfy_node_input_type_name(node_type: Type[ComfyUINode], input_name: str)->str:
+    if not isinstance(node_type, type):
+        node_type = node_type.__class__
+    input_param_dict = node_type.INPUT_TYPES()
+    all_input_params = {}
+    all_input_params.update(input_param_dict.get("required", {}))
+    all_input_params.update(input_param_dict.get("optional", {}))
+    all_input_params.update(input_param_dict.get("hidden", {}))
+    if input_name not in all_input_params:
+        raise ValueError(f"Input name {input_name} not found in node {node_type}.")
+    return all_input_params[input_name][0]
+    
 def _get_input_data(inputs: NodeInputs, 
                     class_def: Type[ComfyUINode], 
                     unique_id: str, 
@@ -38,6 +50,11 @@ def _get_input_data(inputs: NodeInputs,
             * a value
         - class_def: the class of the node
         - unique_id: the id of this node
+        - outputs: {node_id: [output1, output2, ...], ...}
+        - prompt: the prompt dict
+    
+    Returns:
+        a dict of {param name: value}. !Values from node bindings are not resolved yet!
     '''
     valid_inputs = class_def.INPUT_TYPES()
     lazy_inputs = class_def.LAZY_INPUTS if hasattr(class_def, "LAZY_INPUTS") else []
@@ -51,7 +68,7 @@ def _get_input_data(inputs: NodeInputs,
             output_slot_index = input_data[1]
             
             if input_param_name in lazy_inputs:
-                val = Lazy(from_node_id, output_slot_index)
+                val = Lazy(from_node_id, output_slot_index, _get_comfy_node_input_type_name(class_def, input_param_name))
             elif from_node_id not in outputs:
                 val = (None,)
             else:
@@ -96,6 +113,10 @@ def _get_input_data(inputs: NodeInputs,
                     input_data_all[input_param_name] = [extra_data['extra_pnginfo']]
             if h[input_param_name] == "UNIQUE_ID":
                 input_data_all[input_param_name] = [unique_id]
+            elif hidden_cls := HIDDEN.FindHiddenClsByName(h[input_param_name]): # type: ignore
+                node = NodePool().get_node(unique_id)
+                context = InferenceContext(prompt, extra_data, node)
+                input_data_all[input_param_name] = [hidden_cls.GetValue(context)]
             else:
                 try_put_hidden_value(input_param_name)
     return input_data_all
@@ -156,11 +177,13 @@ def _format_value(x):
 
 class RecursiveExecuteResult(NamedTuple):
     success: bool
+    '''whether the execution is successful or not'''
     error_details: Optional[dict]
     exception: Optional[Exception]
 
 @singleton(cross_module_singleton=True)
 class PromptExecutor:
+    '''The executor for running inference.'''
     
     server: Optional['PromptServer']
     '''The server that this executor is associated with. If None, the executor'''
@@ -169,18 +192,24 @@ class PromptExecutor:
     Pool of all created nodes
     {node_id: node_instance, ...}
     '''
-    old_prompt: PROMPT
-    '''old prompt'''
+    
+    # runtime data
+    prompt: Optional[PROMPT]
+    '''latest prompt(running/executed)'''
+    extra_data: Optional[dict] = None
+    '''latest extra data(running/executed)'''
+    executed_node_ids: Set[str] = set()
+    '''set of node ids that have been executed. This variable will be cleared after each execution.'''
     outputs_ui: NodeOutputs_UI
-    '''outputs for UI'''
+    '''latest UI outputs from nodes(running/executed)'''
     outputs: NodeOutputs
-    '''outputs for the prompt'''
-    status_messages: StatusMsg
+    '''latest outputs from nodes(running/executed)'''
+    status_messages: StatusMsgs = []
     '''status messages'''
     success: bool
     '''whether the execution is successful or not'''
-    
-    @class_property
+ 
+    @class_property # type: ignore
     def Instance(cls)->'PromptExecutor':
         return cls()    # type: ignore
     
@@ -188,7 +217,7 @@ class PromptExecutor:
         self.server = server
         self.reset()
     
-    def _get_output_data(self, node: ComfyUINode, input_data_all)->Tuple[List[Any], Dict[str, Any]]:
+    def _get_output_data(self, node: ComfyUINode, input_data_all: dict, save_to_current_output=True)->Tuple[List[Any], Dict[str, Any]]:
         '''
         Get the output data of the given node.
         
@@ -229,9 +258,11 @@ class PromptExecutor:
                     output.append([x for o in results for x in o[i]])
                 else:
                     output.append([o[i] for o in results])
-
+        
+        if save_to_current_output:
+            self.outputs[node.ID] = output
         return output, uis
-
+        
     def _recursive_will_execute(self, prompt: PROMPT, current_node_id, memo={}):
         outputs = self.outputs
         unique_id = current_node_id
@@ -255,17 +286,27 @@ class PromptExecutor:
         memo[unique_id] = will_execute + [unique_id]
         return memo[unique_id]
     
-    def _get_node_output(self, node_id: str, slot_index: int):
+    def _get_node_output(self, node_id: str, slot_index: int, to_type_name: str):
         '''special method for "Lazy" type values, to get the real value from a binding'''
-        pass
-    
-    def _recursive_execute(self,
-                           prompt: PROMPT, 
-                           current_node_id: str, 
-                           extra_data, 
-                           executed: Set[str],   # set of node ids that have been executed 
-                           prompt_id: str,   # just a random string by uuid4
-                           )->RecursiveExecuteResult:
+        node_type = self.node_pool.get_node(node_id).__class__
+        from_val_type = node_type.RETURN_TYPES[slot_index]
+        
+        if hasattr(self, 'outputs') and self.outputs and node_id in self.outputs:
+            val = self.outputs[node_id][slot_index]
+        else:
+            self._recursive_execute(node_id)    # continue execution
+            val = self.outputs[node_id][slot_index]
+            
+        if adapter := find_adapter(from_val_type, to_type_name):
+            val = adapter(val)
+        return val
+        
+    def _recursive_execute(self, current_node_id: str)->RecursiveExecuteResult:
+        if not self.prompt:
+            raise ValueError("Prompt is not set.")
+        prompt = self.prompt
+        extra_data = self.extra_data
+        executed = self.executed_node_ids
         inputs = prompt[current_node_id]['inputs']
         class_type = prompt[current_node_id]['class_type']
         class_def = nodes.NODE_CLASS_MAPPINGS[class_type]
@@ -280,12 +321,8 @@ class PromptExecutor:
                 node_id = input_data[0]
                 output_slot_index = input_data[1]
                 if node_id not in self.outputs:
-                    result = self._recursive_execute(prompt, 
-                                                    node_id, 
-                                                    extra_data, 
-                                                    executed,
-                                                    prompt_id)
-                    if result[0] is not True:
+                    result = self._recursive_execute(node_id)
+                    if result.success is not True:
                         # Another node failed further upstream
                         return result
 
@@ -300,20 +337,19 @@ class PromptExecutor:
             if self.server:
                 if self.server.client_id is not None:
                     self.server.last_node_id = current_node_id
-                    self.server.send_sync("executing",
-                                        { "node": current_node_id, "prompt_id": prompt_id }, 
-                                        self.server.client_id)
+                    self.server.send_sync("executing", 
+                                          {"node": current_node_id, "prompt_id": prompt.id if prompt else None}, 
+                                          self.server.client_id)
 
             node = self.get_node(current_node_id, class_type)
 
-            output_data, output_ui = self._get_output_data(node, input_data_all)
-            self.outputs[current_node_id] = output_data
+            output_data, output_ui = self._get_output_data(node, input_data_all, save_to_current_output=True)
             if len(output_ui) > 0:
                 self.outputs_ui[current_node_id] = output_ui
                 if self.server:
                     if self.server.client_id is not None:
                         self.server.send_sync("executed", 
-                                              { "node": current_node_id, "output": output_ui, "prompt_id": prompt_id }, 
+                                              { "node": current_node_id, "output": output_ui, "prompt_id": prompt.id }, 
                                               self.server.client_id)
         
         except comfy.model_management.InterruptProcessingException as iex:
@@ -356,10 +392,10 @@ class PromptExecutor:
 
         return RecursiveExecuteResult(True, None, None)
 
-    def _recursive_output_delete_if_changed(self, 
-                                            prompt: PROMPT, 
-                                            current_node_id: str):
-        old_prompt = self.old_prompt
+    def _recursive_output_delete_if_changed(self, prompt: PROMPT, current_node_id: str):
+        old_prompt = prompt
+        if not old_prompt:
+            return True
         outputs = self.outputs
         unique_id = current_node_id
         inputs = prompt[unique_id]['inputs']
@@ -415,25 +451,29 @@ class PromptExecutor:
 
     def reset(self):
         self.node_pool = NodePool()
-        
         self.outputs_ui = {}
         self.outputs = {}
-        
-        self.status_messages = []
-        
+        self.status_messages.clear()
         self.success = True
-        
-        self.old_prompt = PROMPT()
-        
+        self.prompt = None
+        self.extra_data = None
+        self.executed_node_ids.clear()
+    
     def get_node(self, node_id:str, class_type_name: str)->ComfyUINode:
         '''Return the target node from the pool, or create a new one if not found.'''
         return self.node_pool.get_node(node_id, class_type_name)
     
-    def add_message(self, event, data: dict, broadcast: bool):
+    def add_message(self, 
+                    event: str, 
+                    data: dict, 
+                    broadcast: bool, 
+                    level: Literal['debug', 'info', 'warning', 'error', 'critical', 'success']='info'):
         self.status_messages.append((event, data))
         if self.server:
             if self.server.client_id is not None or broadcast:
                 self.server.send_sync(event, data, self.server.client_id)
+        else:
+            ComfyUILogger.log(get_log_level_by_name(level), f"Comfy Execution Msg: {event}, {data}")
 
     def handle_execution_error(self, prompt_id, prompt, current_outputs, executed, error, ex):
         node_id = error["node_id"]
@@ -448,7 +488,7 @@ class PromptExecutor:
                 "node_type": class_type,
                 "executed": list(executed),
             }
-            self.add_message("execution_interrupted", mes, broadcast=True)
+            self.add_message("execution_interrupted", mes, broadcast=True, level="warning")
         else:
             mes = {
                 "prompt_id": prompt_id,
@@ -462,15 +502,15 @@ class PromptExecutor:
                 "current_inputs": error["current_inputs"],
                 "current_outputs": error["current_outputs"],
             }
-            self.add_message("execution_error", mes, broadcast=False)
+            self.add_message("execution_error", mes, broadcast=False, level="error")
         
         # Next, remove the subsequent outputs since they will not be executed
         to_delete = []
         for o in self.outputs:
             if (o not in current_outputs) and (o not in executed):
                 to_delete += [o]
-                if o in self.old_prompt:
-                    d = self.old_prompt.pop(o)
+                if self.prompt and o in self.prompt:
+                    d = self.prompt.pop(o)
                     del d
         for o in to_delete:
             d = self.outputs.pop(o)
@@ -481,22 +521,24 @@ class PromptExecutor:
                 prompt_id: Optional[str]=None, # random string by uuid4 
                 extra_data={}, 
                 execute_outputs=[]):
-        if not isinstance(prompt, PROMPT):
-            prompt = PROMPT(prompt)
-        
         if prompt_id is None:
             prompt_id = str(uuid.uuid4())
-        
-        nodes.interrupt_processing(False)
-
+        if not isinstance(prompt, PROMPT):
+            prompt = PROMPT(prompt_id, prompt)
+        # init data for starting execution
+        self.prompt = prompt
+        self.extra_data = extra_data
+        self.executed_node_ids.clear()
+        self.status_messages.clear()
         if self.server:
             if "client_id" in extra_data:
                 self.server.client_id = extra_data["client_id"]
             else:
                 self.server.client_id = None
-
-        self.status_messages = []
-        self.add_message("execution_start", { "prompt_id": prompt_id}, broadcast=False)
+        
+        nodes.interrupt_processing(False)
+        
+        self.add_message("execution_start", { "prompt_id": prompt_id}, broadcast=False, level="info")
 
         with torch.inference_mode():
             #delete cached outputs if nodes don't exist for them
@@ -530,8 +572,10 @@ class PromptExecutor:
                     del d
 
             comfy.model_management.cleanup_models()
-            self.add_message("execution_cached", { "nodes": list(current_outputs) , "prompt_id": prompt_id}, broadcast=False)
-            executed = set()
+            self.add_message("execution_cached", 
+                             {"nodes": list(current_outputs), "prompt_id": prompt_id}, 
+                             broadcast=False,
+                             level="info")
             output_node_id = None
             to_execute = []
 
@@ -547,17 +591,13 @@ class PromptExecutor:
                 # This call shouldn't raise anything if there's an error deep in
                 # the actual SD code, instead it will report the node where the
                 # error was raised
-                self.success, error, ex = self._recursive_execute(prompt,  
-                                                                output_node_id, 
-                                                                extra_data, 
-                                                                executed, 
-                                                                prompt_id,)
+                self.success, error, ex = self._recursive_execute(output_node_id)
                 if self.success is not True:
-                    self.handle_execution_error(prompt_id, prompt, current_outputs, executed, error, ex)
+                    self.handle_execution_error(prompt_id, prompt, current_outputs, self.executed_node_ids, error, ex)
                     break
 
-            for x in executed:
-                self.old_prompt[x] = copy.deepcopy(prompt[x])
+            for x in self.executed_node_ids:
+                self.prompt[x] = copy.deepcopy(prompt[x])
                 
             if self.server:
                 self.server.last_node_id = None
@@ -835,13 +875,15 @@ class ValidatePromptResult:
     
     _prompt: dict
     '''The real input prompt, a dictionary (converted from json)'''
+    _prompt_id: Optional[str] = None
+    '''unique id of the prompt, a random string by uuid4. This can be None to make it compatible with old comfyUI codes.'''
     _formatted_prompt: PROMPT = None     # type: ignore
     '''The properly formatted prompt, in `PROMPT` type'''
     
     @property
     def formatted_prompt(self):
         if not self._formatted_prompt:
-            self._formatted_prompt = PROMPT(self._prompt)
+            self._formatted_prompt = PROMPT(self._prompt_id, self._prompt)
         return self._formatted_prompt
     
     def __getitem__(self, item: int):
@@ -858,7 +900,7 @@ class ValidatePromptResult:
         if item == 4:
             return self.formatted_prompt
             
-def validate_prompt(prompt: PROMPT) -> ValidatePromptResult:
+def validate_prompt(prompt: PROMPT, prompt_id: Optional[str]=None) -> ValidatePromptResult:
     outputs = set()
     for x in prompt:
         class_ = nodes.NODE_CLASS_MAPPINGS[prompt[x]['class_type']]
@@ -872,7 +914,7 @@ def validate_prompt(prompt: PROMPT) -> ValidatePromptResult:
             "details": "",
             "extra_info": {}
         }
-        return ValidatePromptResult(result=False, errors=error, good_outputs=[], node_errors={}, _prompt=prompt)
+        return ValidatePromptResult(result=False, errors=error, good_outputs=[], node_errors={}, _prompt=prompt, _prompt_id=prompt_id)
 
     good_outputs = set()
     errors = []
@@ -943,9 +985,19 @@ def validate_prompt(prompt: PROMPT) -> ValidatePromptResult:
             "extra_info": {}
         }
 
-        return ValidatePromptResult(result=False, errors=error, good_outputs=list(good_outputs), node_errors=node_errors, _prompt=prompt)
+        return ValidatePromptResult(result=False, 
+                                    errors=error, 
+                                    good_outputs=list(good_outputs), 
+                                    node_errors=node_errors, 
+                                    _prompt=prompt,
+                                    _prompt_id=prompt_id)
 
-    return ValidatePromptResult(result=True, errors=None, good_outputs=list(good_outputs), node_errors=node_errors, _prompt=prompt)
+    return ValidatePromptResult(result=True, 
+                                errors=None, 
+                                good_outputs=list(good_outputs), 
+                                node_errors=node_errors, 
+                                _prompt=prompt,
+                                _prompt_id=prompt_id)
 
 MAXIMUM_HISTORY_SIZE = 10000
 
@@ -983,7 +1035,7 @@ class PromptQueue:
     class ExecutionStatus(NamedTuple):
         status_str: Literal['success', 'error']
         completed: bool
-        messages: StatusMsg
+        messages: StatusMsgs
 
     def task_done(self, 
                   item_id, 
