@@ -386,9 +386,18 @@ class AnnotatedParam(metaclass=_NameCheckCls):
         Return the comfy type name(or list of value for COMBO type) for this param.
         For internal use only.
         '''
+<<<<<<< HEAD
         if self.comfy_name:
             return self.comfy_name
-        return _get_comfy_type_definition(self.origin_type, self.inner_type)
+        return _get_comfy_type_definition(self.origin_type, self.inner_type) # type: ignore
+=======
+        if self.comfy_type_name:
+            return self.comfy_type_name
+        
+        if not self.origin_type:
+            raise ValueError('The comfy_type_name is not specified and the origin_type is not specified either.')
+        return _get_comfy_type_definition(self.origin_type)
+>>>>>>> parent of ca58cd6 (Implement RGBA2RGB, RGBAThreshold)
 
     @property
     def _comfy_name(self)->str:
