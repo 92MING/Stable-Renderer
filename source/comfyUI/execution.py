@@ -524,7 +524,7 @@ class PromptExecutor:
         if prompt_id is None:
             prompt_id = str(uuid.uuid4())
         if not isinstance(prompt, PROMPT):
-            prompt = PROMPT(prompt_id, prompt)
+            prompt = PROMPT(prompt, id=prompt_id)
         # init data for starting execution
         self.prompt = prompt
         self.extra_data = extra_data
@@ -883,7 +883,7 @@ class ValidatePromptResult:
     @property
     def formatted_prompt(self):
         if not self._formatted_prompt:
-            self._formatted_prompt = PROMPT(self._prompt_id, self._prompt)
+            self._formatted_prompt = PROMPT(self._prompt, id=self._prompt_id)
         return self._formatted_prompt
     
     def __getitem__(self, item: int):
