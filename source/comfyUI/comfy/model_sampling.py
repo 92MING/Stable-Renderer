@@ -1,6 +1,8 @@
 import torch
-from comfy.ldm.modules.diffusionmodules.util import make_beta_schedule
 import math
+from typing import Protocol
+from comfy.ldm.modules.diffusionmodules.util import make_beta_schedule
+
 
 class EPS:
     def calculate_input(self, sigma, noise):
@@ -31,7 +33,42 @@ class EDM(V_PREDICTION):
         return model_input * self.sigma_data ** 2 / (sigma ** 2 + self.sigma_data ** 2) + model_output * sigma * self.sigma_data / (sigma ** 2 + self.sigma_data ** 2) ** 0.5
 
 
-class ModelSamplingDiscrete(torch.nn.Module):
+class ModelSamplingProtocol(Protocol):
+    """
+    A protocol for sampling models, which should be implemented by all sampling models.
+    Sigma values refer to the noise scale in the diffusion sampling process.
+    
+    Note: Sampling models here are similar to Schedulers in Diffusers
+    """
+    @property
+    def sigma_min(self):
+        pass
+
+    @property
+    def sigma_max(self):
+        pass
+
+    def timestep(self, sigma):
+        """
+        This function should return the timestep corresponding to the given sigma.
+        """
+        pass
+
+    def sigma(self, timestep):
+        """
+        This function should return the sigma corresponding to the given timestep.
+        """
+        pass
+
+    def percent_to_sigma(self, percent):
+        """
+        This function should return the sigma corresponding to the given percentage.
+        """
+        pass
+
+
+
+class ModelSamplingDiscrete(torch.nn.Module, ModelSamplingProtocol):
     def __init__(self, model_config=None):
         super().__init__()
 
@@ -102,7 +139,7 @@ class ModelSamplingDiscrete(torch.nn.Module):
         return self.sigma(torch.tensor(percent * 999.0)).item()
 
 
-class ModelSamplingContinuousEDM(torch.nn.Module):
+class ModelSamplingContinuousEDM(torch.nn.Module, ModelSamplingProtocol):
     def __init__(self, model_config=None):
         super().__init__()
         if model_config is not None:
@@ -146,7 +183,7 @@ class ModelSamplingContinuousEDM(torch.nn.Module):
         log_sigma_min = math.log(self.sigma_min)
         return math.exp((math.log(self.sigma_max) - log_sigma_min) * percent + log_sigma_min)
 
-class StableCascadeSampling(ModelSamplingDiscrete):
+class StableCascadeSampling(ModelSamplingDiscrete, ModelSamplingProtocol):
     def __init__(self, model_config=None):
         super().__init__()
 
