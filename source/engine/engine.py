@@ -1,13 +1,15 @@
 import glfw
 import numpy as np
+np.set_printoptions(suppress=True)
 import OpenGL.GL as gl
 import OpenGL.GLU as glu
 
-from colorama import Fore, Style
 from enum import Enum
 from typing import Optional, Literal
+from inspect import signature
 
-from common_utils.global_utils import *
+from common_utils.debug_utils import EngineLogger
+from common_utils.global_utils import GetOrAddGlobalValue, GetOrCreateGlobalValue, SetGlobalValue
 from common_utils.decorators import class_or_ins_property, prevent_re_init 
 from common_utils.data_struct import Event
 from .managers import *
@@ -16,19 +18,32 @@ from .static import Color
 
 
 class EngineStage(Enum):
-    NOT_YET_START = 0
-    PREPARE = 1
-    FRAME_BEGIN = 2
-    FRAME_RUN = 3
-    FRAME_END = 4
-    RELEASE = 5
+    INIT = 0
+    
+    BEFORE_PREPARE = 1
+    AFTER_PREPARE = 2
+    
+    BEFORE_FRAME_BEGIN = 3
+    BEFORE_FRAME_RUN = 4
+    BEFORE_FRAME_END = 5
+    
+    BEFORE_RELEASE = 6
+    
+    BEFORE_PAUSE = 7
+    PAUSE = 8
+    
+    ENDED = 9
+    
+    @staticmethod
+    def PreparingStages():
+        return (EngineStage.BEFORE_PREPARE, EngineStage.AFTER_PREPARE)
+    
+    @staticmethod
+    def RunningStages():
+        return (EngineStage.BEFORE_FRAME_BEGIN, EngineStage.BEFORE_FRAME_RUN, EngineStage.BEFORE_FRAME_END )
 
-np.set_printoptions(suppress=True)
-
-_EngineInstance: Optional['Engine'] = GetOrAddGlobalValue("_ENGINE_SINGLETON", None)
-
-_OnBeforeStart = Event()
-_OnBeforeEnd = Event()
+_EngineInstance: Optional['Engine'] = GetOrAddGlobalValue("_ENGINE_SINGLETON", None)    # type: ignore
+_OnEngineStageChanged: Event = GetOrCreateGlobalValue("_ON_ENGINE_STAGE_CHANGED", Event, EngineStage)
 
 @prevent_re_init
 class Engine:
@@ -36,21 +51,13 @@ class Engine:
     The base class of engine. You can inherit this class to create your own engine.
     Create and run the engine by calling `Engine.Run()`. It will create a singleton instance of the engine and run it.
     '''
-
-    @class_or_ins_property
-    def OnBeforeStart(cls_or_self)->Event:
-        return _OnBeforeStart
     
-    @class_or_ins_property
-    def OnBeforeEnd(cls_or_self)->Event:
-        return _OnBeforeEnd
-    
-    @class_or_ins_property
-    def IsRunning(cls_or_self)->bool:
-        '''Whether the engine is in running stage(FrameBegin, FrameRun, FrameEnd).'''
+    @class_or_ins_property  # type: ignore
+    def IsLooping(cls_or_self)->bool:
+        '''Whether the engine is within running stage(FrameBegin, FrameRun, FrameEnd).'''
         if not _EngineInstance:
             return False
-        return _EngineInstance._stage in (EngineStage.FRAME_BEGIN, EngineStage.FRAME_RUN, EngineStage.FRAME_END)
+        return _EngineInstance._stage in EngineStage.RunningStages()
     
     def __new__(cls, *args, **kwargs):
         global _EngineInstance
@@ -80,18 +87,18 @@ class Engine:
                  contrast=1.0,
                  debug=False,
                  needOutputMaps=False,
-                 mapMinimizeRatio = 64,
                  maxFrameCacheCount=24,
                  mapSavingInterval=12,
                  threadPoolSize=6,
                  target_device: Optional[int]=None,
-                 running_mode: Literal['game', 'editor']='game'):
+                 running_mode: Literal['game', 'editor']='game',
+                 **kwargs):
 
-        self.AcceptedPrint('Engine is initializing...')
+        EngineLogger.info('Engine is initializing...')
         self._UBO_Binding_Points = {}
         self._debug = debug
         self._scene = scene
-        self._running_mode: Literal['game', 'editor'] = running_mode.lower()
+        self._running_mode: Literal['game', 'editor'] = running_mode.lower()    # type: ignore
         if winTitle is not None:
             title = winTitle
         elif self._scene is not None:
@@ -100,9 +107,17 @@ class Engine:
             title = 'Stable Renderer'
 
         # region managers
-        self._windowManager = WindowManager(title, winSize, windowResizable, bgColor)
-        self._inputManager = InputManager(self._windowManager.Window)
-        self._runtimeManager = RuntimeManager()
+        def find_kwargs_for_manager(manager):
+            init_sig = signature(manager.__init__)
+            found_args = {}
+            for arg_name, arg in kwargs.items():
+                if arg_name in init_sig.parameters:
+                    found_args[arg_name] = arg  # will not pop from kwargs, i.e. when managers have same arg name, it will be passed to all of them
+            return found_args
+            
+        self._windowManager = WindowManager(title, winSize, windowResizable, bgColor, **find_kwargs_for_manager(WindowManager))
+        self._inputManager = InputManager(self._windowManager.Window, **find_kwargs_for_manager(InputManager))
+        self._runtimeManager = RuntimeManager(**find_kwargs_for_manager(RuntimeManager))
         self._renderManager = RenderManager(enableHDR=enableHDR, 
                                             enableGammaCorrection=enableGammaCorrection, 
                                             gamma=gamma, 
@@ -110,18 +125,20 @@ class Engine:
                                             saturation=saturation, 
                                             brightness=brightness, 
                                             contrast=contrast,
-                                            target_device=target_device)
+                                            target_device=target_device,
+                                            **find_kwargs_for_manager(RenderManager))
         self._diffusionManager = DiffusionManager(needOutputMaps=needOutputMaps,
                                            maxFrameCacheCount=maxFrameCacheCount,
                                            mapSavingInterval=mapSavingInterval,
                                            threadPoolSize=threadPoolSize,
-                                           mapMinimizeRatio=mapMinimizeRatio)
-        self._sceneManager = SceneManager(self._scene)
-        self._resourceManager = ResourcesManager()
+                                             **find_kwargs_for_manager(DiffusionManager))
+        self._sceneManager = SceneManager(self._scene, **find_kwargs_for_manager(SceneManager))
+        self._resourceManager = ResourcesManager(**find_kwargs_for_manager(ResourcesManager))
         
         # endregion
         
-        self._stage = EngineStage.NOT_YET_START
+        self._stage = EngineStage.INIT
+        _OnEngineStageChanged.invoke(self._stage)
         
     @property
     def RunningMode(self)->Literal['game', 'editor']:
@@ -131,6 +148,13 @@ class Engine:
     @property
     def Stage(self)->EngineStage:
         return self._stage
+    
+    @Stage.setter
+    def Stage(self, value:EngineStage):
+        if value == self._stage:
+            return
+        self._stage = value
+        _OnEngineStageChanged.invoke(value)
 
     # region debug
     @property
@@ -145,31 +169,8 @@ class Engine:
         try:
             gl.glGetError() # nothing to do with error, just clear error flag
         except Exception as e:
-            print('GL ERROR: ', glu.gluErrorString(e))
+            EngineLogger.error('GL ERROR: ', glu.gluErrorString(e))
             
-    def WarningPrint(self, *args, **kwargs):
-        '''Print as yellow and bold text.'''
-        print(Fore.YELLOW + Style.BRIGHT, end='')
-        print(*args, **kwargs)
-        print(Style.RESET_ALL, end='')
-    
-    def ErrorPrint(self, *args, **kwargs):
-        '''Print as red and bold text.'''
-        print(Fore.RED + Style.BRIGHT, end='')
-        print(*args, **kwargs)
-        print(Style.RESET_ALL, end='')
-    
-    def InfoPrint(self, *args, **kwargs):
-        '''Print as blue and bold text.'''
-        print(Fore.BLUE + Style.BRIGHT, end='')
-        print(*args, **kwargs)
-        print(Style.RESET_ALL, end='')
-    
-    def AcceptedPrint(self, *args, **kwargs):
-        '''Print as green and bold text.'''
-        print(Fore.GREEN + Style.BRIGHT, end='')
-        print(*args, **kwargs)
-        print(Style.RESET_ALL, end='')
     # endregion
 
     # region managers
@@ -221,38 +222,47 @@ class Engine:
     def afterRelease(self):...
     # endregion
 
-    def run(self):
-        self.OnBeforeStart.invoke()
+    def Pause(self):
+        raise NotImplementedError # TODO
+    
+    def Continue(self):
+        raise NotImplementedError # TODO
+    
+    def run(self):        
+        EngineLogger.info('Engine Preparing...')
         
-        self.AcceptedPrint('Engine Preparing...')
-        
+        self.Stage = EngineStage.BEFORE_PREPARE
         self.beforePrepare()
         Manager._RunPrepare()  # prepare work, mainly for sceneManager to build scene, load resources, etc.
         self.afterPrepare()
+        self.Stage = EngineStage.AFTER_PREPARE
 
-        self.AcceptedPrint('Engine Preparation Done.')
-        self.AcceptedPrint('Engine Start Running...')
+        EngineLogger.info('Engine Preparation Done. Start Running...')
         while not glfw.window_should_close(self.WindowManager.Window):
-
+            
+            self.Stage = EngineStage.BEFORE_FRAME_BEGIN
             self.beforeFrameBegin()
             Manager._RunFrameBegin()  # input events / clear buffers / etc.
 
+            self.Stage = EngineStage.BEFORE_FRAME_RUN
             self.beforeFrameRun()
             Manager._RunFrameRun() # update gameobjs, components / render / ... etc.
 
+            self.Stage = EngineStage.BEFORE_FRAME_END
             self.beforeFrameEnd()
             Manager._RunFrameEnd() #  swap buffers / time count / etc.
 
-        self.AcceptedPrint('Engine is ending...')
-        self.AcceptedPrint('Releasing Resources...')
+        EngineLogger.info('Engine loop Ended. Releasing Resources...')
+        
+        self.Stage = EngineStage.BEFORE_RELEASE
         self.beforeRelease()
+        
         Manager._RunRelease()
         self.afterRelease()
         
-        self.OnBeforeEnd.invoke()
+        EngineLogger.success('Engine is ended.')
+        self.Stage = EngineStage.ENDED
         
-        self.AcceptedPrint('Engine is ended.')
-
     @classmethod
     def Run(cls, *args, **kwargs):
         global _EngineInstance

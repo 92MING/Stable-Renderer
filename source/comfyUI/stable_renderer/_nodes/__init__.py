@@ -1,3 +1,8 @@
+'''
+Nodes for stable-renderer.
+This modules is named with name `_nodes` to avoid conflict with `nodes.py` in `comfyUI` package.
+'''
+
 from .node_base import NodeBase
 
 from .maths import *

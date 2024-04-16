@@ -154,21 +154,21 @@ def get_log_level_by_name(name:str)->int:
     '''Get log level by name'''
     return getattr(logging, name.upper())
 
-EngineEditorLogger: _SuccessLogger = _logger_modify(logging.getLogger("Engine.Editor"))
-'''Logger which is active during editor mode. Will be ignore in release mode.'''
+EditorLogger: _SuccessLogger = _logger_modify(logging.getLogger("Engine.Editor"))
+'''Logger for editor(UI). It will be ignore in some modes, e.g. release mode'''
 
-EngineRuntimeLogger: _SuccessLogger = _logger_modify(logging.getLogger("Engine.Runtime"))
-'''Logger is active during runtime. It will not be ignore in any mode.'''
+EngineLogger: _SuccessLogger = _logger_modify(logging.getLogger("Engine.Runtime"))
+'''Logger for rendering engine. It will only be ignore when u are running the ComfyUI directly.'''
 
 ComfyUILogger: _SuccessLogger = _logger_modify(logging.getLogger("Engine.ComfyUI"))
 '''Logger specifically for comfyUI'''
 
-EngineEditorLogger.setLevel(_log_level)
-EngineRuntimeLogger.setLevel(_log_level)
+EditorLogger.setLevel(_log_level)
+EngineLogger.setLevel(_log_level)
 ComfyUILogger.setLevel(_log_level)
 
 DefaultLogger: _SuccessLogger = _logger_modify(_root_logger)
 '''Default logger. You can use it for any purpose.'''
 
 
-__all__ = ['get_log_level_by_name', 'EngineEditorLogger', 'EngineRuntimeLogger', 'ComfyUILogger', 'DefaultLogger']
+__all__ = ['get_log_level_by_name', 'EditorLogger', 'EngineLogger', 'ComfyUILogger', 'DefaultLogger']

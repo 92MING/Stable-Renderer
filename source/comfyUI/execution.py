@@ -22,6 +22,7 @@ from comfyUI.adapters import find_adapter, Adapter
 
 if TYPE_CHECKING:
     from comfyUI.server import PromptServer
+    from engine.runtime.frame_data import EngineFrameData
 
 def _get_comfy_node_input_type_name(node_type: Type[ComfyUINode], input_name: str)->str:
     if not isinstance(node_type, type):
@@ -196,6 +197,8 @@ class PromptExecutor:
     # runtime data
     prompt: Optional[PROMPT]
     '''latest prompt(running/executed)'''
+    engine_frame_data: Optional['EngineFrameData'] = None
+    '''runtime data on each frame of stable-renderer engine.'''
     extra_data: Optional[dict] = None
     '''latest extra data(running/executed)'''
     executed_node_ids: Set[str] = set()
@@ -520,7 +523,8 @@ class PromptExecutor:
                 prompt: Union[PROMPT, dict], 
                 prompt_id: Optional[str]=None, # random string by uuid4 
                 extra_data={}, 
-                execute_outputs=[]):
+                execute_outputs=[],
+                frame_data: Optional['EngineFrameData']= None):
         if prompt_id is None:
             prompt_id = str(uuid.uuid4())
         if not isinstance(prompt, PROMPT):
@@ -530,6 +534,7 @@ class PromptExecutor:
         self.extra_data = extra_data
         self.executed_node_ids.clear()
         self.status_messages.clear()
+        self.engine_frame_data = frame_data
         if self.server:
             if "client_id" in extra_data:
                 self.server.client_id = extra_data["client_id"]

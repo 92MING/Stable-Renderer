@@ -408,29 +408,30 @@ export class ComfyUI {
 
 		this.menuContainer = $el("div.comfy-menu", { parent: document.body }, [
 			$el("div.drag-handle.comfy-menu-header", {
-				style: {
-					overflow: "hidden",
-					position: "relative",
-					width: "100%",
-					cursor: "default"
-				}
-			}, 	[
-				$el("span.drag-handle"),
-				$el("span.comfy-menu-queue-size", { $: (q) => (this.queueSize = q) }),
-				$el("div.comfy-menu-actions", [
-					$el("button.comfy-settings-btn", {
-						textContent: "⚙️",
-						onclick: () => this.settings.show(),
-					}),
-					$el("button.comfy-close-menu-btn", {
-						textContent: "\u00d7",
-						onclick: () => {
-							this.menuContainer.style.display = "none";
-							this.menuHamburger.style.display = "flex";
-						},
-					}),
-				]),
-			]),
+						style: {
+							overflow: "hidden",
+							position: "relative",
+							width: "100%",
+							cursor: "default"
+						}
+					},
+	[	$el("span.drag-handle"),
+						$el("span.comfy-menu-queue-size", { $: (q) => (this.queueSize = q) }),
+						$el("div.comfy-menu-actions", [
+							$el("button.comfy-settings-btn", {
+								textContent: "⚙️",
+								onclick: () => this.settings.show(),
+							}),
+							$el("button.comfy-close-menu-btn", {
+								textContent: "\u00d7",
+								onclick: () => {
+									this.menuContainer.style.display = "none";
+									this.menuHamburger.style.display = "flex";
+								},
+							}),
+						]),
+					]
+			),
 			$el("button.comfy-queue-btn", {
 				id: "queue-button",
 				textContent: "Queue Prompt",
@@ -587,6 +588,14 @@ export class ComfyUI {
 				id: "comfy-refresh-button",
 				textContent: "Refresh",
 				onclick: () => app.refreshComboInNodes()
+			}),
+			$el("button", {id: 
+				"comfy-reload-button", 
+				textContent: "Reload", 
+				onclick: async () => {
+					await app.reload();
+					app.refreshComboInNodes();
+				}
 			}),
 			$el("button", {id: "comfy-clipspace-button", textContent: "Clipspace", onclick: () => app.openClipspace()}),
 			$el("button", {

@@ -8,10 +8,11 @@ import urllib
 import json
 import glob
 import struct
+import importlib
+import importlib.util
 import aiohttp
 import asyncio
 
-import nodes
 import folder_paths
 import comfy.utils
 import comfy.model_management
@@ -25,7 +26,7 @@ from asyncio.events import AbstractEventLoop
 from aiohttp import web
 
 from common_utils.decorators import singleton, class_or_ins_property
-from common_utils.global_utils import GetOrCreateGlobalValue
+from common_utils.global_utils import GetOrCreateGlobalValue, SetGlobalValue
 from common_utils.debug_utils import ComfyUILogger
 from comfy.cli_args import args
 from app.user_manager import UserManager
@@ -33,6 +34,20 @@ from app.user_manager import UserManager
 if TYPE_CHECKING:
     from execution import PromptQueue
 
+nodes_py_path = os.path.join(os.path.dirname(__file__), 'nodes.py')
+nodes_module_spec = importlib.util.spec_from_file_location('nodes', nodes_py_path)  # type: ignore
+nodes = importlib.util.module_from_spec(nodes_module_spec)  # type: ignore
+nodes_module_spec.loader.exec_module(nodes)  # type: ignore
+
+def reload_nodes():
+    ComfyUILogger.debug('Reloading nodes...')
+    SetGlobalValue("__COMFYUI_CUSTOM_NODES_INITED__", False)
+    SetGlobalValue("__COMFYUI_NODE_CLASS_MAPPINGS__", None)
+    SetGlobalValue("__COMFYUI_NODE_DISPLAY_NAME_MAPPINGS__", None)
+    SetGlobalValue("__COMFYUI_EXTENSION_WEB_DIRS__", None)
+    nodes_module_spec.loader.exec_module(nodes)  # type: ignore
+    nodes.init_custom_nodes(reload_mode=True)
+    ComfyUILogger.debug('Nodes reloaded.')
 
 class BinaryEventTypes:
     PREVIEW_IMAGE = 1
@@ -593,6 +608,17 @@ class PromptServer:
 
             return web.Response(status=200)
         
+        @routes.get('/reload')
+        async def reload(request):
+            '''reload comfyUI system, e.g. nodes, ...'''
+            try:
+                reload_nodes()
+                return web.Response(status=200)
+            except Exception as e:
+                ComfyUILogger.warning(f"[ERROR] An error occurred while reloading the system.")
+                traceback.print_exc()
+                return web.Response(status=500)
+            
     def add_routes(self):
         self.user_manager.add_routes(self.routes)
         self.app.add_routes(self.routes)

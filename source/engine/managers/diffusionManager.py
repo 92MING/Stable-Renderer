@@ -1,21 +1,22 @@
 import os.path
 import numpy as np
-import glm
 import multiprocessing
-
+from typing import TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
 from common_utils.path_utils import *
 from .manager import Manager
 from engine.static import Workflow
-
+if TYPE_CHECKING:
+    from comfyUI.execution import PromptExecutor
 
 class DiffusionManager(Manager):
     
+    _prompt_executor: 'PromptExecutor'
+    
     def __init__(self,
                  needOutputMaps=False,
-                 mapMinimizeRatio=64,
                  maxFrameCacheCount=24,
                  mapSavingInterval=12,
                  threadPoolSize=None,):
@@ -27,7 +28,6 @@ class DiffusionManager(Manager):
         '''
         super().__init__()
         self._needOutputMaps = needOutputMaps
-        self._mapMinimizeRatio = mapMinimizeRatio
         self._maxFrameCacheCount = maxFrameCacheCount
         self._mapSavingInterval = mapSavingInterval
 
@@ -35,33 +35,17 @@ class DiffusionManager(Manager):
             threadPoolSize = multiprocessing.cpu_count()
         self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize) # for saving maps asynchronously
         self._outputPath = get_new_map_output_dir(create_if_not_exists=False)
-
         self._init_comfyUI()
     
     # region comfyUI
     def _init_comfyUI(self):
-        return
-        from comfyUI.main import execute_prestartup_script
-        execute_prestartup_script()
+        from comfyUI.main import run
+        self._prompt_executor = run()   # will detect whether it should create web server or not automatically
         
-        if self.engine.RunningMode == 'game':   # game mode will not start web server
-            from comfyUI.execution import PromptExecutor
-        else:
-            raise NotImplementedError
     
     # endregion
     
     # region properties
-    @property
-    def MapMinimizeRatio(self)->int:
-        return self._mapMinimizeRatio
-    
-    @MapMinimizeRatio.setter
-    def MapMinimizeRatio(self, value:int):
-        '''Ratio should be a perfect square'''
-        assert (value > 0 and glm.sqrt(value) == int(glm.sqrt(value))), 'MapMinimizeRatio must be a perfect square'
-        self._mapMinimizeRatio = value
-        
     @property
     def ShouldOutputFrame(self):
         '''Return if the current frame's map data should be output to disk'''

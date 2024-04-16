@@ -92,14 +92,19 @@ def GetEnv(key: str, default: Optional[T] = None, type: Type[T] = str)->Optional
     except TypeError:
         return default
 
+def is_engine_looping()->bool:
+    '''Indicates whether the engine is within rendering loop.'''
+    if not (engine := GetGlobalValue('_ENGINE_SINGLETON', None)):
+        return False
+    return engine.IsLooping
+    
 def is_game_mode()->bool:
     '''
     Game mode means the engine should be ran without editor window.
-    
     Default is True.
     '''
     if 'GAME_MODE' in os.environ:
-        mode: bool = GetEnv('GAME_MODE', False, bool)
+        mode: bool = GetEnv('GAME_MODE', False, bool)   # type: ignore
         if not mode:
             if 'EDITOR_MODE' in os.environ:
                 return not GetEnv('EDITOR_MODE', False, bool)
@@ -107,6 +112,10 @@ def is_game_mode()->bool:
     elif 'EDITOR_MODE' in os.environ:
         return not GetEnv('EDITOR_MODE', False, bool)
     return True # default is game mode
+
+def is_game_editor_mode():
+    '''indicate whether engine is running within rendering loop under editor mode.'''
+    return is_editor_mode() and is_engine_looping()
 
 def should_run_web_server()->bool:
     '''Indicates whether the comfyUI's web server should be started.'''
@@ -155,7 +164,8 @@ def is_dev_mode():
     '''
     return not is_release_mode()
 
-__all__ = ['GetEnv', 'should_run_web_server', 'is_game_mode', 'is_editor_mode', 'is_release_mode', 'is_dev_mode']
+__all__ = ['GetEnv', 'should_run_web_server', 'is_game_mode', 'is_editor_mode', 'is_release_mode', 'is_dev_mode',
+           'is_engine_looping', 'is_game_editor_mode']
 # endregion
 
 # region global values

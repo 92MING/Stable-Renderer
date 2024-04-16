@@ -10,7 +10,7 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 from deprecated import deprecated
 
-from common_utils.global_utils import GetOrCreateGlobalValue
+from common_utils.global_utils import GetOrCreateGlobalValue, is_engine_looping
 from common_utils.type_utils import valueTypeCheck, get_cls_name
 from common_utils.decorators import singleton, class_property, class_or_ins_property, prevent_re_init
 from comfy.samplers import KSampler
@@ -20,8 +20,8 @@ from comfy.model_base import BaseModel
 
 if TYPE_CHECKING:
     from comfyUI.execution import PromptExecutor
-    from comfyUI.stable_renderer.nodes.node_base import NodeBase
-
+    from comfyUI.stable_renderer._nodes.node_base import NodeBase
+    from engine.runtime.frame_data import EngineFrameData
 
 _T = TypeVar('_T')
 _HT = TypeVar('_HT', bound='HIDDEN')
@@ -445,12 +445,7 @@ class InferenceContext:
         '''The prompt executor instance.'''
         from comfyUI.execution import PromptExecutor
         return PromptExecutor() # since the PromptExecutor is a singleton, it is safe to create a new instance here
-    
-    @property
-    def prompt_id(self)->str:
-        '''The prompt id for current execution.'''
-        return self.prompt.id
-    
+
     prompt: 'PROMPT'
     '''The prompt of current execution. It is a dict containing all nodes' input for execution.'''
     extra_data: dict
@@ -465,6 +460,18 @@ class InferenceContext:
         self.prompt = current_prompt
         self.extra_data = extra_data
         self.current_node = current_node
+
+    @property
+    def prompt_id(self)->str:
+        '''The prompt id for current execution.'''
+        return self.prompt.id   # type: ignore
+    
+    @property
+    def engine_frame_data(self)->'EngineFrameData':
+        '''The engine frame data for current execution.'''
+        if not is_engine_looping():
+            raise ValueError('Cannot get engine frame data outside engine loop.')
+        return self._executor.engine_frame_data # type: ignore
        
     @property
     def node_pool(self)-> 'NodePool':
@@ -1354,7 +1361,9 @@ class UNIQUE_ID(str, HIDDEN):
             return cur_node.ID  # type: ignore
         return None
 
-StatusMsgs: TypeAlias = List[Tuple[str, Dict[str, Any]]]
+StatusMsgEvent: TypeAlias = Literal['status', 'progress', 'executing', 'executed', 'execution_start', 'execution_error', 'execution_cached']
+'''The status message event type for PromptExecutor. See source/comfyUI/web/scripts/api.js'''
+StatusMsgs: TypeAlias = List[Tuple[StatusMsgEvent, Dict[str, Any]]]
 '''
 The status message type for PromptExecutor.
 [(event, {msg_key: msg_value, ...}), ...]

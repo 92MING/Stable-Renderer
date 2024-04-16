@@ -2252,6 +2252,21 @@ export class ComfyApp {
 		this.lastExecutionError = null;
 		this.runningNodeId = null;
 	}
+
+	/**
+	 * reload comfy's system and refresh workflow.
+	 */
+	async reload() {
+		this.ui.dialog.show("Reloading...");
+		let resp = await api.fetchApi('/reload');
+		if (resp.status == 200) {
+			window.location.reload();
+			this.ui.dialog.show("<b style='color: green;'>Reloaded successfully</b>");
+		}
+		else {
+			this.ui.dialog.show("<b style='color: red;'>Failed to reload</b>");
+		}
+	}
 }
 
 export const app = new ComfyApp();

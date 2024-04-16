@@ -17,7 +17,29 @@ from typing import (Any, Sequence, Union, ForwardRef, get_args as tp_get_args, g
                     Iterable, Mapping, Literal, TypeAlias, Tuple, _SpecialForm, Type)
 from types import UnionType
 from inspect import getmro, signature
-from typeguard import check_type as tg_check_type, TypeCheckError
+
+from typeguard import check_type as tg_check_type
+try:
+    from typeguard import TypeCheckError    # type: ignore
+except ImportError: # version problem
+    TypeCheckError = TypeError
+    
+_tg_check_type_params = signature(tg_check_type).parameters
+_tg_check_type_required_param_count = sum(1 for p in _tg_check_type_params.values() if p.default == _empty)
+def _wrapped_tg_check_type(val, t):
+    if _tg_check_type_required_param_count >= 3:
+        try:
+            tg_check_type("", val, t)
+            return True
+        except TypeCheckError:
+            return False
+    else:
+        try:
+            tg_check_type(val, t)   # type: ignore
+            return True
+        except TypeCheckError:
+            return False
+    
 from functools import cache
 from pathlib import Path
 
@@ -113,13 +135,13 @@ def valueTypeCheck(value:Any, types: Union[str, type, TypeAlias, Sequence[Union[
                         and all(valueTypeCheck(k, get_args(types)[0]) for k in value.keys()))
             else:
                 try:
-                    tg_check_type(value, types)
+                    _wrapped_tg_check_type(value, types)
                     return True
                 except (TypeError, TypeCheckError):
                     return False
         else:
             try:
-                tg_check_type(value, types)
+                _wrapped_tg_check_type(value, types)
                 return True
             except (TypeError, TypeCheckError):
                 return False

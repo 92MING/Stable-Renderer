@@ -69,8 +69,6 @@ import threading
 import gc
 import yaml
 
-from typing import Union
-
 import server
 import execution
 import nodes
@@ -80,12 +78,8 @@ import comfy.model_management
 
 from comfy.cli_args import args
 
-def run()->Union[execution.PromptExecutor, None]:
-    '''
-    Run comfyUI.
-    
-    When game_mode, it will return the prompt_executor.
-    '''
+def run()->execution.PromptExecutor:
+    '''Run comfyUI and return the prompt executor.'''
     
     if args.cuda_device is not None:
         os.environ['CUDA_VISIBLE_DEVICES'] = str(args.cuda_device)
@@ -278,9 +272,8 @@ def run()->Union[execution.PromptExecutor, None]:
             ComfyUILogger.success("Server Stopped")
             
         cleanup_temp()
-    
-    else:
-        return prompt_executor
+
+    return prompt_executor
 
 if __name__ == '__main__':
     run()

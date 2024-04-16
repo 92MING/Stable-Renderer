@@ -8,15 +8,15 @@ import math
 import time
 import random
 import importlib
-
-from PIL import Image, ImageOps, ImageSequence
-from PIL.PngImagePlugin import PngInfo
+import importlib.util
 import numpy as np
 import safetensors.torch
 
-from typing import Dict, Type, TYPE_CHECKING
+from PIL import Image, ImageOps, ImageSequence
+from PIL.PngImagePlugin import PngInfo
+from typing import Dict, Type, TYPE_CHECKING, Optional
 
-from common_utils.global_utils import GetGlobalValue, SetGlobalValue, is_dev_mode
+from common_utils.global_utils import GetGlobalValue, SetGlobalValue, is_dev_mode, GetOrAddGlobalValue
 from common_utils.debug_utils import ComfyUILogger
 
 sys.path.insert(2, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
@@ -1901,13 +1901,13 @@ def _load_custom_node(module_path, ignore=set(), raise_err=False):
         module_name = sp[0]
     try:
         if os.path.isfile(module_path):
-            module_spec = importlib.util.spec_from_file_location(module_name, module_path)
+            module_spec = importlib.util.spec_from_file_location(module_name, module_path)  # type: ignore
             module_dir = os.path.split(module_path)[0]
         else:
-            module_spec = importlib.util.spec_from_file_location(module_name, os.path.join(module_path, "__init__.py"))
+            module_spec = importlib.util.spec_from_file_location(module_name, os.path.join(module_path, "__init__.py"))  # type: ignore
             module_dir = module_path
 
-        module = importlib.util.module_from_spec(module_spec)
+        module = importlib.util.module_from_spec(module_spec)  # type: ignore
         sys.modules[module_name] = module
         module_spec.loader.exec_module(module)
 
@@ -1937,7 +1937,7 @@ def _load_custom_node(module_path, ignore=set(), raise_err=False):
         else:
             raise e
             
-def load_custom_nodes():
+def load_custom_nodes(reload_mode=False):
     '''
     Load all custom nodes from:
         - the stable_renderer/nodes folder
@@ -1958,7 +1958,7 @@ def load_custom_nodes():
             if os.path.isfile(module_path) and os.path.splitext(module_path)[1] != ".py": continue
             if module_path.endswith(".disabled"): continue
             time_before = time.perf_counter()
-            success = _load_custom_node(module_path, base_node_names)
+            success = _load_custom_node(module_path, base_node_names, raise_err=reload_mode)
             node_import_times.append((time.perf_counter() - time_before, module_path, success))
 
     if len(node_import_times) > 0:
@@ -1972,8 +1972,8 @@ def load_custom_nodes():
     
     ComfyUILogger.debug('loading stable-renderer nodes...')
     
-    stable_renderer_nodes_path = os.path.join(folder_paths.base_path, 'stable_renderer', 'nodes')
-    raise_err = is_dev_mode()
+    stable_renderer_nodes_path = os.path.join(folder_paths.base_path, 'stable_renderer', '_nodes')
+    raise_err = reload_mode
     success = _load_custom_node(stable_renderer_nodes_path, raise_err=raise_err)
 
     if not success:
@@ -1983,7 +1983,10 @@ def load_custom_nodes():
 
     _init_node_clses()
 
-def init_custom_nodes():
+
+def init_custom_nodes(reload_mode=False):
+    if GetOrAddGlobalValue("__COMFYUI_CUSTOM_NODES_INITED__", False):
+        return
     extras_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy_extras")
     extras_files = [
         "nodes_latent.py",
@@ -2017,10 +2020,10 @@ def init_custom_nodes():
 
     import_failed = []
     for node_file in extras_files:
-        if not _load_custom_node(os.path.join(extras_dir, node_file)):
+        if not _load_custom_node(os.path.join(extras_dir, node_file), raise_err=reload_mode):
             import_failed.append(node_file)
 
-    load_custom_nodes()
+    load_custom_nodes(reload_mode=reload_mode)
 
     if len(import_failed) > 0:
         ComfyUILogger.warning("WARNING: some comfy_extras/ nodes did not import correctly. This may be because they are missing some dependencies.\n")
@@ -2031,3 +2034,9 @@ def init_custom_nodes():
             ComfyUILogger.info("Please run the update script: update/update_comfyui.bat")
         else:
             ComfyUILogger.info("Please do a: pip install -r requirements.txt")
+    SetGlobalValue("__COMFYUI_CUSTOM_NODES_INITED__", True)
+
+def get_node_cls_by_name(node_name: str) -> Optional[Type['ComfyUINode']]:
+    if not GetOrAddGlobalValue("__COMFYUI_CUSTOM_NODES_INITED__", False):
+        init_custom_nodes()
+    return NODE_CLASS_MAPPINGS.get(node_name)
