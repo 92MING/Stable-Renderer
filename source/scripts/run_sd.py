@@ -12,16 +12,16 @@ config = RunPipeConfig(
         controlnet_loose_depth_model= None,
         
         prompt='a luxury golden boat',
-        specific_timesteps=[139, 279, 499],
-        # num_inference_steps = 10,
+        # specific_timesteps=[139, 279, 499],
+        num_inference_steps = 10,
         
         overlap_end_value=0.2,
         corrmap_merge_len=8,
         guidance_scale = 1.5,
-        img2img_strength=0.8,
+        img2img_strength=0,
         kernel_radius_end_value=1,
         kernel_radius_start_value=2,
-        num_frames=1, 
+        num_frames=8, 
         
         enable_ancestral_sampling=False,
         disable_ancestral_at_last=True,
@@ -30,6 +30,8 @@ config = RunPipeConfig(
         do_controlnet=False,
         do_overlapping=False, 
         do_img2img=False,
+
+        use_lcm_lora=False,
     )
 
 
