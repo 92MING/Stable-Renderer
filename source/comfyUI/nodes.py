@@ -19,7 +19,7 @@ from typing import (
     Type, TYPE_CHECKING
 )
 
-from common_utils.global_utils import GetGlobalValue, SetGlobalValue, is_dev_mode, GetOrAddGlobalValue
+from common_utils.global_utils import GetGlobalValue, SetGlobalValue, GetOrAddGlobalValue
 from common_utils.debug_utils import ComfyUILogger
 
 sys.path.insert(2, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
@@ -62,7 +62,7 @@ class CLIPTextEncode:
 
     CATEGORY = "conditioning"
 
-    def encode(self, clip, text):
+    def encode(self, clip: 'CLIP', text: str):
         tokens = clip.tokenize(text)
         cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
         return ([[cond, {"pooled_output": pooled}]], )
@@ -76,7 +76,7 @@ class ConditioningCombine:
 
     CATEGORY = "conditioning"
 
-    def combine(self, conditioning_1, conditioning_2):
+    def combine(self, conditioning_1: 'Conditioning', conditioning_2: 'Conditioning'):
         return (conditioning_1 + conditioning_2, )
 
 class ConditioningAverage :
@@ -294,7 +294,7 @@ class VAEDecode:
 
     CATEGORY = "latent"
 
-    def decode(self, vae, samples):
+    def decode(self, vae: 'VAE', samples):
         return (vae.decode(samples["samples"]), )
 
 class VAEDecodeTiled:
@@ -308,7 +308,7 @@ class VAEDecodeTiled:
 
     CATEGORY = "_for_testing"
 
-    def decode(self, vae, samples, tile_size):
+    def decode(self, vae: 'VAE', samples, tile_size):
         return (vae.decode_tiled(samples["samples"], tile_x=tile_size // 8, tile_y=tile_size // 8, ), )
 
 class VAEEncode:
@@ -320,7 +320,7 @@ class VAEEncode:
 
     CATEGORY = "latent"
 
-    def encode(self, vae, pixels):
+    def encode(self, vae: 'VAE', pixels):
         t = vae.encode(pixels[:,:,:,:3])
         return ({"samples":t}, )
 
@@ -335,7 +335,7 @@ class VAEEncodeTiled:
 
     CATEGORY = "_for_testing"
 
-    def encode(self, vae, pixels, tile_size):
+    def encode(self, vae: 'VAE', pixels, tile_size):
         t = vae.encode_tiled(pixels[:,:,:,:3], tile_x=tile_size, tile_y=tile_size, )
         return ({"samples":t}, )
 
@@ -348,7 +348,7 @@ class VAEEncodeForInpaint:
 
     CATEGORY = "latent/inpaint"
 
-    def encode(self, vae, pixels, mask, grow_mask_by=6):
+    def encode(self, vae: 'VAE', pixels, mask, grow_mask_by=6):
         x = (pixels.shape[1] // vae.downscale_ratio) * vae.downscale_ratio
         y = (pixels.shape[2] // vae.downscale_ratio) * vae.downscale_ratio
         mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(pixels.shape[1], pixels.shape[2]), mode="bilinear")
@@ -395,7 +395,7 @@ class InpaintModelConditioning:
 
     CATEGORY = "conditioning/inpaint"
 
-    def encode(self, positive, negative, pixels, vae, mask):
+    def encode(self, positive, negative, pixels, vae: 'VAE', mask):
         x = (pixels.shape[1] // 8) * 8
         y = (pixels.shape[2] // 8) * 8
         mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(pixels.shape[1], pixels.shape[2]), mode="bilinear")

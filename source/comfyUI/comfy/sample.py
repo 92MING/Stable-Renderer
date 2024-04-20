@@ -4,7 +4,7 @@ import numpy as np
 
 from typing import List, Tuple, Optional, Dict, Any
 from comfyUI.types import CONDITIONING as Conditioning, ConvertedConditioning
-
+from common_utils.debug_utils import ComfyUILogger
 import comfy.model_management
 import comfy.model_patcher
 import comfy.samplers
@@ -157,7 +157,7 @@ def sample(model: comfy.model_patcher.ModelPatcher,
            **kwargs
 ) -> torch.Tensor:
     if "callback" in kwargs:
-        print("Warning: 'callback' is deprecated, use 'callbacks' instead")
+        ComfyUILogger.warn("Warning: 'callback' is deprecated, use 'callbacks' instead")
         legacy_callback = kwargs.pop("callback")
         callbacks.append(legacy_callback)
 
