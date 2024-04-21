@@ -62,7 +62,9 @@ class Mesh_OBJ(Mesh):
         currMatName = None
         if not os.path.exists(path):
             raise FileNotFoundError(f'File "{path}" not found')
-        mesh_data_lines = [line.strip('\n') for line in open(path, 'r').readlines()]
+        with open(path, 'r') as f:
+            data_lines = f.readlines()
+        mesh_data_lines = [line.strip('\n') for line in data_lines]
         for line in tqdm(mesh_data_lines, desc=f'Loading Mesh-"{self.name}"'):
             if line.startswith('#'): continue
             if line.startswith('v'): temp_points.extend(map(float, line.split(' ')[1:4]))

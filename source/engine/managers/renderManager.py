@@ -8,6 +8,7 @@ import pycuda.driver as cuda_driver
 from functools import partial
 from typing import Union, Optional, Callable
 from common_utils.cuda_utils import *
+from common_utils.global_utils import is_dev_mode
 from common_utils.data_struct.event import AutoSortTask
 from .manager import Manager
 from .runtimeManager import RuntimeManager
@@ -88,6 +89,8 @@ class RenderManager(Manager):
     # region cuda
     def _init_cuda(self):
         target_device = self.TargetDevice
+        if is_dev_mode():
+            cuda_driver.set_debugging()
         cuda_driver.init()
         self._cuda_device = cuda_driver.Device(target_device)
         self._cuda_context = self._cuda_device.make_context()
@@ -574,6 +577,7 @@ class RenderManager(Manager):
             diffuseManager.OutputNumpyData('pos', posData)
             diffuseManager.OutputNumpyData('noise', noiseData)
             diffuseManager.OutputDepthMap(depthData)
+            diffuseManager.OutputCannyMap(colorData)
         
         # get data back from SD
         # TODO: load the color data back to self._gBuffer_color_and_depth_texture texture, i.e. colorData = ...

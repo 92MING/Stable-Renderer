@@ -1,6 +1,8 @@
 // this is a debug vs for direct output to the screen
 #version 430 core
-layout (std140) uniform Runtime {
+#define RUNTIME_UBO_BINDING 0
+
+layout (std140, binding=RUNTIME_UBO_BINDING) uniform Runtime {
 	mat4 model;
 	mat4 view;
 	mat4 projection;
@@ -10,7 +12,10 @@ layout (std140) uniform Runtime {
 	mat4 MV_IT; // inverse transpose of MV
 	vec3 cameraPos;
 	vec3 cameraDir;
+	vec2 cameraNearFar;	// x=near, y=far
+	float cameraFov;
 };
+
 layout (location = 0) in vec3 pos;
 layout (location = 1) in vec3 normal;
 layout (location = 2) in vec2 texcoord;

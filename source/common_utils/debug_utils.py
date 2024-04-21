@@ -1,9 +1,11 @@
-import os, sys
+import os
+import sys
 import logging
+import signal
 import colorama
 import warnings
 
-from typing import ClassVar
+from typing import ClassVar, Union
 from functools import partial
 from concurrent_log_handler import ConcurrentTimedRotatingFileHandler as _RotatingFileHandler
 
@@ -137,16 +139,25 @@ _root_handler.setLevel(_log_level)
 
 _root_logger.handlers = [_root_handler, ]
 
-class _SuccessLogger(logging.Logger):
+class _ModifiedLogger(logging.Logger):
     '''just a type hint for logger with success method.'''
     def success(self, msg, *args, **kwargs): ...
     
-def _log_success(self, message: str, *args, **kws):
+    def print(self, *args, level:Union[str, int]=logging.INFO, sep:str=" "): ...
+    
+def _log_success(self: logging.Logger, message: str, *args, **kws):
     if self.isEnabledFor(logging.SUCCESS):  # type: ignore
         self._log(logging.SUCCESS, message, args, **kws)    # type: ignore
 
-def _logger_modify(logger: logging.Logger)->_SuccessLogger:
+def _log_print(self: logging.Logger, *args, level:Union[str, int]=logging.INFO, sep:str=" "):
+    if isinstance(level, str):
+        level = get_log_level_by_name(level)
+    if self.isEnabledFor(level):  # type: ignore
+        self._log(level, sep.join(map(str, args)), (), {})    # type: ignore
+    
+def _logger_modify(logger: logging.Logger)->_ModifiedLogger:
     logger.success = partial(_log_success, logger)  # type: ignore
+    logger.print = partial(_log_print, logger)  # type: ignore
     return logger   # type: ignore
 # endregion
 
@@ -154,20 +165,20 @@ def get_log_level_by_name(name:str)->int:
     '''Get log level by name'''
     return getattr(logging, name.upper())
 
-EditorLogger: _SuccessLogger = _logger_modify(logging.getLogger("Engine.Editor"))
+EditorLogger: _ModifiedLogger = _logger_modify(logging.getLogger("Engine.Editor"))
 '''Logger for editor(UI). It will be ignore in some modes, e.g. release mode'''
 
-EngineLogger: _SuccessLogger = _logger_modify(logging.getLogger("Engine.Runtime"))
+EngineLogger: _ModifiedLogger = _logger_modify(logging.getLogger("Engine.Runtime"))
 '''Logger for rendering engine. It will only be ignore when u are running the ComfyUI directly.'''
 
-ComfyUILogger: _SuccessLogger = _logger_modify(logging.getLogger("Engine.ComfyUI"))
+ComfyUILogger: _ModifiedLogger = _logger_modify(logging.getLogger("Engine.ComfyUI"))
 '''Logger specifically for comfyUI'''
 
 EditorLogger.setLevel(_log_level)
 EngineLogger.setLevel(_log_level)
 ComfyUILogger.setLevel(_log_level)
 
-DefaultLogger: _SuccessLogger = _logger_modify(_root_logger)
+DefaultLogger: _ModifiedLogger = _logger_modify(_root_logger)
 '''Default logger. You can use it for any purpose.'''
 
 

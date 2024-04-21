@@ -4,6 +4,7 @@ from multiprocessing import Process
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QWidget, QApplication, QMainWindow
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from common_utils.debug_utils import EditorLogger
 import requests
 
 if __name__ == '__main__':
@@ -22,7 +23,7 @@ def test_comfyUI_started(port=8188, timeout: float=1)->bool:
     return False
     
 def start_comfyUI(timeout=12):
-    print('starting ComfyUI...')
+    EditorLogger.print('starting ComfyUI...')
     
     # from comfyUI.comfy.main import main
     #process = Process(target=main)
@@ -40,7 +41,7 @@ class PipelineEditor(QWebEngineView):
         self.show()
 
     def closeEvent(self, event):
-        print("terminating comfyUI process...")
+        EditorLogger.print("terminating comfyUI process...")
         #self.comfyUI_process.terminate()
         event.accept()
 

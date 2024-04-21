@@ -122,7 +122,7 @@ def singleton(cross_module_singleton: bool=True)->Callable[[ClsT], ClsT]:   # ty
     This is helpful when the import relationship is complex.
     '''
 
-_cross_module_cls_dict = GetOrCreateGlobalValue('__CROSS_MODULE_CLASS_DICT__', dict)
+_cross_module_cls_dict = GetOrCreateGlobalValue('__CROSS_MODULE_CLASS_DICT__', dict)    # same name as the dict of `CrossModuleClass`
 
 def _singleton(cls: ClsT, cross_module_singleton:bool=False)->ClsT:
     '''
@@ -171,7 +171,7 @@ def singleton(*args, **kwargs)->Union[ClsT, Callable[[ClsT], ClsT]]:  # type: ig
     if isinstance(arg, bool):
         return lambda cls: _singleton(cls, arg)
     else:
-        return _singleton(arg)
+        return _singleton(arg)  #  type: ignore
 
 
 __all__.extend(['prevent_re_init', 'singleton'])
