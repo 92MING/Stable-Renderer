@@ -1,7 +1,7 @@
 # *-* coding: utf-8 *-*
 '''The base class for texture'''
-
 import os
+import sys
 import OpenGL.GL as gl
 import OpenGL.error
 import numpy as np
@@ -22,6 +22,7 @@ from ..resourcesObj import ResourcesObj
 from ..enums import *
 from ..color import Color
 from common_utils.decorators import Overload
+from common_utils.debug_utils import EngineLogger
 from common_utils.cuda_utils import *
 
 from typing import TYPE_CHECKING, Union, Optional, Final, Literal
@@ -316,7 +317,7 @@ class Texture(ResourcesObj):
     def load(self, path: Union[str, Path]): # type: ignore
         '''Load the image on the given path by PIL.'''
         assert not self._cleared, 'This texture has been cleared.'
-        print('Loading texture by path:', path, '...')
+        EngineLogger.debug('Loading texture by path:' + str(path) + '...')
         image = Image.open(path).convert(self.format.PIL_convert_mode)
         self._data = image.transpose(Image.FLIP_TOP_BOTTOM).tobytes()
         self._height = image.height
@@ -327,7 +328,7 @@ class Texture(ResourcesObj):
     def load(self, array: np.ndarray):
         '''Load by numpy array'''
         assert not self._cleared, 'This texture has been cleared.'
-        print('Loading texture by numpy array...')
+        EngineLogger.debug('Loading texture by numpy array...')
         self._data = array.tobytes()
         self._width = array.shape[1]
         self._height = array.shape[0]
@@ -336,7 +337,7 @@ class Texture(ResourcesObj):
     def load(self, data: bytes, width: int, height: int):
         '''Load by bytes directly'''
         assert not self._cleared, 'This texture has been cleared.'
-        print('Loading texture by bytes...')
+        EngineLogger.debug('Loading texture by bytes...')
         self._data = data
         self._width = width
         self._height = height
@@ -345,7 +346,7 @@ class Texture(ResourcesObj):
     def load(self, image: ImageType):
         '''Load by PIL image'''
         assert not self._cleared, 'This texture has been cleared.'
-        print('Loading texture by PIL image...')
+        EngineLogger.debug('Loading texture by PIL image...')
         self._data = image.transpose(Image.FLIP_TOP_BOTTOM).tobytes()
         self._height = image.height
         self._width = image.width
@@ -359,21 +360,22 @@ class Texture(ResourcesObj):
     def _init_tensor(self):
         '''The tensor of the texture. It could be None if the texture is not shared to torch.'''
         assert not self._cleared, 'This texture has been cleared.'
-        assert self._share_to_torch, 'This texture is not shared to torch.'
+        assert self._share_to_torch, 'This texture is not set to be sharing to torch.'
         assert self._texID is not None, 'This texture is not yet sent to GPU.'
         
-        if self._tensor is not None:    
-            pass
+        self._support_gl_share_to_torch = False # temporarily set to False here
+        return
         
-        self._tensor = torch.zeros((self.height, self.width, self.channel_count), 
-                                dtype=self.data_type.value.torch_dtype, 
-                                device=f"cuda:{self.engine.RenderManager.TargetDevice}")
+        if self._tensor is None:
+            self._tensor = torch.zeros((self.height, self.width, self.channel_count), 
+                                        dtype=self.data_type.value.torch_dtype, 
+                                        device=f"cuda")
         try:
             self._cuda_buffer = pycuda.gl.RegisteredImage(int(self.textureID), 
-                                                        int(gl.GL_TEXTURE_2D), 
-                                                        pycuda.gl.graphics_map_flags.NONE)
-        except pycuda._driver.Error:
-            print('Warning: failed to register image. The hardware does not support gl share to torch. Data will be copied from CPU on each frame.')
+                                                         int(gl.GL_TEXTURE_2D), 
+                                                         pycuda.gl.graphics_map_flags.NONE)
+        except:
+            EngineLogger.warn('Warning: failed to register image. Error: {}'.format(sys.exc_info()[0]))
             self._support_gl_share_to_torch = False
         
         if self.support_gl_share_to_torch:
@@ -445,7 +447,7 @@ class Texture(ResourcesObj):
         if not data:
             data = np.zeros((self.height, self.width, self.format.channel_count), 
                             dtype=self.data_type.value.numpy_dtype).tobytes()
-            
+        
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 
                         0, 
                         self.internal_format.value.gl_internal_format,
@@ -455,7 +457,7 @@ class Texture(ResourcesObj):
                         self.format.value.gl_format, 
                         self.data_type.value.gl_data_type,
                         data)  # data can be None, its ok
-
+        
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, self.s_wrap.value)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, self.t_wrap.value)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, self.mag_filter.value)
@@ -467,7 +469,7 @@ class Texture(ResourcesObj):
         if (self.mag_filter in (TextureFilter.LINEAR_MIPMAP_LINEAR, TextureFilter.NEAREST_MIPMAP_NEAREST) or
             self.min_filter in (TextureFilter.LINEAR_MIPMAP_LINEAR, TextureFilter.NEAREST_MIPMAP_NEAREST)):
             gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
-            
+        
         if self.share_to_torch:
             self._init_tensor()
             
@@ -485,9 +487,9 @@ class Texture(ResourcesObj):
                 if glErr.err == 1282:
                     pass
                 else:
-                    print('Warning: failed to delete texture. Error: {}'.format(glErr))
+                    EngineLogger.warn('Warning: failed to delete texture. Error: {}'.format(glErr))
             except Exception as err:
-                print('Warning: failed to delete texture. Error: {}'.format(err))
+                EngineLogger.warn('Warning: failed to delete texture. Error: {}'.format(err))
             self._texID = None
         self._data = None
         self._width = None

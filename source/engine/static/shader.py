@@ -449,9 +449,11 @@ class Shader(NamedObj, EngineObj):
                  vertex_source_path: str, 
                  fragment_source_path: str):
         super().__init__(name)
-        self._vertex_source = self._edit_shader_source_code(open(vertex_source_path, 'r'))
+        with open(vertex_source_path, 'r') as f:
+            self._vertex_source = self._edit_shader_source_code(f)
         '''source code of vertex shader'''
-        self._fragment_source = self._edit_shader_source_code(open(fragment_source_path, 'r'))
+        with open(fragment_source_path, 'r') as f:
+            self._fragment_source = self._edit_shader_source_code(f)
         '''source code of fragment shader'''
         
         self._v_shaderID = self._init_shader(self._vertex_source, ShaderType.VERTEX)
@@ -673,7 +675,6 @@ class Shader(NamedObj, EngineObj):
             raise NotImplementedError
         else:
             raise TypeError("Invalid uniform type: {}".format(type(value)))
-
 
 
 

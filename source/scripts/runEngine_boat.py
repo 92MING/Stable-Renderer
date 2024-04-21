@@ -1,4 +1,5 @@
 import torch
+import math
 torch.cuda.current_device()
 
 import os, sys
@@ -11,17 +12,16 @@ from engine.runtime.components import Camera, MeshRenderer
 from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
-from engine.runtime.components import CameraController
+from engine.runtime.components import CameraController, HelicalOrbit
 from engine.static import Material, Mesh, Texture, DefaultTextureType, GLFW_Key
 from common_utils.path_utils import EXAMPLE_3D_MODEL_DIR
+from common_utils.spherical_cache import ViewPoint
+
+import json
+from pydantic_core import to_jsonable_python
 
 
 if __name__ == '__main__':
-
-    class AutoRotation(Component):
-        def update(self):
-            self.transform.rotateLocalY(0.2)
-
     class ControlBoat(Component):
         '''Control the boat with W, A, S, D keys. The boat will move forward, backward, left, right.'''
         
@@ -81,6 +81,16 @@ if __name__ == '__main__':
             
             self.update_physics()
 
+    class HelicalOrbitWrapper(HelicalOrbit):
+        historical_pos = []
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+        
+        def update(self):
+            super().update()
+            view_point = ViewPoint.from_cartesian(*self.transform.position)
+            self.historical_pos.append(view_point)
+    
     class Sample(Engine):
         def beforePrepare(self):
 
@@ -94,15 +104,22 @@ if __name__ == '__main__':
             
             self.boat = GameObject('Boat', position=[0, 0, 0])
             self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, materials=self.boatMaterial)
-            self.boat.addComponent(AutoRotation)
-            #self.boat.addComponent(ControlBoat)
             
-            self.camera = GameObject('Camera', position=[4, 4, -3])
+            initial_position = [0, 0, -6]
+            self.camera = GameObject('Camera', position=initial_position)
             self.camera.addComponent(Camera)
-            self.camera.addComponent(CameraController, defaultPos=[4, 4, -3], defaultLookAt=[0, 0, 0])
-
+            self.camera.addComponent(CameraController, defaultPos=initial_position, defaultLookAt=[0, 0, 0])
+            self.camera.addComponent(HelicalOrbitWrapper, theta_speed=1, phi=180)
 
     Sample.Run(enableGammaCorrection=True,
-               debug=False,
-               winSize=(512, 512),
-               needOutputMaps=False,)
+            debug=False,
+            winSize=(512, 512),
+            mapSavingInternal=1,
+            needOutputMaps=False,
+            startComfyUI=False,
+            fixedUpdateMaxFPS=60,)
+    with open('historical_pos.json', 'w') as f:
+        print(Sample.DiffusionManager._output_path)
+        json.dump(HelicalOrbitWrapper.historical_pos, f, default=to_jsonable_python)
+        print(len(HelicalOrbitWrapper.historical_pos))
+        

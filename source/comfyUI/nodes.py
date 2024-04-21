@@ -19,7 +19,7 @@ from typing import (
     Type, TYPE_CHECKING
 )
 
-from common_utils.global_utils import GetGlobalValue, SetGlobalValue, GetOrAddGlobalValue, is_dev_mode
+from common_utils.global_utils import GetGlobalValue, SetGlobalValue, GetOrAddGlobalValue, is_game_mode, is_game_editor_mode
 from common_utils.debug_utils import ComfyUILogger
 
 sys.path.insert(2, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
@@ -1956,9 +1956,11 @@ def _load_custom_node(module_path, ignore=set(), raise_err=False):
 
         module = importlib.util.module_from_spec(module_spec)  # type: ignore
         sys.modules[module_name] = module
+        ComfyUILogger.debug(f'Importing custom nodes:{module_name}...')
         module_spec.loader.exec_module(module)  # type: ignore
 
-        if hasattr(module, "WEB_DIRECTORY") and getattr(module, "WEB_DIRECTORY") is not None:
+        need_init_web = not (is_game_mode() or is_game_editor_mode())
+        if need_init_web and hasattr(module, "WEB_DIRECTORY") and getattr(module, "WEB_DIRECTORY") is not None:
             web_dir = os.path.abspath(os.path.join(module_dir, getattr(module, "WEB_DIRECTORY")))
             if os.path.isdir(web_dir):
                 EXTENSION_WEB_DIRS[module_name] = web_dir

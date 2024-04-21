@@ -9,7 +9,7 @@ from typing import Optional, Literal
 from inspect import signature
 
 from common_utils.debug_utils import EngineLogger
-from common_utils.global_utils import GetOrAddGlobalValue, GetOrCreateGlobalValue, SetGlobalValue
+from common_utils.global_utils import GetOrAddGlobalValue, GetOrCreateGlobalValue, SetGlobalValue, GetGlobalValue
 from common_utils.decorators import class_or_ins_property, prevent_re_init 
 from common_utils.data_struct import Event
 from .managers import *
@@ -92,9 +92,24 @@ class Engine:
                  threadPoolSize=6,
                  target_device: Optional[int]=None,
                  running_mode: Literal['game', 'editor']='game',
+                 startComfyUI=True,
                  **kwargs):
 
         EngineLogger.info('Engine is initializing...')
+        
+        if startComfyUI:
+            cross_module_cls_dict: dict = GetGlobalValue('__CROSS_MODULE_CLASS_DICT__', None)   # type: ignore
+            has_prompt_executor = True
+            if not cross_module_cls_dict:
+                has_prompt_executor = False
+            elif 'PromptExecutor' not in cross_module_cls_dict:
+                has_prompt_executor = False
+            if not has_prompt_executor:
+                from comfyUI.main import run
+                self._prompt_executor = run()   # this will add `PromptExecutor` to `cross_module_cls_dict` automatically
+            else:
+                self._prompt_executor = cross_module_cls_dict['PromptExecutor']
+            
         self._UBO_Binding_Points = {}
         self._debug = debug
         self._scene = scene
@@ -114,10 +129,13 @@ class Engine:
                 if arg_name in init_sig.parameters:
                     found_args[arg_name] = arg  # will not pop from kwargs, i.e. when managers have same arg name, it will be passed to all of them
             return found_args
-            
+        
         self._windowManager = WindowManager(title, winSize, windowResizable, bgColor, **find_kwargs_for_manager(WindowManager))
+        
         self._inputManager = InputManager(self._windowManager.Window, **find_kwargs_for_manager(InputManager))
+        
         self._runtimeManager = RuntimeManager(**find_kwargs_for_manager(RuntimeManager))
+        
         self._renderManager = RenderManager(enableHDR=enableHDR, 
                                             enableGammaCorrection=enableGammaCorrection, 
                                             gamma=gamma, 
@@ -127,14 +145,16 @@ class Engine:
                                             contrast=contrast,
                                             target_device=target_device,
                                             **find_kwargs_for_manager(RenderManager))
-        self._diffusionManager = DiffusionManager(needOutputMaps=needOutputMaps,
-                                           maxFrameCacheCount=maxFrameCacheCount,
-                                           mapSavingInterval=mapSavingInterval,
-                                           threadPoolSize=threadPoolSize,
-                                             **find_kwargs_for_manager(DiffusionManager))
-        self._sceneManager = SceneManager(self._scene, **find_kwargs_for_manager(SceneManager))
-        self._resourceManager = ResourcesManager(**find_kwargs_for_manager(ResourcesManager))
         
+        self._diffusionManager = DiffusionManager(needOutputMaps=needOutputMaps,
+                                                  maxFrameCacheCount=maxFrameCacheCount,
+                                                  mapSavingInterval=mapSavingInterval,
+                                                  threadPoolSize=threadPoolSize,
+                                                  **find_kwargs_for_manager(DiffusionManager))
+        
+        self._sceneManager = SceneManager(self._scene, **find_kwargs_for_manager(SceneManager))
+        
+        self._resourceManager = ResourcesManager(**find_kwargs_for_manager(ResourcesManager))
         # endregion
         
         self._stage = EngineStage.INIT
@@ -144,6 +164,12 @@ class Engine:
     def RunningMode(self)->Literal['game', 'editor']:
         '''Running mode of the engine. It can be 'game' or 'editor'. Default is 'game'.'''
         return self._running_mode
+
+    @property
+    def PromptExecutor(self):
+        if not hasattr(self, '_prompt_executor'):
+            raise AttributeError('PromptExecutor is not available. Please set startComfyUI=True when initializing the engine.')
+        return self._prompt_executor
 
     @property
     def Stage(self)->EngineStage:

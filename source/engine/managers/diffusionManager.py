@@ -35,15 +35,6 @@ class DiffusionManager(Manager):
             threadPoolSize = multiprocessing.cpu_count()
         self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize) # for saving maps asynchronously
         self._outputPath = get_new_map_output_dir(create_if_not_exists=False)
-        self._init_comfyUI()
-    
-    # region comfyUI
-    def _init_comfyUI(self):
-        from comfyUI.main import run
-        self._prompt_executor = run()   # will detect whether it should create web server or not automatically
-        
-    
-    # endregion
     
     # region properties
     @property
@@ -148,6 +139,20 @@ class DiffusionManager(Manager):
         '''output method especially for depth map'''
         if self._needOutputMaps:
             self._threadPool.submit(self._outputDepthMap, mapData)
+    
+    def _outputCannyMap(self, mapData:np.ndarray):
+        import cv2
+        mapData = (mapData * 255).astype(np.uint8)
+        canny = cv2.Canny(mapData, 100, 200)
+        outputPath = os.path.join(self._outputPath, 'canny')
+        if not os.path.exists(outputPath):
+            os.makedirs(outputPath)
+        cv2.imwrite(os.path.join(outputPath, f'canny_{self.engine.RuntimeManager.FrameCount}.png'), canny)
+    
+    def OutputCannyMap(self, mapData:np.ndarray):
+        '''output method especially for canny map'''
+        if self._needOutputMaps:
+            self._threadPool.submit(self._outputCannyMap, mapData)
     # endregion
 
     

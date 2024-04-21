@@ -54,6 +54,9 @@ CACHE_DIR = OUTPUT_DIR / '.cache'
 MAP_OUTPUT_DIR = OUTPUT_DIR / 'runtime_map'
 '''runtime map output directory, for saving normal map, pos map, id map, etc., during runtime.'''
 COMFYUI_OUTPUT_DIR = OUTPUT_DIR / 'comfyui'
+'''comfyui output directory, for saving comfyui output files.'''
+SPHERE_CACHE_DIR = OUTPUT_DIR / 'sphere_cache'
+'''sphere cache directory, for saving sphere cache files.'''
 
 INPUT_DIR = PROJECT_DIR / 'input'
 
