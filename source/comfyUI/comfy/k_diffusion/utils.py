@@ -10,7 +10,7 @@ from PIL import Image
 import torch
 from torch import nn, optim
 from torch.utils import data
-
+from common_utils.debug_utils import ComfyUILogger
 
 def hf_datasets_augs_helper(examples, transform, image_key, mode='RGB'):
     """Apply passed in transforms for HuggingFace Datasets."""
@@ -292,7 +292,7 @@ class CSVLogger:
             self.write(*self.columns)
 
     def write(self, *args):
-        print(*args, sep=',', file=self.file, flush=True)
+        ComfyUILogger.print(*args, sep=',', file=self.file, flush=True)
 
 
 @contextmanager

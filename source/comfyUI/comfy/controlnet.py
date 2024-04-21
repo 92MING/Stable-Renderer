@@ -10,11 +10,12 @@ import comfy.ops
 
 import comfy.cldm.cldm
 import comfy.t2i_adapter.adapter
+from common_utils.debug_utils import ComfyUILogger
 
 
 def broadcast_image_to(tensor, target_batch_size, batched_number):
     current_batch_size = tensor.shape[0]
-    #print(current_batch_size, target_batch_size)
+    #ComfyUILogger.print(current_batch_size, target_batch_size)
     if current_batch_size == 1:
         return tensor
 
@@ -373,7 +374,7 @@ def load_controlnet(ckpt_path, model=None):
 
         leftover_keys = controlnet_data.keys()
         if len(leftover_keys) > 0:
-            print("leftover keys:", leftover_keys)
+            ComfyUILogger.print("leftover keys:", leftover_keys)
         controlnet_data = new_sd
 
     pth_key = 'control_model.zero_convs.0.0.weight'
@@ -388,7 +389,7 @@ def load_controlnet(ckpt_path, model=None):
     else:
         net = load_t2i_adapter(controlnet_data)
         if net is None:
-            print("error checkpoint does not contain controlnet or t2i adapter data", ckpt_path)
+            ComfyUILogger.error("error checkpoint does not contain controlnet or t2i adapter data", ckpt_path)
         return net
 
     if controlnet_config is None:
@@ -423,7 +424,7 @@ def load_controlnet(ckpt_path, model=None):
                             cd = controlnet_data[x]
                             cd += model_sd[sd_key].type(cd.dtype).to(cd.device)
             else:
-                print("WARNING: Loaded a diff controlnet without a model. It will very likely not work.")
+                ComfyUILogger.warn("WARNING: Loaded a diff controlnet without a model. It will very likely not work.")
 
         class WeightsLoader(torch.nn.Module):
             pass
@@ -432,7 +433,7 @@ def load_controlnet(ckpt_path, model=None):
         missing, unexpected = w.load_state_dict(controlnet_data, strict=False)
     else:
         missing, unexpected = control_model.load_state_dict(controlnet_data, strict=False)
-    print(missing, unexpected)
+    ComfyUILogger.print(missing, unexpected)
 
     global_average_pooling = False
     filename = os.path.splitext(ckpt_path)[0]
@@ -528,9 +529,9 @@ def load_t2i_adapter(t2i_data):
         return None
     missing, unexpected = model_ad.load_state_dict(t2i_data)
     if len(missing) > 0:
-        print("t2i missing", missing)
+        ComfyUILogger.print("t2i missing", missing)
 
     if len(unexpected) > 0:
-        print("t2i unexpected", unexpected)
+        ComfyUILogger.print("t2i unexpected", unexpected)
 
     return T2IAdapter(model_ad, model_ad.input_channels)

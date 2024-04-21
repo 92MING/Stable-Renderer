@@ -5,7 +5,8 @@ import os
 import cv2
 from PIL import Image
 from pathlib import Path
-from sd.modules import utils, config, log_utils as logu
+from sd.modules import utils, config
+from common_utils.debug_utils import DefaultLogger as logu
 from sd.modules.diffuser_pipelines.multi_frame_stable_diffusion import StableRendererPipeline
 from sd.modules.diffuser_pipelines.pipeline_utils import load_pipe
 from sd.modules.diffuser_pipelines.overlap import ResizeOverlap, Scheduler

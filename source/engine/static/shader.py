@@ -14,6 +14,7 @@ from typing import (get_args, Optional, Union, Dict, Any, ClassVar, TypeAlias, T
 
 from common_utils.path_utils import SHADER_DIR
 from common_utils.decorators import class_property
+from common_utils.debug_utils import EngineLogger
 from common_utils.type_utils import valueTypeCheck
 from .enums import ShaderType
 
@@ -460,7 +461,7 @@ class Shader(NamedObj, EngineObj):
         self._f_shaderID = self._init_shader(self._fragment_source, ShaderType.FRAGMENT)
         
         self._programID = self._init_program(self._v_shaderID, self._f_shaderID)
-        print('Loaded shader: ', name)
+        EngineLogger.print('Loaded shader: ', name)
         
     def _edit_shader_constant(self, source:str, constant_name:str, value):
         pattern = r'#[ ]*?define[ ]+?'+constant_name+r'[ ]+?(\d+)'

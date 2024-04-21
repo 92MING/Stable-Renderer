@@ -12,6 +12,7 @@ from .util import (
     timestep_embedding,
     AlphaBlender,
 )
+from common_utils.debug_utils import ComfyUILogger
 from ..attention import SpatialTransformer, SpatialVideoTransformer, default
 from comfy.ldm.util import exists
 import comfy.ops
@@ -359,7 +360,7 @@ def apply_control(h, control, name):
             try:
                 h += ctrl
             except:
-                print("warning control could not be applied", h.shape, ctrl.shape)
+                ComfyUILogger.warn("warning control could not be applied", h.shape, ctrl.shape)
     return h
 
 class UNetModel(nn.Module):
@@ -496,7 +497,7 @@ class UNetModel(nn.Module):
             if isinstance(self.num_classes, int):
                 self.label_emb = nn.Embedding(num_classes, time_embed_dim, dtype=self.dtype, device=device)
             elif self.num_classes == "continuous":
-                print("setting up linear c_adm embedding layer")
+                ComfyUILogger.print("setting up linear c_adm embedding layer")
                 self.label_emb = nn.Linear(1, time_embed_dim)
             elif self.num_classes == "sequential":
                 assert adm_in_channels is not None

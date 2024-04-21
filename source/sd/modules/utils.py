@@ -12,7 +12,7 @@ from typing import List, Union
 from PIL import Image
 from pathlib import Path
 from . import config
-from . import log_utils as logu
+from common_utils.debug_utils import DefaultLogger as logu
 from .data_classes.correspondenceMap import CorrespondenceMap
 
 

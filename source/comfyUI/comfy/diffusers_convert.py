@@ -6,7 +6,7 @@ import torch
 # =================#
 # UNet Conversion #
 # =================#
-
+from common_utils.debug_utils import ComfyUILogger
 unet_conversion_map = [
     # (stable-diffusion, HF Diffusers)
     ("time_embed.0.weight", "time_embedding.linear_1.weight"),
@@ -177,7 +177,7 @@ def convert_vae_state_dict(vae_state_dict):
     for k, v in new_state_dict.items():
         for weight_name in weights_to_convert:
             if f"mid.attn_1.{weight_name}.weight" in k:
-                print(f"Reshaping {k} for SD format")
+                ComfyUILogger.print(f"Reshaping {k} for SD format")
                 new_state_dict[k] = reshape_weight_for_sd(v)
     return new_state_dict
 

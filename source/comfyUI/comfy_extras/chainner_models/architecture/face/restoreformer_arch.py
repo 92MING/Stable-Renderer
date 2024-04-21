@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from common_utils.debug_utils import ComfyUILogger
 
 class VectorQuantizer(nn.Module):
     """
@@ -446,7 +446,7 @@ class MultiHeadDecoder(nn.Module):
         block_in = ch * ch_mult[self.num_resolutions - 1]
         curr_res = resolution // 2 ** (self.num_resolutions - 1)
         self.z_shape = (1, z_channels, curr_res, curr_res)
-        print(
+        ComfyUILogger.print(
             "Working with z of shape {} = {} dimensions.".format(
                 self.z_shape, np.prod(self.z_shape)
             )
@@ -573,7 +573,7 @@ class MultiHeadDecoderTransformer(nn.Module):
         block_in = ch * ch_mult[self.num_resolutions - 1]
         curr_res = resolution // 2 ** (self.num_resolutions - 1)
         self.z_shape = (1, z_channels, curr_res, curr_res)
-        print(
+        ComfyUILogger.print(
             "Working with z of shape {} = {} dimensions.".format(
                 self.z_shape, np.prod(self.z_shape)
             )

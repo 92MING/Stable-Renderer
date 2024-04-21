@@ -11,8 +11,7 @@ from .utils import overlap_rate
 from ...data_classes.correspondenceMap import CorrespondenceMap
 from ...data_classes.common import Rectangle
 
-from ... import log_utils as logu
-
+from common_utils.debug_utils import DefaultLogger as logu
 import torch
 import torch.nn.functional as F
 

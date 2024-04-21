@@ -14,12 +14,9 @@ import safetensors.torch
 
 from PIL import Image, ImageOps, ImageSequence
 from PIL.PngImagePlugin import PngInfo
-from typing import (
-    Dict, Tuple, List, Any, Optional, Callable,
-    Type, TYPE_CHECKING
-)
+from typing import (Dict, Tuple, List, Any, Optional, Callable, Type, TYPE_CHECKING)
 
-from common_utils.global_utils import GetGlobalValue, SetGlobalValue, GetOrAddGlobalValue, is_game_mode, is_game_editor_mode
+from common_utils.global_utils import GetGlobalValue, SetGlobalValue, GetOrAddGlobalValue, is_game_mode, is_game_editor_mode, is_dev_mode
 from common_utils.debug_utils import ComfyUILogger
 
 sys.path.insert(2, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
@@ -41,8 +38,7 @@ if TYPE_CHECKING:
     from comfyUI.types import ComfyUINode, CONDITIONING as Conditioning, COMFY_SCHEDULERS as Schedulers
     from comfy.sd import VAE, CLIP
     from comfy.controlnet import ControlBase
-    from comfy.model_base import BaseModel
-
+    from comfy.model_patcher import ModelPatcher
 
 
 def before_node_execution():
@@ -777,12 +773,12 @@ class ControlNetApply:
             return (conditioning, )
 
         c = []
-        print("image dims", image.shape)
+        ComfyUILogger.print("image dims", image.shape)
         control_hint = image.movedim(-1,1)
-        print("control hint dim", control_hint.shape)
+        ComfyUILogger.print("control hint dim", control_hint.shape)
         for t in conditioning:
             n = [t[0], t[1].copy()]
-            c_net = control_net.copy().set_cond_hint(control_hint, strength)
+            c_net = control_net.copy().set_cond_hint(control_hint, strength)    # type: ignore
             if 'control' in t[1]:
                 c_net.set_previous_controlnet(t[1]['control'])
             n[1]['control'] = c_net
@@ -1352,13 +1348,13 @@ def common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, 
     callbacks.append(latent_preview.prepare_callback(model, steps))
     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
-                                  denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step,
-                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)
+                                  denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step, # type: ignore
+                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed) # type: ignore
     out = latent.copy()
     out["samples"] = samples
     return (out, )
 
-def custom_ksampler(model: "BaseModel",
+def custom_ksampler(model: "ModelPatcher",
                     seed: int,
                     steps: int,
                     cfg: float,
@@ -1388,8 +1384,8 @@ def custom_ksampler(model: "BaseModel",
     callbacks.append(latent_preview.prepare_callback(model, steps))
     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
-                                  denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step,
-                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)
+                                  denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step, # type: ignore
+                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)  # type: ignore
     out = latent.copy()
     out["samples"] = samples
     return (out, )

@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from einops import repeat, rearrange
-
+from common_utils.debug_utils import ComfyUILogger
 from comfy.ldm.util import instantiate_from_config
 
 class AlphaBlender(nn.Module):
@@ -131,7 +131,7 @@ def make_ddim_timesteps(ddim_discr_method, num_ddim_timesteps, num_ddpm_timestep
     # add one to get the final alpha values right (the ones from first scale to data during sampling)
     steps_out = ddim_timesteps + 1
     if verbose:
-        print(f'Selected timesteps for ddim sampler: {steps_out}')
+        ComfyUILogger.print(f'Selected timesteps for ddim sampler: {steps_out}')
     return steps_out
 
 
@@ -143,8 +143,8 @@ def make_ddim_sampling_parameters(alphacums, ddim_timesteps, eta, verbose=True):
     # according the the formula provided in https://arxiv.org/abs/2010.02502
     sigmas = eta * np.sqrt((1 - alphas_prev) / (1 - alphas) * (1 - alphas / alphas_prev))
     if verbose:
-        print(f'Selected alphas for ddim sampler: a_t: {alphas}; a_(t-1): {alphas_prev}')
-        print(f'For the chosen value of eta, which is {eta}, '
+        ComfyUILogger.print(f'Selected alphas for ddim sampler: a_t: {alphas}; a_(t-1): {alphas_prev}')
+        ComfyUILogger.print(f'For the chosen value of eta, which is {eta}, '
               f'this results in the following sigma_t schedule for ddim sampler {sigmas}')
     return sigmas, alphas, alphas_prev
 

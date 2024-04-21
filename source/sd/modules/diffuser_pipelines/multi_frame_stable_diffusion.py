@@ -30,7 +30,7 @@ from transformers import CLIPTextModel, CLIPTokenizer
 
 from .lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline, preprocess_image
 from ..data_classes.correspondenceMap import CorrespondenceMap
-from common_utils import log_utils as logu
+from common_utils.debug_utils import DefaultLogger as logu
 from ..utils import save_latents
 from .overlap import Overlap
 from .overlap.johnny_overlap import overlap as temp_overlap

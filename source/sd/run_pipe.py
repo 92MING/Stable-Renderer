@@ -421,7 +421,7 @@ def run_pipe(config: RunPipeConfig = None):
     
     
     
-    print(f"Time usage: {time_usage.total_seconds()}s")
+    DefaultLogger.print(f"Time usage: {time_usage.total_seconds()}s")
     
     
     

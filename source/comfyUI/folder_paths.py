@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple, Union, Set
 
 from common_utils.path_utils import Path, COMFYUI_TEMP_DIR, get_comfyUI_output_dir, INPUT_DIR
 from common_utils.global_utils import GetOrCreateGlobalValue
-
+from common_utils.debug_utils import ComfyUILogger
 
 supported_pt_extensions = set(['.ckpt', '.pt', '.bin', '.pth', '.safetensors'])
 
@@ -56,7 +56,7 @@ if not os.path.exists(input_directory):
     try:
         os.makedirs(input_directory)
     except:
-        print("Failed to create input directory")
+        ComfyUILogger.print("Failed to create input directory")
 
 def set_output_directory(output_dir):
     global output_directory
@@ -160,7 +160,7 @@ def recursive_search(directory, excluded_dir_names=None):
     try:
         dirs[directory] = os.path.getmtime(directory)
     except FileNotFoundError:
-        print(f"Warning: Unable to access {directory}. Skipping this path.")
+        ComfyUILogger.warn(f"Warning: Unable to access {directory}. Skipping this path.")
         
     for dirpath, subdirs, filenames in os.walk(directory, followlinks=True, topdown=True):
         subdirs[:] = [d for d in subdirs if d not in excluded_dir_names]
@@ -173,7 +173,7 @@ def recursive_search(directory, excluded_dir_names=None):
             try:
                 dirs[path] = os.path.getmtime(path)
             except FileNotFoundError:
-                print(f"Warning: Unable to access {path}. Skipping this path.")
+                ComfyUILogger.warn(f"Warning: Unable to access {path}. Skipping this path.")
                 continue
     return result, dirs
 
@@ -263,7 +263,7 @@ def get_save_image_path(filename_prefix, output_dir, image_width=0, image_height
               "\n full_output_folder: " + os.path.abspath(full_output_folder) + \
               "\n         output_dir: " + output_dir + \
               "\n         commonpath: " + os.path.commonpath((output_dir, os.path.abspath(full_output_folder))) 
-        print(err)
+        ComfyUILogger.error(err)
         raise Exception(err)
 
     try:

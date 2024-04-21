@@ -3,7 +3,7 @@
 import torch
 import torch.nn.functional as F
 import math
-
+from common_utils.debug_utils import ComfyUILogger
 from tqdm.auto import trange, tqdm
 
 
@@ -205,9 +205,9 @@ def model_wrapper(
             The "v" prediction is derivation detailed in Appendix D of [1], and is used in Imagen-Video [2].
 
             [1] Salimans, Tim, and Jonathan Ho. "Progressive distillation for fast sampling of diffusion models."
-                arXiv preprint arXiv:2202.00512 (2022).
+                arXiv pre.print arXiv:2202.00512 (2022).
             [2] Ho, Jonathan, et al. "Imagen Video: High Definition Video Generation with Diffusion Models."
-                arXiv preprint arXiv:2210.02303 (2022).
+                arXiv pre.print arXiv:2210.02303 (2022).
     
         4. "score": marginal score function. (Trained by denoising score matching).
             Note that the score function and the noise prediction model follows a simple relationship:
@@ -244,7 +244,7 @@ def model_wrapper(
             And if cond == `unconditional_condition`, the model output is the unconditional DPM output.
 
             [4] Ho, Jonathan, and Tim Salimans. "Classifier-free diffusion guidance."
-                arXiv preprint arXiv:2207.12598 (2022).
+                arXiv pre.print arXiv:2207.12598 (2022).
         
 
     The `t_input` is the time label of the model, which may be discrete-time labels (i.e. 0 to 999)
@@ -475,7 +475,7 @@ class UniPC:
             return self.multistep_uni_pc_vary_update(x, model_prev_list, t_prev_list, t, order, **kwargs)
 
     def multistep_uni_pc_vary_update(self, x, model_prev_list, t_prev_list, t, order, use_corrector=True):
-        print(f'using unified predictor-corrector with order {order} (solver type: vary coeff)')
+        ComfyUILogger.print(f'using unified predictor-corrector with order {order} (solver type: vary coeff)')
         ns = self.noise_schedule
         assert order <= len(model_prev_list)
 
@@ -519,7 +519,7 @@ class UniPC:
             A_p = C_inv_p
 
         if use_corrector:
-            print('using corrector')
+            ComfyUILogger.print('using corrector')
             C_inv = torch.linalg.inv(C)
             A_c = C_inv
 
@@ -578,7 +578,7 @@ class UniPC:
         return x_t, model_t
 
     def multistep_uni_pc_bh_update(self, x, model_prev_list, t_prev_list, t, order, x_t=None, use_corrector=True):
-        # print(f'using unified predictor-corrector with order {order} (solver type: B(h))')
+        # ComfyUILogger.print(f'using unified predictor-corrector with order {order} (solver type: B(h))')
         ns = self.noise_schedule
         assert order <= len(model_prev_list)
         dims = x.dim()
@@ -646,7 +646,7 @@ class UniPC:
             D1s = None
 
         if use_corrector:
-            # print('using corrector')
+            # ComfyUILogger.print('using corrector')
             # for order 1, we use a simplified version
             if order == 1:
                 rhos_c = torch.tensor([0.5], device=b.device)
@@ -736,9 +736,9 @@ class UniPC:
                             step_order = min(order, steps + 1 - step)
                         else:
                             step_order = order
-                        # print('this step order:', step_order)
+                        # ComfyUILogger.print('this step order:', step_order)
                         if step == steps:
-                            # print('do not run corrector at the last step')
+                            # ComfyUILogger.print('do not run corrector at the last step')
                             use_corrector = False
                         else:
                             use_corrector = True

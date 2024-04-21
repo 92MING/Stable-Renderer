@@ -10,7 +10,7 @@ from .overlap_scheduler import Scheduler
 from .utils import overlap_rate
 from ..data_classes import CorrespondenceMap, Rectangle
 
-from common_utils import log_utils as logu
+from common_utils.debug_utils import DefaultLogger as logu
 
 import torch
 import torch.nn.functional as F

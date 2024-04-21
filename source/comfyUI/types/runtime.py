@@ -361,7 +361,7 @@ All outputs of nodes for execution.
 {node id: [output1, output2, ...], ...}
 '''
 
-StatusMsgEvent: TypeAlias = Literal['status', 'progress', 'executing', 'executed', 'execution_start', 'execution_error', 'execution_cached']
+StatusMsgEvent: TypeAlias = Literal['status', 'progress', 'executing', 'executed', 'execution_start', 'execution_error', 'execution_cached', 'execution_interrupted']
 '''The status message event type for PromptExecutor. See source/comfyUI/web/scripts/api.js'''
 
 StatusMsgs: TypeAlias = List[Tuple[StatusMsgEvent, Dict[str, Any]]]

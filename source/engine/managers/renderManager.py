@@ -9,6 +9,7 @@ from functools import partial
 from typing import Union, Optional, Callable
 from common_utils.cuda_utils import *
 from common_utils.global_utils import is_dev_mode
+from common_utils.debug_utils import EngineLogger
 from common_utils.data_struct.event import AutoSortTask
 from .manager import Manager
 from .runtimeManager import RuntimeManager
@@ -345,7 +346,7 @@ class RenderManager(Manager):
             try:
                 func()
             except Exception as e:
-                print(f"Render Task ({order}, {func}) Error. Msg: {e}. Skipped.")
+                EngineLogger.print(f"Render Task ({order}, {func}) Error. Msg: {e}. Skipped.")
         self._renderTasks._tempEvents.clear()
 
     # endregion
