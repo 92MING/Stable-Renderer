@@ -1266,7 +1266,12 @@ export class ComfyApp {
 					}
 				}
 			} else {
-				this.nodeOutputs[detail.node] = detail.output;
+				if (detail.output && detail.output[detail.node]) {
+					this.nodeOutputs[detail.node] = detail.output[detail.node];
+				}
+				else{
+					this.nodeOutputs[detail.node] = detail.output;
+				}
 			}
 			const node = this.graph.getNodeById(detail.node);
 			if (node) {

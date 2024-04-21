@@ -17,8 +17,6 @@ from PIL.PngImagePlugin import PngInfo
 import folder_paths
 
 from comfyUI.types import *
-from ..node_base import StableRendererNodeBase
-from common_utils.debug_utils import ComfyUILogger as logger
 
 
 def _tensor_to_int(tensor, bits):

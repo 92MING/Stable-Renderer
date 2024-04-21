@@ -5,7 +5,7 @@ sys.path.insert(0, _COMFYUI_PROJ_PATH)
 sys.path.insert(0, _STABLE_RENDERER_PROJ_PATH)
 
 from common_utils.debug_utils import ComfyUILogger
-from common_utils.global_utils import GetOrCreateGlobalValue, is_game_mode, is_dev_mode
+from common_utils.global_utils import GetOrCreateGlobalValue, is_game_mode
 from common_utils.system_utils import get_available_port, check_port_is_using
 
 import comfy.options
@@ -81,6 +81,10 @@ from comfy.cli_args import args
 def run()->execution.PromptExecutor:
     '''Run comfyUI and return the prompt executor.'''
     
+    if args.backend_mode:
+        args.multi_user = True
+        os.environ['BACKEND_MODE'] = 'True'
+    
     if args.cuda_device is not None:
         os.environ['CUDA_VISIBLE_DEVICES'] = str(args.cuda_device)
         ComfyUILogger.debug("Set cuda device to:", args.cuda_device)
@@ -118,14 +122,14 @@ def run()->execution.PromptExecutor:
                 prompt_id = item[1]
                 server.last_prompt_id = prompt_id
 
-                e.execute(item[2], prompt_id, item[3], item[4])
+                context = e.execute(item[2], prompt_id, item[3], item[4])
                 need_gc = True
-                q.task_done(item_id,
-                            e.outputs_ui,
+                q.task_done(item_id=item_id,
+                            outputs_ui=context.outputs_ui,
                             status=execution.PromptQueue.ExecutionStatus(
-                                status_str='success' if e.success else 'error',
-                                completed=e.success,
-                                messages=e.status_messages
+                                status_str='success' if context.success else 'error',
+                                completed=context.success,
+                                messages=context.status_messages
                                 )
                             )
                 if server.client_id is not None:

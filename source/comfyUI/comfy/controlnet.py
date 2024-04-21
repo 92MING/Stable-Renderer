@@ -1,6 +1,7 @@
 import torch
 import math
 import os
+from abc import ABC, abstractmethod
 import comfy.utils
 import comfy.model_management
 import comfy.model_detection
@@ -29,7 +30,7 @@ def broadcast_image_to(tensor, target_batch_size, batched_number):
     else:
         return torch.cat([tensor] * batched_number, dim=0)
 
-class ControlBase:
+class ControlBase(ABC):
     def __init__(self, device=None):
         self.cond_hint_original = None
         self.cond_hint = None
@@ -130,6 +131,9 @@ class ControlBase:
                             else:
                                 o[i] += prev_val
         return out
+    
+    @abstractmethod
+    def copy(self): ...
 
 class ControlNet(ControlBase):
     def __init__(self, control_model, global_average_pooling=False, device=None, load_device=None, manual_cast_dtype=None):
@@ -170,8 +174,8 @@ class ControlNet(ControlBase):
         y = cond.get('y', None)
         if y is not None:
             y = y.to(dtype)
-        timestep = self.model_sampling_current.timestep(t)
-        x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)
+        timestep = self.model_sampling_current.timestep(t)  # type: ignore
+        x_noisy = self.model_sampling_current.calculate_input(t, x_noisy)   # type: ignore
 
         control = self.control_model(x=x_noisy.to(dtype), hint=self.cond_hint, timesteps=timestep.float(), context=context.to(dtype), y=y)
         return self.control_merge(None, control, control_prev, output_dtype)
@@ -210,7 +214,8 @@ class ControlLoraOps:
         def forward(self, input):
             weight, bias = comfy.ops.cast_bias_weight(self, input)
             if self.up is not None:
-                return torch.nn.functional.linear(input, weight + (torch.mm(self.up.flatten(start_dim=1), self.down.flatten(start_dim=1))).reshape(self.weight.shape).type(input.dtype), bias)
+                return torch.nn.functional.linear(input, 
+                                                  weight + (torch.mm(self.up.flatten(start_dim=1), self.down.flatten(start_dim=1))).reshape(self.weight.shape).type(input.dtype), bias) # type: ignore
             else:
                 return torch.nn.functional.linear(input, weight, bias)
 
@@ -250,7 +255,13 @@ class ControlLoraOps:
         def forward(self, input):
             weight, bias = comfy.ops.cast_bias_weight(self, input)
             if self.up is not None:
-                return torch.nn.functional.conv2d(input, weight + (torch.mm(self.up.flatten(start_dim=1), self.down.flatten(start_dim=1))).reshape(self.weight.shape).type(input.dtype), bias, self.stride, self.padding, self.dilation, self.groups)
+                return torch.nn.functional.conv2d(input, 
+                                                  weight + (torch.mm(self.up.flatten(start_dim=1), self.down.flatten(start_dim=1))).reshape(self.weight.shape).type(input.dtype), # type: ignore
+                                                  bias, 
+                                                  self.stride, 
+                                                  self.padding, 
+                                                  self.dilation, 
+                                                  self.groups) # type: ignore
             else:
                 return torch.nn.functional.conv2d(input, weight, bias, self.stride, self.padding, self.dilation, self.groups)
 
@@ -269,7 +280,7 @@ class ControlLora(ControlNet):
         self.manual_cast_dtype = model.manual_cast_dtype
         dtype = model.get_dtype()
         if self.manual_cast_dtype is None:
-            class control_lora_ops(ControlLoraOps, comfy.ops.disable_weight_init):
+            class control_lora_ops(ControlLoraOps, comfy.ops.disable_weight_init):  # type: ignore
                 pass
         else:
             class control_lora_ops(ControlLoraOps, comfy.ops.manual_cast):
@@ -382,8 +393,8 @@ def load_controlnet(ckpt_path, model=None):
 
     if controlnet_config is None:
         model_config = comfy.model_detection.model_config_from_unet(controlnet_data, prefix, True)
-        supported_inference_dtypes = model_config.supported_inference_dtypes
-        controlnet_config = model_config.unet_config
+        supported_inference_dtypes = model_config.supported_inference_dtypes    # type: ignore
+        controlnet_config = model_config.unet_config    # type: ignore
 
     load_device = comfy.model_management.get_torch_device()
     if supported_inference_dtypes is None:

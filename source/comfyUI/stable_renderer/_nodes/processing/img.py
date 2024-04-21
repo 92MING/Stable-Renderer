@@ -5,7 +5,6 @@ import numpy as np
 import cv2
 
 from comfyUI.types import *
-from ..node_base import StableRendererNodeBase
 
 
 # region image processing

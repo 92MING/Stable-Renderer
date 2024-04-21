@@ -113,6 +113,7 @@ parser.add_argument("--windows-standalone-build", action="store_true", help="Win
 parser.add_argument("--disable-metadata", action="store_true", help="Disable saving prompt metadata in files.")
 
 parser.add_argument("--multi-user", action="store_true", help="Enables per-user storage.")
+parser.add_argument("--backend-mode", action="store_true", help="Enables backend mode, which means comfyUI will run as a backend server for appliation deployment.")
 
 if comfy.options.args_parsing:
     args = parser.parse_args()

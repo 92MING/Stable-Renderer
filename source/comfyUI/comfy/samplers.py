@@ -1,16 +1,19 @@
-from .k_diffusion import sampling as k_diffusion_sampling
-from .extra_samplers import uni_pc
 import torch
 import collections
-from comfy import model_management, model_base
 import math
 
-from typing import (
-    List, Dict, Any, Tuple, Optional, Callable, Literal,
-    ParamSpec, TypeVar, TYPE_CHECKING
-)
+from abc import ABC, abstractmethod
+from deprecated import deprecated
+from typing import (List, Dict, Any, Tuple, Optional, Callable, Literal, TYPE_CHECKING, TypeAlias)
+
+from common_utils.debug_utils import ComfyUILogger
+from .k_diffusion import sampling as k_diffusion_sampling
+from .extra_samplers import uni_pc
+from comfy import model_management, model_base
+
 if TYPE_CHECKING:
     from comfyUI.types import ConvertedConditioning
+
 
 def get_area_and_mult(conds, x_in, timestep_in):
     area = (x_in.shape[2], x_in.shape[3], 0, 0)
@@ -245,9 +248,18 @@ def calc_cond_uncond_batch(model, cond, uncond, x_in, timestep, model_options):
     del out_uncond_count
     return out_cond, out_uncond
 
-#The main sampling function shared by all the samplers
-#Returns denoised
-def sampling_function(model, x, timestep, uncond, cond, cond_scale, model_options={}, seed=None):
+def sampling_function(model: model_base.BaseModel,
+                      x, 
+                      timestep, 
+                      uncond, 
+                      cond, 
+                      cond_scale, 
+                      model_options={}, 
+                      seed=None):
+    '''
+    The main sampling function shared by all the samplers.
+    Returns denoised image.
+    '''
     if math.isclose(cond_scale, 1.0) and model_options.get("disable_cfg1_optimization", False) == False:
         uncond_ = None
     else:
@@ -272,9 +284,18 @@ class CFGNoisePredictor(torch.nn.Module):
     def __init__(self, model):
         super().__init__()
         self.inner_model = model
+        
     def apply_model(self, x, timestep, cond, uncond, cond_scale, model_options={}, seed=None):
-        out = sampling_function(self.inner_model, x, timestep, uncond, cond, cond_scale, model_options=model_options, seed=seed)
+        out = sampling_function(self.inner_model, 
+                                x, 
+                                timestep, 
+                                uncond, 
+                                cond, 
+                                cond_scale, 
+                                model_options=model_options, 
+                                seed=seed)
         return out
+    
     def forward(self, *args, **kwargs):
         return self.apply_model(*args, **kwargs)
 
@@ -285,6 +306,7 @@ class KSamplerX0Inpaint(torch.nn.Module):
         super().__init__()
         self.inner_model = model
         self.sigmas = sigmas
+        
     def forward(self, x, sigma, uncond, cond, cond_scale, denoise_mask, model_options={}, seed=None):
         if denoise_mask is not None:
             if "denoise_mask_function" in model_options:
@@ -536,7 +558,6 @@ def apply_empty_x_to_equal_area(conds, uncond, name, uncond_fill_func):
             n[name] = uncond_fill_func(cond_cnets, x)
             uncond[temp[1]] = n
 
-P = ParamSpec("P")
 def encode_model_conds(model_function: Callable[[Dict[str, Any]], Dict[str, Any]],
                        conds: "ConvertedConditioning",
                        noise: torch.Tensor,
@@ -568,9 +589,12 @@ def encode_model_conds(model_function: Callable[[Dict[str, Any]], Dict[str, Any]
     
     return conds
 
-class Sampler:
+class Sampler(ABC):
+    '''Base class of samplers.'''
+    
+    @abstractmethod
     def sample(self):
-        pass
+        raise NotImplementedError
 
     def max_denoise(self, model_wrap, sigmas):
         max_sigma = float(model_wrap.inner_model.model_sampling.sigma_max)
@@ -579,10 +603,22 @@ class Sampler:
 
 KSAMPLER_NAMES = ["euler", "euler_ancestral", "heun", "heunpp2","dpm_2", "dpm_2_ancestral",
                   "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral", "dpmpp_sde", "dpmpp_sde_gpu",
-                  "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_2m_sde_gpu", "dpmpp_3m_sde", "dpmpp_3m_sde_gpu", "ddpm", "lcm"]
+                  "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_2m_sde_gpu", "dpmpp_3m_sde", "dpmpp_3m_sde_gpu", "ddpm", "lcm",]
+'''all possible ksampler types'''
 
-class KSAMPLER(Sampler):
-    def __init__(self, sampler_function, extra_options={}, inpaint_options={}):
+SAMPLER_NAMES = KSAMPLER_NAMES + ["ddim", "uni_pc", "uni_pc_bh2"]
+'''all possible sampler types. This is the full list of samplers that can be used in the UI.'''
+
+SCHEDULER_NAMES = ["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform"]
+'''all possible schedulers'''
+
+
+class KSAMPLER_METHOD(Sampler):
+    '''wrapper for sampling methods'''
+    def __init__(self, 
+                 sampler_function: Callable, 
+                 extra_options={}, 
+                 inpaint_options={}):
         self.sampler_function = sampler_function
         self.extra_options = extra_options
         self.inpaint_options = inpaint_options
@@ -615,9 +651,23 @@ class KSAMPLER(Sampler):
         samples = self.sampler_function(model_k, noise, sigmas, extra_args=extra_args, callbacks=k_callbacks, disable=disable_pbar, **self.extra_options)
         return samples
 
+@deprecated # `KSAMPLER` is the old name of `KSAMPLER_METHOD`, now deprecated.
+class KSAMPLER(KSAMPLER_METHOD):
+    '''
+    The origin name of `KSAMPLER_METHOD` is `KSAMPLER` actually, but it makes things very messy.
+    For the sake of compatibility, `KSAMPLER` is still available as an alias of `KSAMPLER_METHOD`.
+    '''
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-def ksampler(sampler_name, extra_options={}, inpaint_options={}):
-    if sampler_name == "dpm_fast":
+def get_ksampler_method(sampler_name, extra_options={}, inpaint_options={})->KSAMPLER_METHOD:
+    if sampler_name == "uni_pc":
+        return KSAMPLER_METHOD(uni_pc.sample_unipc)
+    elif sampler_name == "uni_pc_bh2":
+        return KSAMPLER_METHOD(uni_pc.sample_unipc_bh2)
+    elif sampler_name == "ddim":
+        return get_ksampler_method("euler", inpaint_options={"random": True})
+    elif sampler_name == "dpm_fast":
         def dpm_fast_function(model, noise, sigmas, extra_args, callbacks, disable):
             sigma_min = sigmas[-1]
             if sigma_min == 0:
@@ -635,7 +685,21 @@ def ksampler(sampler_name, extra_options={}, inpaint_options={}):
     else:
         sampler_function = getattr(k_diffusion_sampling, "sample_{}".format(sampler_name))
 
-    return KSAMPLER(sampler_function, extra_options, inpaint_options)
+    return KSAMPLER_METHOD(sampler_function, extra_options, inpaint_options)
+
+@deprecated # `ksampler` is the old name of `get_ksampler_method`, now deprecated.
+def ksampler(sampler_name, extra_options={}, inpaint_options={}):
+    '''
+    Deprecated cuz the old one makes code very messy. 
+    Use `get_ksampler_method` instead.
+    '''
+    return get_ksampler_method(sampler_name, extra_options, inpaint_options)
+
+@deprecated
+def sampler_object(name: str):
+    '''!!DEPRECATED!! Use `get_ksampler_method` instead.'''
+    return get_ksampler_method(name)
+
 
 def wrap_model(model: model_base.BaseModel) -> CFGNoisePredictor:
     model_denoise = CFGNoisePredictor(model)
@@ -647,7 +711,7 @@ def sample(model: model_base.BaseModel,
            negative: "ConvertedConditioning",
            cfg: float,
            device: str,
-           sampler: KSAMPLER,
+           sampler: KSAMPLER_METHOD,
            sigmas: torch.Tensor,
            model_options: Dict = {},
            latent_image: torch.Tensor = None,
@@ -691,8 +755,7 @@ def sample(model: model_base.BaseModel,
     samples = sampler.sample(model_wrap, sigmas, extra_args, callbacks, noise, latent_image, denoise_mask, disable_pbar)
     return model.process_latent_out(samples.to(torch.float32))
 
-SCHEDULER_NAMES = ["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform"]
-SAMPLER_NAMES = KSAMPLER_NAMES + ["ddim", "uni_pc", "uni_pc_bh2"]
+
 
 def calculate_sigmas_scheduler(model, scheduler_name, steps):
     if scheduler_name == "karras":
@@ -708,19 +771,9 @@ def calculate_sigmas_scheduler(model, scheduler_name, steps):
     elif scheduler_name == "sgm_uniform":
         sigmas = normal_scheduler(model, steps, sgm=True)
     else:
-        print("error invalid scheduler", scheduler_name)
+        ComfyUILogger.error("error invalid scheduler" + scheduler_name)
     return sigmas
 
-def sampler_object(name):
-    if name == "uni_pc":
-        sampler = KSAMPLER(uni_pc.sample_unipc)
-    elif name == "uni_pc_bh2":
-        sampler = KSAMPLER(uni_pc.sample_unipc_bh2)
-    elif name == "ddim":
-        sampler = ksampler("euler", inpaint_options={"random": True})
-    else:
-        sampler = ksampler(name)
-    return sampler
 
 class KSampler:
     SCHEDULERS = SCHEDULER_NAMES
@@ -742,7 +795,7 @@ class KSampler:
         if sampler not in self.SAMPLERS:
             sampler = self.SAMPLERS[0]
         self.scheduler = scheduler
-        self.sampler = sampler
+        self.sampler_name = sampler
         self.set_steps(steps, denoise)
         self.denoise = denoise
         self.model_options = model_options
@@ -751,7 +804,7 @@ class KSampler:
         sigmas = None
 
         discard_penultimate_sigma = False
-        if self.sampler in self.DISCARD_PENULTIMATE_SIGMA_SAMPLERS:
+        if self.sampler_name in self.DISCARD_PENULTIMATE_SIGMA_SAMPLERS:
             steps += 1
             discard_penultimate_sigma = True
 
@@ -822,6 +875,19 @@ class KSampler:
                     return latent_image
                 else:
                     return torch.zeros_like(noise)
-        sampler = sampler_object(self.sampler)
+        sampler = sampler_object(self.sampler_name)
 
-        return sample(self.model, noise, positive, negative, cfg, self.device, sampler, sigmas, self.model_options, latent_image=latent_image, denoise_mask=denoise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)
+        return sample(self.model, 
+                      noise, 
+                      positive, 
+                      negative, 
+                      cfg, 
+                      self.device, 
+                      sampler, 
+                      sigmas, 
+                      self.model_options, 
+                      latent_image=latent_image, 
+                      denoise_mask=denoise_mask, 
+                      callbacks=callbacks, 
+                      disable_pbar=disable_pbar, 
+                      seed=seed)

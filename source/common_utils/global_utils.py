@@ -143,7 +143,7 @@ def is_release_mode():
     Default is False.
     '''
     if 'RELEASE_MODE' in os.environ:
-        mode: bool = GetEnv('RELEASE_MODE', False, bool)
+        mode: bool = GetEnv('RELEASE_MODE', False, bool)    # type: ignore
         if not mode:
             if 'DEV_MODE' in os.environ:    # if dev mode is set, release mode will be overrided
                 return not GetEnv('DEV_MODE', False, bool)
@@ -164,8 +164,11 @@ def is_dev_mode():
     '''
     return not is_release_mode()
 
+def is_backend_mode():
+    return GetEnv('BACKEND_MODE', False, bool)
+
 __all__ = ['GetEnv', 'should_run_web_server', 'is_game_mode', 'is_editor_mode', 'is_release_mode', 'is_dev_mode',
-           'is_engine_looping', 'is_game_editor_mode']
+           'is_engine_looping', 'is_game_editor_mode', 'is_backend_mode']
 # endregion
 
 # region global values

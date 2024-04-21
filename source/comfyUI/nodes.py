@@ -19,7 +19,7 @@ from typing import (
     Type, TYPE_CHECKING
 )
 
-from common_utils.global_utils import GetGlobalValue, SetGlobalValue, GetOrAddGlobalValue
+from common_utils.global_utils import GetGlobalValue, SetGlobalValue, GetOrAddGlobalValue, is_dev_mode
 from common_utils.debug_utils import ComfyUILogger
 
 sys.path.insert(2, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
@@ -36,11 +36,11 @@ import folder_paths
 import latent_preview
 
 from comfy.cli_args import args
-
+from comfyUI.types import NODE_MAPPING
 if TYPE_CHECKING:
     from comfyUI.types import ComfyUINode, CONDITIONING as Conditioning, COMFY_SCHEDULERS as Schedulers
     from comfy.sd import VAE, CLIP
-    from comfy.controlnet import ControlNet, T2IAdapter, ControlLora, ControlBase
+    from comfy.controlnet import ControlBase
     from comfy.model_base import BaseModel
 
 
@@ -79,12 +79,14 @@ class ConditioningCombine:
     def combine(self, conditioning_1: 'Conditioning', conditioning_2: 'Conditioning'):
         return (conditioning_1 + conditioning_2, )
 
-class ConditioningAverage :
+class ConditioningAverage:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {"conditioning_to": ("CONDITIONING", ), "conditioning_from": ("CONDITIONING", ),
-                              "conditioning_to_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01})
-                             }}
+        return {"required": {"conditioning_to": ("CONDITIONING", ), 
+                             "conditioning_from": ("CONDITIONING", ),
+                             "conditioning_to_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01})
+                             }
+                }
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "addWeighted"
 
@@ -770,7 +772,7 @@ class ControlNetApply:
 
     CATEGORY = "conditioning"
 
-    def apply_controlnet(self, conditioning, control_net, image, strength):
+    def apply_controlnet(self, conditioning, control_net: "ControlBase", image, strength):
         if strength == 0:
             return (conditioning, )
 
@@ -1791,10 +1793,10 @@ class ImagePadForOutpaint:
 
         return (new_image, mask)
 
-NODE_CLASS_MAPPINGS: Dict[str, Type['ComfyUINode']] = GetGlobalValue("__COMFYUI_NODE_CLASS_MAPPINGS__", None) # type: ignore
+NODE_CLASS_MAPPINGS: NODE_MAPPING[Type['ComfyUINode']] = GetGlobalValue("__COMFYUI_NODE_CLASS_MAPPINGS__", None) # type: ignore
 '''Node class mappings for all nodes. This dictionary will be updated on init.'''
 if NODE_CLASS_MAPPINGS is None:
-    NODE_CLASS_MAPPINGS: Dict[str, Type['ComfyUINode']] = {
+    NODE_CLASS_MAPPINGS = NODE_MAPPING({
         "KSampler": KSampler,
         "CheckpointLoaderSimple": CheckpointLoaderSimple,
         "CLIPTextEncode": CLIPTextEncode,
@@ -1861,13 +1863,13 @@ if NODE_CLASS_MAPPINGS is None:
         "ConditioningZeroOut": ConditioningZeroOut,
         "ConditioningSetTimestepRange": ConditioningSetTimestepRange,
         "LoraLoaderModelOnly": LoraLoaderModelOnly,
-    }   # type: ignore
+    })
     SetGlobalValue("__COMFYUI_NODE_CLASS_MAPPINGS__", NODE_CLASS_MAPPINGS)
 
-NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = GetGlobalValue("__COMFYUI_NODE_DISPLAY_NAME_MAPPINGS__", None) # type: ignore
+NODE_DISPLAY_NAME_MAPPINGS: NODE_MAPPING[str] = GetGlobalValue("__COMFYUI_NODE_DISPLAY_NAME_MAPPINGS__", None) # type: ignore
 '''Node display name mappings. This dictionary will be updated on init.'''
 if NODE_DISPLAY_NAME_MAPPINGS is None:
-    NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
+    NODE_DISPLAY_NAME_MAPPINGS = NODE_MAPPING({
         # Sampling
         "KSampler": "KSampler",
         "KSamplerAdvanced": "KSampler (Advanced)",
@@ -1924,17 +1926,19 @@ if NODE_DISPLAY_NAME_MAPPINGS is None:
         # _for_testing
         "VAEDecodeTiled": "VAE Decode (Tiled)",
         "VAEEncodeTiled": "VAE Encode (Tiled)",
-    }
+    })
     SetGlobalValue("__COMFYUI_NODE_DISPLAY_NAME_MAPPINGS__", NODE_DISPLAY_NAME_MAPPINGS)
     
-EXTENSION_WEB_DIRS = GetGlobalValue("__COMFYUI_EXTENSION_WEB_DIRS__", None) # type: ignore
+EXTENSION_WEB_DIRS: Dict[str, str] = GetGlobalValue("__COMFYUI_EXTENSION_WEB_DIRS__", None) # type: ignore
 if EXTENSION_WEB_DIRS is None:
     EXTENSION_WEB_DIRS = {}
     SetGlobalValue("__COMFYUI_EXTENSION_WEB_DIRS__", EXTENSION_WEB_DIRS)
 
+
 def _init_node_clses():
     for _, node_cls in NODE_CLASS_MAPPINGS.items():
         setattr(node_cls, '__IS_COMFYUI_NODE__', True)
+        
 _init_node_clses()
     
 def _load_custom_node(module_path, ignore=set(), raise_err=False):
@@ -1952,7 +1956,7 @@ def _load_custom_node(module_path, ignore=set(), raise_err=False):
 
         module = importlib.util.module_from_spec(module_spec)  # type: ignore
         sys.modules[module_name] = module
-        module_spec.loader.exec_module(module)
+        module_spec.loader.exec_module(module)  # type: ignore
 
         if hasattr(module, "WEB_DIRECTORY") and getattr(module, "WEB_DIRECTORY") is not None:
             web_dir = os.path.abspath(os.path.join(module_dir, getattr(module, "WEB_DIRECTORY")))
@@ -1960,18 +1964,40 @@ def _load_custom_node(module_path, ignore=set(), raise_err=False):
                 EXTENSION_WEB_DIRS[module_name] = web_dir
 
         if hasattr(module, "NODE_CLASS_MAPPINGS") and getattr(module, "NODE_CLASS_MAPPINGS") is not None:
-            for name in module.NODE_CLASS_MAPPINGS:
+            for key in module.NODE_CLASS_MAPPINGS:
+                if isinstance(key, tuple):
+                    if len(key)!=2:
+                        if raise_err:
+                            raise ValueError(f"Invalid key in NODE_CLASS_MAPPINGS in {module_path}: {key}. It must be (cls name, namespace) or just cls name.")
+                        else:
+                            ComfyUILogger.warning(f"Invalid key in NODE_CLASS_MAPPINGS in {module_path}: {key}. It must be (cls name, namespace) or just cls name.")
+                            return False
+                    else:
+                        name, namespace = key
+                else:
+                    name = key
+                    namespace = module_name
                 if name not in ignore:
-                    NODE_CLASS_MAPPINGS[name] = module.NODE_CLASS_MAPPINGS[name]
+                    NODE_CLASS_MAPPINGS[(name, namespace)] = module.NODE_CLASS_MAPPINGS[key]
+            
+            # only find the display name mappings if the node class mappings are found
             if hasattr(module, "NODE_DISPLAY_NAME_MAPPINGS") and getattr(module, "NODE_DISPLAY_NAME_MAPPINGS") is not None:
-                NODE_DISPLAY_NAME_MAPPINGS.update(module.NODE_DISPLAY_NAME_MAPPINGS)
-            return True
-        else:
-            if not raise_err:
-                ComfyUILogger.warning(f"Skip {module_path} module for custom nodes due to the lack of NODE_CLASS_MAPPINGS.")
-                return False
-            else:
-                raise ValueError(f"Cannot find NODE_CLASS_MAPPINGS in {module_path}")
+                for key in module.NODE_DISPLAY_NAME_MAPPINGS:
+                    if isinstance(key, tuple):
+                        if len(key)!=2:
+                            if raise_err:
+                                raise ValueError(f"Invalid key in NODE_DISPLAY_NAME_MAPPINGS in {module_path}: {key}. It must be (cls name, namespace) or just cls name.")
+                            else:
+                                ComfyUILogger.warning(f"Invalid key in NODE_DISPLAY_NAME_MAPPINGS in {module_path}: {key}. It must be (cls name, namespace) or just cls name.")
+                                return False
+                        else:
+                            name, namespace = key
+                    else:
+                        name = key
+                        namespace = module_name
+                    if name not in ignore:
+                        NODE_DISPLAY_NAME_MAPPINGS[(name, namespace)] = module.NODE_DISPLAY_NAME_MAPPINGS[key]
+        return True
             
     except Exception as e:
         if not raise_err:
@@ -1980,7 +2006,7 @@ def _load_custom_node(module_path, ignore=set(), raise_err=False):
         else:
             raise e
             
-def load_custom_nodes(reload_mode=False):
+def load_custom_nodes(raise_err=False):
     '''
     Load all custom nodes from:
         - the stable_renderer/nodes folder
@@ -2001,7 +2027,7 @@ def load_custom_nodes(reload_mode=False):
             if os.path.isfile(module_path) and os.path.splitext(module_path)[1] != ".py": continue
             if module_path.endswith(".disabled"): continue
             time_before = time.perf_counter()
-            success = _load_custom_node(module_path, base_node_names, raise_err=reload_mode)
+            success = _load_custom_node(module_path, base_node_names, raise_err=raise_err)
             node_import_times.append((time.perf_counter() - time_before, module_path, success))
 
     if len(node_import_times) > 0:
@@ -2014,59 +2040,49 @@ def load_custom_nodes(reload_mode=False):
             ComfyUILogger.debug("{:6.1f} seconds{}:".format(n[0], import_message) + n[1])
     
     ComfyUILogger.debug('loading stable-renderer nodes...')
-    
-    stable_renderer_nodes_path = os.path.join(folder_paths.base_path, 'stable_renderer', '_nodes')
-    raise_err = reload_mode
-    success = _load_custom_node(stable_renderer_nodes_path, raise_err=raise_err)
 
+    stable_renderer_nodes_path = os.path.join(folder_paths.base_path, 'stable_renderer', '_nodes')
+    success = _load_custom_node(stable_renderer_nodes_path, raise_err=raise_err)
     if not success:
         ComfyUILogger.warning('failed to load stable-renderer nodes.')
     else:
         ComfyUILogger.debug('successfully loaded stable-renderer nodes.')
+        
+    # advance node registration
+    from comfyUI.types import NodeBase
+    advance_node_mapping = {}
+    advance_node_name_mapping = {}
+    for advance_node_cls in NodeBase._AllSubclasses():
+        if advance_node_cls._IsAbstract:
+            continue
+        cls_qual_name = advance_node_cls.__qualname__
+        cls_real_name = advance_node_cls._RealClsName
+        cls_namespace = advance_node_cls.NameSpace or ""
+        advance_node_mapping[(cls_qual_name, cls_namespace)] = advance_node_cls._RealComfyUINodeCls
+        advance_node_name_mapping[(cls_qual_name, cls_namespace)] = advance_node_cls._ReadableName
+        
+        if cls_qual_name != cls_real_name:
+            advance_node_mapping[(cls_real_name, cls_namespace)] = advance_node_cls._RealComfyUINodeCls
+            advance_node_name_mapping[(cls_real_name, cls_namespace)] = advance_node_cls._ReadableName
+            
+    NODE_CLASS_MAPPINGS.update(advance_node_mapping)
+    NODE_DISPLAY_NAME_MAPPINGS.update(advance_node_name_mapping)
 
     _init_node_clses()
 
-
-def init_custom_nodes(reload_mode=False):
+def init_custom_nodes(raise_err=is_dev_mode()):
+    ComfyUILogger.debug(f'(raise={raise_err})initializing custom nodes................')
     if GetOrAddGlobalValue("__COMFYUI_CUSTOM_NODES_INITED__", False):
         return
     extras_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy_extras")
-    extras_files = [
-        "nodes_latent.py",
-        "nodes_hypernetwork.py",
-        "nodes_upscale_model.py",
-        "nodes_post_processing.py",
-        "nodes_mask.py",
-        "nodes_compositing.py",
-        "nodes_rebatch.py",
-        "nodes_model_merging.py",
-        "nodes_tomesd.py",
-        "nodes_clip_sdxl.py",
-        "nodes_canny.py",
-        "nodes_freelunch.py",
-        "nodes_custom_sampler.py",
-        "nodes_hypertile.py",
-        "nodes_model_advanced.py",
-        "nodes_model_downscale.py",
-        "nodes_images.py",
-        "nodes_video_model.py",
-        "nodes_sag.py",
-        "nodes_perpneg.py",
-        "nodes_stable3d.py",
-        "nodes_sdupscale.py",
-        "nodes_photomaker.py",
-        "nodes_cond.py",
-        "nodes_morphology.py",
-        "nodes_stable_cascade.py",
-        "nodes_differential_diffusion.py",
-    ]
+    extras_files = [f for f in os.listdir(extras_dir) if f.endswith(".py") and f.startswith("nodes_")]
 
     import_failed = []
     for node_file in extras_files:
-        if not _load_custom_node(os.path.join(extras_dir, node_file), raise_err=reload_mode):
+        if not _load_custom_node(os.path.join(extras_dir, node_file), raise_err=raise_err):
             import_failed.append(node_file)
 
-    load_custom_nodes(reload_mode=reload_mode)
+    load_custom_nodes(raise_err=raise_err)
 
     if len(import_failed) > 0:
         ComfyUILogger.warning("WARNING: some comfy_extras/ nodes did not import correctly. This may be because they are missing some dependencies.\n")
@@ -2078,8 +2094,3 @@ def init_custom_nodes(reload_mode=False):
         else:
             ComfyUILogger.info("Please do a: pip install -r requirements.txt")
     SetGlobalValue("__COMFYUI_CUSTOM_NODES_INITED__", True)
-
-def get_node_cls_by_name(node_name: str) -> Optional[Type['ComfyUINode']]:
-    if not GetOrAddGlobalValue("__COMFYUI_CUSTOM_NODES_INITED__", False):
-        init_custom_nodes()
-    return NODE_CLASS_MAPPINGS.get(node_name)

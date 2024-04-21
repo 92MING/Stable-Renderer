@@ -6,7 +6,6 @@ from pathlib import Path
 from torchvision.io import read_image, ImageReadMode
 
 from comfyUI.types import *
-from .node_base import StableRendererNodeBase
 from stable_renderer.src.data_classes import CorrespondenceMap, ImageFrames
 
 

@@ -1,5 +1,4 @@
 from comfyUI.types import *
-from .node_base import StableRendererNodeBase
 from comfyUI.nodes import custom_ksampler
 
 

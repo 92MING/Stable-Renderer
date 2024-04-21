@@ -2,18 +2,108 @@
 Base class for all nodes.
 All sub classes will be registered automatically.
 '''
-
 import re
 
 from inspect import isabstract, signature, Parameter, Signature
 from abc import abstractmethod
-from typing import ClassVar, Optional, Any, Tuple, Union, Dict, get_args, List
+from typing import (Type, _ProtocolMeta, ClassVar, Optional, Any, Tuple, Union, Dict, get_args, List, runtime_checkable, Protocol,
+                    TypeAlias, Literal)
 from collections import OrderedDict
 
 from common_utils.base_clses import CrossModuleABC
 from common_utils.debug_utils import ComfyUILogger
 from common_utils.type_utils import get_origin, is_empty_method
-from comfyUI.types import *
+
+from .basic import *
+
+class _ComfyUINodeMeta(_ProtocolMeta):
+    def __instancecheck__(cls, instance: Any) -> bool:
+        if hasattr(instance, '__IS_COMFYUI_NODE__') and instance.__IS_COMFYUI_NODE__:
+            return True
+        return False
+    
+    def __subclasscheck__(cls, subclass: Type) -> bool:
+        return hasattr(subclass, '__IS_COMFYUI_NODE__') and subclass.__IS_COMFYUI_NODE__
+        
+@runtime_checkable
+class ComfyUINode(Protocol, metaclass=_ComfyUINodeMeta):
+    '''
+    The type hint for comfyUI nodes. It is not necessary to inherit from this class.
+    I have done some tricks to make it available for `isinstance` check.
+    
+    Note: 
+        For better node customization, you can use the `NodeBase` class from `comfyUI.stable_renderer`,
+        which is will do automatic registration and type hinting for you. You just need to define the `__call__` method
+        and put type annotation on input/output parameters.
+    '''
+    
+    # region internal attributes
+    __IS_COMFYUI_NODE__: ClassVar[bool]
+    '''internal flag for identifying comfyUI nodes.'''
+    
+    __IS_ADVANCED_COMFYUI_NODE__: ClassVar[bool] = False
+    '''if u create nodes by inheriting from `NodeBase`, this flag will be set to True.'''
+    
+    __ADVANCED_NODE_CLASS__: ClassVar[Optional[Type['NodeBase']]] = None
+    '''If u create nodes by inheriting from `NodeBase`, this will be the real node class.'''
+    
+    __real_node_instance__: 'NodeBase'
+    '''real node instance after creation. This is only available for advanced comfyUI nodes which inherit from `NodeBase`.'''
+    
+    ID: str
+    '''The unique id of the node. This will be assigned in runtime.'''
+    # endregion
+    
+    FUNCTION: str
+    '''the target function name of the node. If not define, will try to use the only function it have.'''
+    DESCRIPTION: str
+    '''the description of the node'''
+    CATEGORY: str
+    '''the category of the node. For searching'''
+    NAMESPACE: Union[str, None] = None
+    '''the namespace of the node. It is used to avoid name conflicts.'''
+    
+    INPUT_IS_LIST: bool
+    '''whether the input is a list'''
+    OUTPUT_IS_LIST: Tuple[bool, ...]
+    '''whether the output is a list'''
+    LAZY_INPUTS: Tuple[str, ...]
+    '''the lazy input params of the node'''
+    
+    OUTPUT_NODE: bool
+    '''
+    Means the node have values that shown on UI.
+    Too strange, the name and the meaning are not matched...
+    '''
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[NodeInputParamType, Dict[str, Tuple[Union[str, type], dict]]]: # type: ignore
+        '''
+        All nodes for comfyUI should have this class method to define the input types.
+        
+        {input_type: {param_name: (param_type, param_info_dict), ...}, ...}
+        '''
+    
+    RETURN_TYPES: Tuple[str, ...]
+    '''All return type names of the node.'''
+    RETURN_NAMES: Tuple[str, ...]
+    '''Names for each return values'''
+    
+    @classmethod
+    def VALIDATE_INPUTS(cls, *args, **kwargs)->bool:     # type: ignore
+        '''If you have defined this method, it will be called to validate the input values.'''    
+    
+    def IS_CHANGED(self, *args, **kwargs): 
+        '''
+        This method will be called when the input value is changed. 
+        It should have the same signature as the function which you have defined to called.
+        '''
+    
+    def ON_DESTROY(self):
+        '''This method will be called when the node is destroyed.'''
+    
+    
+__all__ = ['NodeInputParamType', 'ComfyUINode']
 
 
 def _pack_param(sig: Signature, args, kwargs)-> OrderedDict[str, Any]:
@@ -87,6 +177,8 @@ class NodeBase(CrossModuleABC):
     '''The category of this node. This is for grouping nodes in the UI.'''
     Name: ClassVar[Optional[str]] = None
     '''The user friendly name of this node. This is for registration. If not defined, the class name(split by camel case & underscore) will be used.'''
+    NameSpace: ClassVar[Optional[str]] = None
+    '''namespace for avoiding name conflict. This is for registration & searching.'''
     Description: ClassVar[Optional[str]] = None
     '''
     The description of this node. 
@@ -120,7 +212,7 @@ class NodeBase(CrossModuleABC):
     '''The real user friendly class name for registration.'''
     _RealClsName: ClassVar[str]
     '''The real class name for registration.'''
-    _Description: ClassVar[str]
+    _Description: ClassVar[Optional[str]]
     '''The real description for registration.'''
     _Category: ClassVar[Optional[str]]
     '''The real category for registration.'''
@@ -138,10 +230,9 @@ class NodeBase(CrossModuleABC):
     _IsAbstract: ClassVar[bool]
     '''Real value for `IsAbstract`.'''
     
-    _RealComfyUINode: ClassVar[type] = None     # type: ignore
+    _RealComfyUINodeCls: ClassVar[Type[ComfyUINode]]
     '''The real registration node class for ComfyUI'''
     
-
     @classmethod
     def _InitFields(cls):
         # init input fields
@@ -178,10 +269,10 @@ class NodeBase(CrossModuleABC):
                         return_fields.append(AnnotatedParam(ret_type))
                         return_field_names.append(return_fields[-1].param_name or "")
             else:
-                return_fields.append(AnnotatedParam(return_anno))   # type: ignore
+                return_fields.append(AnnotatedParam(return_anno))    # type: ignore
                 return_field_names.append(return_fields[-1].param_name or "")
         else:
-            return_fields.append(AnnotatedParam(return_anno))   # type: ignore
+            return_fields.append(AnnotatedParam(return_anno))    # type: ignore
             return_field_names.append(return_fields[-1].param_name or "")
         
         cls._HasUIReturn = any(('ui' in field.tags) for field in return_fields)
@@ -236,7 +327,7 @@ class NodeBase(CrossModuleABC):
                 desc = cls.__doc__ or ''
             elif hasattr(cls.__call__, '__doc__'):
                 desc = cls.__call__.__doc__ or ''
-        cls._Description = desc # type: ignore
+        cls._Description = desc  # type: ignore
     
     @classmethod
     def _InitTypesForComfy(cls):
@@ -283,7 +374,7 @@ class NodeBase(CrossModuleABC):
         if cls._IsAbstract:
             raise TypeError(f'Abstract node {cls} cannot be registered. `_RealComfyUINode` should not be called on abstract nodes.')
         
-        newcls: ComfyUINode = type(cls._RealClsName, (), {}) # type: ignore
+        newcls: Type[ComfyUINode] = type(cls._RealClsName, (), {})  # type: ignore
         
         setattr(newcls, '__IS_COMFYUI_NODE__', True)
         setattr(newcls, '__IS_ADVANCED_COMFYUI_NODE__', True)
@@ -295,12 +386,11 @@ class NodeBase(CrossModuleABC):
         
         if cls._Category:
             setattr(newcls, 'CATEGORY', cls._Category)
-        
         if cls._Description:
             setattr(newcls, 'DESCRIPTION', cls._Description)
-
         if cls._HasUIReturn:
             setattr(newcls, 'OUTPUT_NODE', cls._HasUIReturn)    # `OUTPUT_NODE` is a flag for ComfyUI to shown on UI
+        setattr(newcls, 'NAMESPACE', cls.NameSpace if hasattr(cls, 'NameSpace') else "")
         
         setattr(newcls, 'RETURN_TYPES', tuple(cls._ComfyOutputTypes))
         
@@ -338,7 +428,7 @@ class NodeBase(CrossModuleABC):
             if len(cls._ComfyOutputTypes) == 1 and not isinstance(result, tuple):
                 result = (result,)
             if cls._HasUIReturn:
-                return cls._MakeUIRetDict(result)
+                return cls._MakeUIRetDict(result)    # type: ignore
             else:
                 return result
             
@@ -364,8 +454,12 @@ class NodeBase(CrossModuleABC):
                 proper_kws.pop(first_key)  # remove the first key(self), cuz this is a classmethod
                 return cls.ValidateInput(**proper_kws)
             setattr(newcls, 'VALIDATE_INPUTS', VALIDATE_INPUTS)
-            
-        cls._RealComfyUINode = newcls
+
+        def ON_DESTROY(ins:ComfyUINode):
+            ins.__real_node_instance__.OnDestroy()
+        setattr(newcls, 'ON_DESTROY', ON_DESTROY)
+        
+        cls._RealComfyUINodeCls = newcls
     
     def __init_subclass__(cls):
         if cls.IsAbstract is not None:
@@ -429,7 +523,7 @@ class NodeBase(CrossModuleABC):
         return ret
         
     @staticmethod
-    def _AllSubclasses(non_abstract_only: bool = True):
+    def _AllSubclasses(non_abstract_only: bool = True)->Tuple[Type["NodeBase"]]:
         '''return all subclasses of `NodeBase`.'''
         all_clses = list(NodeBase.__subclasses__())
         subclses = set()
@@ -480,7 +574,7 @@ class NodeBase(CrossModuleABC):
         '''
     
     @classmethod
-    def ValidateInput(cls, *args, **kwargs)->bool:  # type: ignore
+    def ValidateInput(cls, *args, **kwargs)->bool:   # type: ignore
         '''
         You can define this method to validate the node input is valid. Note that this is a classmethod
         (I think thats a bad idea actually, should be changed into instance method)
@@ -488,12 +582,18 @@ class NodeBase(CrossModuleABC):
         return a boolean value to indicate whether the input is valid.
         '''
 
+    def OnDestroy(self):
+        '''This method will be called when the node is destroyed.'''
+
+
 
 class StableRendererNodeBase(NodeBase):
     '''For inheritance category of stable-renderer nodes.'''
     
     Category = 'stable-renderer'
+    
+    NameSpace = "StableRenderer"
 
 
 
-__all__ = ['NodeBase', 'StableRendererNodeBase']
+__all__.extend(['NodeBase', 'StableRendererNodeBase'])

@@ -1,6 +1,5 @@
 from typing import Any, Literal
 
-from .node_base import StableRendererNodeBase
 from comfyUI.types import *
 
 

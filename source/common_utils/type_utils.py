@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from inspect import Parameter, signature, _empty, getmro
 from collections import OrderedDict
 from typing import (Any, Sequence, Union, ForwardRef, get_args as tp_get_args, get_origin as tp_get_origin, Callable, Awaitable, 
-                    Iterable, Mapping, Literal, TypeAlias, Tuple, _SpecialForm, Type)
+                    Iterable, Mapping, Literal, TypeAlias, Tuple, _SpecialForm, Type, Dict)
 from types import UnionType
 from inspect import getmro, signature
 
@@ -44,6 +44,7 @@ from functools import cache
 from pathlib import Path
 
 from .path_utils import SOURCE_DIR
+from .global_utils import GetOrCreateGlobalValue
 
 # region type checking
 @cache
@@ -223,7 +224,7 @@ def get_cls_name(cls_or_ins: Any):
     Return the pure class name, without module name. e.g. 'A' instead of 'utils.xxx....A
     Preventing error when `__qualname__` is not available.
     '''
-    if not type(cls_or_ins) == type:
+    if not isinstance(cls_or_ins, type):
         cls = type(cls_or_ins)
     else:
         cls = cls_or_ins
@@ -234,6 +235,12 @@ def get_cls_name(cls_or_ins: Any):
 
 MAX_MRO_DISTANCE = 999
 
+def get_mro_names(cls_or_ins: Any):
+    '''return all parent clses' name'''
+    cls_type = type(cls_or_ins) if not isinstance(cls_or_ins, type) else cls_or_ins
+    mro = getmro(cls_type)
+    return tuple([get_cls_name(c) for c in mro])
+    
 def get_mro_distance(cls:Any, super_cls:Union[type, str, None])->int:
     '''
     Return the distance of cls to super_cls in the mro.
@@ -317,7 +324,7 @@ def get_attr(obj: Any, attr_name: str)->Union[Any, None]:
     return None
     
 
-__all__.extend(['get_origin', 'get_args', 'get_cls_name', 'get_mro_distance', 'get_proper_module_name', 'get_attr'])
+__all__.extend(['get_origin', 'get_args', 'get_cls_name', 'get_mro_names', 'get_mro_distance', 'get_proper_module_name', 'get_attr'])
 # endregion
 
 
@@ -459,4 +466,77 @@ AsyncFunc = Callable[..., Awaitable[Any]]
 '''Async function'''
 
 __all__.extend(['BasicType', 'AsyncFunc'])
+# endregion
+
+
+# region base clses
+_NameCheckClses: Dict[Tuple[str,...], type] = GetOrCreateGlobalValue('__NameCheckClses__', dict)
+
+def NameCheckMetaCls(*meta_clses: Type[type])->Type[type]:
+    '''create a metacls which makes the subclass can do proper `isinstance` & `issubclass` check by name directly.'''
+    if not meta_clses:
+        meta_clses = tuple([type, ])
+    meta_cls_names = tuple([get_cls_name(cls) for cls in meta_clses])
+    
+    if meta_cls_names in _NameCheckClses:
+        return _NameCheckClses[meta_cls_names]
+    
+    class _NameCheckCls(*meta_clses):
+        def __instancecheck__(self, instance: Any) -> bool:
+            '''check by name, to avoid module problem'''
+            this_cls_name = get_cls_name(self)
+            cls_mro = get_mro_names(instance)
+            for cls_name in cls_mro:
+                if cls_name == this_cls_name:
+                    return True
+            return False
+    
+        def __subclasscheck__(self, subcls):
+            '''check by name, to avoid module problem'''
+            this_cls_name = get_cls_name(self)
+            if isinstance(subcls, str):
+                return subcls == this_cls_name
+            cls_mro = get_mro_names(subcls)
+            for cls_name in cls_mro:
+                if cls_name == this_cls_name:
+                    return True
+            return False
+
+    _NameCheckClses[meta_cls_names] = _NameCheckCls
+    return _NameCheckCls
+
+class GetableFunc(metaclass=NameCheckMetaCls()):
+    '''A special class to allow original function to be called when using `[]` syntax.'''
+    
+    origin_func: Callable
+    
+    def __init__(self, origin_func: Callable):
+        self.origin_func = origin_func
+    
+    def __getitem__(self, vals):
+        '''when using `INT[0, 10, 2]` syntax, INT(0, 10, 2) will be called.'''
+        if isinstance(vals, tuple):
+            return self.origin_func(*vals)
+        return self.origin_func(vals)
+    
+    def __call__(self, *args, **kwargs):
+        return self.origin_func(*args, **kwargs)
+
+from typing import Literal as DynamicLiteral    # trick for faking IDE to believe DynamicLiteral is Literal
+def _DynamicLiteral(*args: Union[str, int, float, bool]):
+    '''Literal annotation for dynamic options(to avoid problem in lower version python).'''
+    if len(args)==1 and isinstance(args[0], (list, tuple)):
+        literal_args=tuple(args[0])
+    else:
+        literal_args = tuple(args)
+    for option in literal_args:
+        if not isinstance(option, (str, int, float, bool)):
+            raise TypeError(f'Unexpected type: {option}. It should be one of str, int, float, bool.')
+    t = Literal[""]
+    t.__args__ = literal_args  # type: ignore
+    return t    # type: ignore
+globals()['DynamicLiteral'] = GetableFunc(_DynamicLiteral)    # trick for faking IDE to believe DynamicLiteral is Literal
+
+
+__all__.extend(['NameCheckMetaCls', 'GetableFunc', 'DynamicLiteral'])
 # endregion

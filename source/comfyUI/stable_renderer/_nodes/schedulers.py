@@ -1,7 +1,6 @@
 from comfyUI.types import *
 from typing import Literal
 
-from .node_base import StableRendererNodeBase
 from stable_renderer.src.overlap.overlap_scheduler import Scheduler
 
 

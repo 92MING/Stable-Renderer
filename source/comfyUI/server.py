@@ -18,7 +18,7 @@ import comfy.utils
 import comfy.model_management
 
 from multidict import MultiDict
-from typing import Optional, TYPE_CHECKING, Dict, Any
+from typing import Optional, TYPE_CHECKING, Type, Dict, Any
 from PIL import Image, ImageOps
 from PIL.PngImagePlugin import PngInfo
 from io import BytesIO
@@ -31,8 +31,10 @@ from common_utils.debug_utils import ComfyUILogger
 from comfy.cli_args import args
 from app.user_manager import UserManager
 
+from comfyUI.types._utils import get_comfy_type_definition
 if TYPE_CHECKING:
     from execution import PromptQueue
+    from comfyUI.types import ComfyUINode
 
 nodes_py_path = os.path.join(os.path.dirname(__file__), 'nodes.py')
 nodes_module_spec = importlib.util.spec_from_file_location('nodes', nodes_py_path)  # type: ignore
@@ -96,7 +98,6 @@ def _validate_response(data, *args, **kwargs):
             for i, val in enumerate(data):
                 if hasattr(val, '__ComfyDump__'):
                     data[i] = val.__ComfyDump__()
-    
         else:
             if hasattr(data, '__ComfyDump__'):
                 data = data.__ComfyDump__()
@@ -457,23 +458,32 @@ class PromptServer:
             return _validate_response(self.get_queue_info())
 
         def node_info(node_class_name: str)->Dict[str, Any]:
-            obj_class = nodes.NODE_CLASS_MAPPINGS[node_class_name]
+            obj_class: Type["ComfyUINode"] = nodes.NODE_CLASS_MAPPINGS[node_class_name]
+            
             info = {}
-            info['input'] = obj_class.INPUT_TYPES()
+            
+            input_types = obj_class.INPUT_TYPES()
+            info['input'] = input_types.copy() if input_types else {}
+            for param_type, that_type_params in info['input'].items():
+                for param_name, param_info in that_type_params.items():
+                    if isinstance(param_type, type):
+                        info['input'][param_type][param_name] = tuple(get_comfy_type_definition(param_info[0]), param_info[1])  # type: ignore
+            
             info['output'] = obj_class.RETURN_TYPES
             info['output_is_list'] = obj_class.OUTPUT_IS_LIST if hasattr(obj_class, 'OUTPUT_IS_LIST') else [False] * len(obj_class.RETURN_TYPES)
             info['output_name'] = obj_class.RETURN_NAMES if hasattr(obj_class, 'RETURN_NAMES') else info['output']
             info['name'] = node_class_name
             info['display_name'] = nodes.NODE_DISPLAY_NAME_MAPPINGS[node_class_name] if node_class_name in nodes.NODE_DISPLAY_NAME_MAPPINGS.keys() else node_class_name
             info['description'] = obj_class.DESCRIPTION if hasattr(obj_class,'DESCRIPTION') else ''
+            info['namespace'] = obj_class.NAMESPACE if hasattr(obj_class, 'NAMESPACE') else ''
             info['lazy_inputs'] = obj_class.LAZY_INPUTS if hasattr(obj_class, 'LAZY_INPUTS') else []
-                
+            
             if not info['description']:
                 if hasattr(obj_class, '__doc__') and obj_class.__doc__:
                     info['description'] = obj_class.__doc__
                 elif hasattr(getattr(obj_class, obj_class.FUNCTION), '__doc__') and getattr(obj_class, obj_class.FUNCTION).__doc__: 
                     info['description'] = getattr(obj_class, obj_class.FUNCTION).__doc__
-                    
+
             info['category'] = 'sd'
             if hasattr(obj_class, 'OUTPUT_NODE') and obj_class.OUTPUT_NODE == True:
                 info['output_node'] = True
@@ -487,11 +497,11 @@ class PromptServer:
         @routes.get("/object_info")
         async def get_object_info(request):
             out = {}
-            for x in nodes.NODE_CLASS_MAPPINGS:
+            for (node_cls_name, node_cls_namespace) in nodes.NODE_CLASS_MAPPINGS: # TODO: also returns the namespace to web client side.
                 try:
-                    out[x] = node_info(x)
+                    out[node_cls_name] = node_info(node_cls_name)
                 except Exception as e:
-                    ComfyUILogger.warning(f"[ERROR] An error occurred while retrieving information for the '{x}' node.", file=sys.stderr)
+                    ComfyUILogger.warning(f"[ERROR] An error occurred while retrieving information for the '{node_cls_name}' node, err: {e}")
                     traceback.print_exc()
             return _validate_response(out)
 
