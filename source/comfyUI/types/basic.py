@@ -8,7 +8,16 @@ from pathlib import Path
 from functools import partial
 
 from common_utils.type_utils import valueTypeCheck, NameCheckMetaCls, GetableFunc, DynamicLiteral
-from comfy.samplers import KSampler
+try:
+    from comfy.samplers import KSampler
+except ModuleNotFoundError as e:
+    if str(e) == "No module named 'comfy'":
+        import sys, os
+        _comfyUI_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        sys.path.append(_comfyUI_path)
+        from comfy.samplers import KSampler
+    else:
+        raise e    
 from comfy.sd import VAE as comfy_VAE, CLIP as comfy_CLIP
 from comfy.controlnet import ControlBase as comfy_ControlNetBase
 from comfy.model_patcher import ModelPatcher
