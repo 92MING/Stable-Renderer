@@ -194,22 +194,8 @@ def get_node_func_ret(node: Union[str, ComfyUINode, Type[ComfyUINode]],
     
     if func in (*_node_ins_methods, node_type.FUNCTION):    # type: ignore
         params = inspect.signature(real_func).parameters
-        required_params = {k: v.default for k, v in params.items() if v.default == inspect.Parameter.empty}
-    
-        if func == node_type.FUNCTION:  # type: ignore
-            optional_params = node_type.INPUT_TYPES().get("optional", {}).keys()    # type: ignore
-            hidden_params = node_type.INPUT_TYPES().get("hidden", {}).keys()    # type: ignore
-            for key in (*optional_params, *hidden_params):
-                required_params.pop(key, None)
-        
-        for key in func_params:
-            required_params.pop(key, None)
-        param_count_diff = len(required_params)
-        
-        if param_count_diff > 1:
-            raise ValueError(f"Node {node_type} function {func} requires {param_count_diff} more parameters, but only got {len(func_params)}. Input params: {func_params}")
-        elif param_count_diff == 1:
-            first_param = list(params.keys())[0]
+        first_param = list(params.keys())[0]
+        if first_param not in func_params:
             if isinstance(node, type):
                 if not create_node_if_need:
                     raise ValueError(f"Node {node_type} is not created.")
@@ -590,8 +576,11 @@ class PromptExecutor:
             if input_data_all is not None:
                 input_data_formatted = {}
                 for name, inputs in input_data_all.items():
-                    input_data_formatted[name] = [self._format_value(x) for x in inputs]
-
+                    try:
+                        input_data_formatted[name] = [self._format_value(x) for x in inputs]
+                    except TypeError:
+                        input_data_formatted[name] = self._format_value(inputs)
+                        
             output_data_formatted = {}
             for node_id, node_outputs in context.outputs.items():
                 output_data_formatted[node_id] = [[self._format_value(x) for x in l] for l in node_outputs]

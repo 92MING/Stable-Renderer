@@ -7,6 +7,7 @@ from scipy import integrate
 from torch import nn
 from tqdm.auto import trange, tqdm
 
+from functools import partial
 from . import utils
 
 
@@ -325,7 +326,11 @@ class PIDStepSizeController:
 class DPMSolver(nn.Module):
     """DPM-Solver. See https://arxiv.org/abs/2206.00927."""
 
-    def __init__(self, model, extra_args=None, eps_callback=None, info_callbacks: Optional[List[Callable]]=None):
+    def __init__(self,
+                 model,
+                 extra_args=None,
+                 eps_callback=None,
+                 info_callbacks: Optional[List[Callable]]=None,):
         super().__init__()
         info_callbacks = info_callbacks or []
         self.model = model
@@ -470,19 +475,24 @@ class DPMSolver(nn.Module):
 
         return x, info
 
+def sampling_solver_callback(callback: Callable, callback_info: dict, info: dict):
+    callback({**callback_info, **info})
 
 @torch.no_grad()
-def sample_dpm_fast(model, x, sigma_min, sigma_max, n, extra_args=None, callbacks=[], disable=None, eta=0., s_noise=1., noise_sampler=None):
+def sample_dpm_fast(model,x, sigma_min, sigma_max, n,
+                    extra_args=None, callbacks=[], 
+                    disable=None, eta=0., s_noise=1., noise_sampler=None):
     """DPM-Solver-Fast (fixed step size). See https://arxiv.org/abs/2206.00927."""
     if sigma_min <= 0 or sigma_max <= 0:
         raise ValueError('sigma_min and sigma_max must not be 0')
     with tqdm(total=n, disable=disable) as pbar:
         dpm_solver = DPMSolver(model, extra_args, eps_callback=pbar.update)
-
+        dpm_solver.info_callbacks=[]
+        callback_info = {'sigma': dpm_solver.sigma(sigma_max.clone().detach()), 'sigma_hat': dpm_solver.sigma(sigma_min.clone().detach())}
         if callbacks:
             for callback in callbacks:
                 dpm_solver.info_callbacks.append(
-                    lambda info: callback({'sigma': dpm_solver.sigma(info['t']), 'sigma_hat': dpm_solver.sigma(info['t_up']), **info})
+                    partial(sampling_solver_callback, callback, callback_info)
                 )
 
         return dpm_solver.dpm_solver_fast(x, dpm_solver.t(torch.tensor(sigma_max)), dpm_solver.t(torch.tensor(sigma_min)), n, eta, s_noise, noise_sampler)

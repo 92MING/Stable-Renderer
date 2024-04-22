@@ -1380,12 +1380,11 @@ def custom_ksampler(model: "ModelPatcher",
     if "noise_mask" in latent:
         noise_mask = latent["noise_mask"]
 
-    callbacks = []
     callbacks.append(latent_preview.prepare_callback(model, steps))
     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
                                   denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step, # type: ignore
-                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)  # type: ignore
+                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)
     out = latent.copy()
     out["samples"] = samples
     return (out, )

@@ -616,22 +616,15 @@ SAMPLER_NAMES = KSAMPLER_NAMES + ["ddim", "uni_pc", "uni_pc_bh2"]
 SCHEDULER_NAMES = ["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform"]
 '''all possible schedulers'''
 
-_method_param_conut_cache: Dict[int, int] = GetOrCreateGlobalValue('__COMFY_SAMPLER_METHOD_PARAM_COUNT_CACHE__', dict)
 def _get_method_param_count(method: Callable) -> int:
-    method_id = id(method)
-    if method_id in _method_param_conut_cache:
-        return _method_param_conut_cache[method_id]
-    else:
-        if hasattr(method, '__code__'):
-            param_count = method.__code__.co_argcount
-        else:
-            param_count = len(signature(method).parameters)
-        if isinstance(method, MethodType):
-            param_count -= 1
-        _method_param_conut_cache[method_id] = param_count
-        return param_count
+    param_count = len(signature(method).parameters)
+    return param_count
 
-def _call_context_callback(callback, total_steps, dict_data_from_upper: dict):
+def _call_no_arg_callback(c, data_form_upper):
+    '''calling no-arg callback'''
+    return c()
+
+def _call_1_arg_callback(callback, total_steps, dict_data_from_upper: dict):
     from comfyUI.types import SamplingCallbackContext
     context = SamplingCallbackContext(dict_data_from_upper.pop("i"), 
                                       dict_data_from_upper.pop("denoised"), 
@@ -640,6 +633,9 @@ def _call_context_callback(callback, total_steps, dict_data_from_upper: dict):
     for key, val in dict_data_from_upper.items():
         setattr(context, key, val)
     return callback(context)
+
+def _call_4_arg_callback(callback, total_steps, dict_data_from_upper: dict):
+    return callback(dict_data_from_upper["i"], dict_data_from_upper["denoised"], dict_data_from_upper["x"], total_steps)
 
 class KSAMPLER_METHOD(Sampler):
     '''wrapper for sampling methods'''
@@ -678,14 +674,23 @@ class KSAMPLER_METHOD(Sampler):
                 callbacks = [callbacks]
             for callback in callbacks:
                 callback_arg_count = _get_method_param_count(callback)
+
                 if callback_arg_count == 0: # no arguments
-                    k_callbacks.append(lambda x: callback())
+                    k_callbacks.append(partial(_call_no_arg_callback, callback))
                 elif callback_arg_count == 1: # pass context
-                    k_callbacks.append(partial(_call_context_callback, callback, total_steps))
+                    k_callbacks.append(partial(_call_1_arg_callback, callback, total_steps))
                 elif callback_arg_count == 4:   # pass (i, denoised, x, total_steps)
-                    k_callbacks.append(lambda x: callback(x["i"], x["denoised"], x["x"], total_steps))
-                
-        samples = self.sampler_function(model_k, noise, sigmas, extra_args=extra_args, callbacks=k_callbacks, disable=disable_pbar, **self.extra_options)
+                    k_callbacks.append(partial(_call_4_arg_callback, callback, total_steps))
+                else:
+                    assert False, f"Invalid callback function signature: {callback.__name__}"
+
+        samples = self.sampler_function(model_k, 
+                                        noise, 
+                                        sigmas, 
+                                        extra_args=extra_args, 
+                                        callbacks=k_callbacks, 
+                                        disable=disable_pbar, 
+                                        **self.extra_options)
         return samples
 
 @deprecated # `KSAMPLER` is the old name of `KSAMPLER_METHOD`, now deprecated.
@@ -703,21 +708,29 @@ def get_ksampler_method(sampler_name, extra_options={}, inpaint_options={})->KSA
     elif sampler_name == "uni_pc_bh2":
         return KSAMPLER_METHOD(uni_pc.sample_unipc_bh2)
     elif sampler_name == "ddim":
-        return get_ksampler_method("euler", inpaint_options={"random": True})
+        return get_ksampler_method("euler", extra_options=extra_options, inpaint_options={"random": True})
     elif sampler_name == "dpm_fast":
-        def dpm_fast_function(model, noise, sigmas, extra_args, callbacks, disable):
+        def dpm_fast_function(model, noise, sigmas, extra_args, callbacks, disable, **kwargs):
             sigma_min = sigmas[-1]
             if sigma_min == 0:
                 sigma_min = sigmas[-2]
             total_steps = len(sigmas) - 1
-            return k_diffusion_sampling.sample_dpm_fast(model, noise, sigma_min, sigmas[0], total_steps, extra_args=extra_args, callbacks=callbacks, disable=disable)
+            return k_diffusion_sampling.sample_dpm_fast(model,
+                                                        noise, 
+                                                        sigma_min, 
+                                                        sigmas[0], 
+                                                        total_steps, 
+                                                        extra_args=extra_args, 
+                                                        callbacks=callbacks, 
+                                                        disable=disable,
+                                                        **kwargs)
         sampler_function = dpm_fast_function
     elif sampler_name == "dpm_adaptive":
-        def dpm_adaptive_function(model, noise, sigmas, extra_args, callbacks, disable):
+        def dpm_adaptive_function(model, noise, sigmas, extra_args, callbacks, disable, **kwargs):
             sigma_min = sigmas[-1]
             if sigma_min == 0:
                 sigma_min = sigmas[-2]
-            return k_diffusion_sampling.sample_dpm_adaptive(model, noise, sigma_min, sigmas[0], extra_args=extra_args, callbacks=callbacks, disable=disable)
+            return k_diffusion_sampling.sample_dpm_adaptive(model, noise, sigma_min, sigmas[0], extra_args=extra_args, callbacks=callbacks, disable=disable, **kwargs)
         sampler_function = dpm_adaptive_function
     else:
         sampler_function = getattr(k_diffusion_sampling, "sample_{}".format(sampler_name))
@@ -757,7 +770,6 @@ def sample(model: model_base.BaseModel,
            disable_pbar: Optional[bool] = False,
            seed: Optional[int] = None,
            **kwargs):
-
     positive = positive[:]
     negative = negative[:]
 
@@ -789,7 +801,14 @@ def sample(model: model_base.BaseModel,
 
     extra_args = {"cond":positive, "uncond":negative, "cond_scale": cfg, "model_options": model_options, "seed":seed}
 
-    samples = sampler.sample(model_wrap, sigmas, extra_args, noise, callbacks, latent_image, denoise_mask, disable_pbar)
+    samples = sampler.sample(model_wrap=model_wrap, 
+                             sigmas=sigmas, 
+                             extra_args=extra_args, 
+                             noise=noise, 
+                             callbacks=callbacks, 
+                             latent_image=latent_image, 
+                             denoise_mask=denoise_mask, 
+                             disable_pbar=disable_pbar)
     return model.process_latent_out(samples.to(torch.float32))
 
 
