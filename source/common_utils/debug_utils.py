@@ -1,7 +1,6 @@
 import os
 import sys
 import logging
-import signal
 import colorama
 import warnings
 

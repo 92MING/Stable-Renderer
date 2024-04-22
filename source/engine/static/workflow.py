@@ -1,4 +1,11 @@
-'''ComfyUI's Workflow class.'''
+'''ComfyUI's Workflow class, for loading to engine.'''
+
+if __name__ == '__main__':  # for debugging
+    import sys, os
+    _proj_path = os.path.abspath(os.path.join(__file__, '..', '..', '..'))
+    sys.path.append(_proj_path)
+    __package__ = 'engine.static'
+
 import json
 from typing import Tuple, Type, Union, Dict, List, Any, TYPE_CHECKING, Optional, Tuple
 from pathlib import Path
@@ -346,3 +353,10 @@ class Workflow(Dict[str, Any]):
     
     
 __all__ = ['Workflow']
+
+
+if __name__ == '__main__':
+    from common_utils.path_utils import TEMP_DIR
+    test_workflow_path = TEMP_DIR / 'workflow.json'
+    workflow = Workflow.Load(test_workflow_path)
+    print(workflow)
