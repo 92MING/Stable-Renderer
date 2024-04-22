@@ -51,28 +51,31 @@ class SphereCache(ABC):
         self._init_view_normal_thresholds()
 
     def _init_view_normal_thresholds(self):
-        thetas = [
-            i * (2 * math.pi) / self.sqrt_num_possible_views
-            for i in range(self.num_possible_views - 1)
-        ]
-        print(thetas)
-        phis = [
-            i * (math.pi / 2) / self.sqrt_num_possible_views
-            for i in range(1, self.sqrt_num_possible_views)
-        ]
-        
-        view_normal_thresholds = torch.tensor([
-            [round(n, 5) for n in self.get_cartesian_coordinates(1, theta, phi)]
-            for theta in thetas for phi in phis
-        ])
+        view_normal_thresholds = [[0, 0, 1]]
+        LEFT = torch.tensor([1, 0, 0])
+        RIGHT = torch.tensor([-1, 0, 0])
+        UP = torch.tensor([0, 1, 0])
+        DOWN = torch.tensor([0, -1, 0])
+
+
+        i_th_inner_grid_perimeter = None
+        for i in range(1, self.sqrt_num_possible_views // 2 + 1 + 1):
+            phi = i * math.pi / 2 / (self.sqrt_num_possible_views // 2 + 1)
+            if math.isclose(phi, math.pi / 2, rel_tol=1e-5):
+                view_normal_thresholds.append([0, 0, 1])
+            else:
+                if i == 0:
+                    i_th_inner_grid_perimeter = 1
+                elif i == 1:
+                    i_th_inner_grid_perimeter = 8
+                else:
+                    i_th_inner_grid_perimeter = (i_th_inner_grid_perimeter + 4) // 4 * 4 + 4
+                for j in range(i_th_inner_grid_perimeter):
+                    theta = j * 2 * math.pi / (i_th_inner_grid_perimeter)
+                    x, y, z = [round(n, 5) for n in self.get_cartesian_coordinates(1, theta, phi)]
+                    view_normal_thresholds.append([x, y, z])
         print(view_normal_thresholds)
-        # for i in range(self.sqrt_num_possible_views):
-        #     for j in range(self.sqrt_num_possible_views):
-        #         if i == self.sqrt_num_possible_views // 2 and j == self.sqrt_num_possible_views // 2:
-        #             view_normal_thresholds[i, j] = [0, 0, 1]
-        #         else:
-        #             view_normal_thresholds[i, j] = 
-        # view_normal_thresholds[self.sqrt_num_possible_views // 2, self.sqrt_num_possible_views // 2] = [0, 0, 1]
+        print(len(view_normal_thresholds))
 
 
 
@@ -362,5 +365,5 @@ if __name__ == '__main__':
     historical_positions_file = "/mnt/disk2/Stable-Renderer-Previous/Stable-Renderer/resources/example-sphere-and-object-views/historical_pos.json"
 
     cache = OpenGLSphereCache.from_numpy_files(
-        9, (1024, 1024), sphere_id_files_dir, sphere_normal_files_dir, object_views_file_dir, historical_positions_file, 15
+        25, (1024, 1024), sphere_id_files_dir, sphere_normal_files_dir, object_views_file_dir, historical_positions_file, 15
     )
