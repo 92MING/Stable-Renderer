@@ -1,4 +1,5 @@
 import torch
+import inspect
 from deprecated import deprecated
 from typing import (Union, TypeAlias, Literal, Optional, List, Any, Type, Dict, Tuple, TYPE_CHECKING, 
                     Sequence, TypeVar, Generic, Set, NamedTuple, Union, Callable)
@@ -181,7 +182,7 @@ class NodePool(Dict[Tuple[str, str], "ComfyUINode"]):
             node = node_type()
             setattr(node, 'ID', node_id)
             # '__IS_COMFYUI_NODE__' should already be set in `nodes.py`
-            self[node_id] = node
+            super().__setitem__((node_id, node_type_name), node)
         
         node = super().__getitem__((node_id, node_type_name))
         setattr(node, 'ID', node_id) if not hasattr(node, 'ID') else None
@@ -205,6 +206,7 @@ class NodePool(Dict[Tuple[str, str], "ComfyUINode"]):
                 if not node_type:
                     node = self[node_id]    # will raise KeyError if not found
                 else:
+                    print("Node id", node_id, " node type ", node_type)
                     return self[(node_id, node_type)]   # will create if not found
             except KeyError as e:
                 if raise_err:

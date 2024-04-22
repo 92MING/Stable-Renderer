@@ -168,7 +168,19 @@ def sample(model: comfy.model_patcher.ModelPatcher,
 
     sampler = comfy.samplers.KSampler(real_model, steps=steps, device=model.load_device, sampler=sampler_name, scheduler=scheduler, denoise=denoise, model_options=model.model_options)
 
-    samples = sampler.sample(noise, positive_copy, negative_copy, cfg=cfg, latent_image=latent_image, start_step=start_step, last_step=last_step, force_full_denoise=force_full_denoise, denoise_mask=noise_mask, sigmas=sigmas, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)
+    samples = sampler.sample(noise, 
+                             positive_copy, 
+                             negative_copy, 
+                             cfg=cfg, 
+                             latent_image=latent_image, 
+                             start_step=start_step, 
+                             last_step=last_step, 
+                             force_full_denoise=force_full_denoise, 
+                             denoise_mask=noise_mask, 
+                             sigmas=sigmas, 
+                             callbacks=callbacks, 
+                             disable_pbar=disable_pbar, 
+                             seed=seed)
     samples = samples.to(comfy.model_management.intermediate_device())
 
     cleanup_additional_models(models)

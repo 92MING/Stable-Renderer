@@ -48,7 +48,7 @@ def reload_nodes():
     SetGlobalValue("__COMFYUI_NODE_DISPLAY_NAME_MAPPINGS__", None)
     SetGlobalValue("__COMFYUI_EXTENSION_WEB_DIRS__", None)
     nodes_module_spec.loader.exec_module(nodes)  # type: ignore
-    nodes.init_custom_nodes(reload_mode=True)
+    nodes.init_custom_nodes(True)
     ComfyUILogger.debug('Nodes reloaded.')
 
 class BinaryEventTypes:

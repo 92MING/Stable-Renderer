@@ -122,6 +122,8 @@ def run()->execution.PromptExecutor:
                 server.last_prompt_id = prompt_id
 
                 context = e.execute(item[2], prompt_id, item[3], item[4])
+                context.outputs_ui = {k: v for k, v in context.outputs_ui.items() if v}
+                print(context.outputs_ui)
                 need_gc = True
                 q.task_done(item_id=item_id,
                             outputs_ui=context.outputs_ui,
