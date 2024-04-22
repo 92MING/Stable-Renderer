@@ -528,7 +528,7 @@ __all__.extend(['LATENT', 'VAE', 'CLIP', 'CONTROL_NET', 'MODEL', 'IMAGE', 'MASK'
 # region return types
 def Named(tp: Union[type, TypeAlias, AnnotatedParam], return_name: str):
     '''Type hint for specifying a named return value.'''
-    return AnnotatedParam(tp, param_name=return_name)
+    return Annotated[tp, return_name]   # type: ignore
 globals()['Named'] = GetableFunc(Named)    # trick for faking IDE to believe ReturnType is a function
 
 class UI(Generic[_T]):

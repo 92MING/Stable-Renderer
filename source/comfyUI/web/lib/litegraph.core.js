@@ -103,6 +103,7 @@
         node_types_by_file_extension: {}, //used for dropping files in the canvas
         Nodes: {}, //node types by classname
 		Globals: {}, //used to store vars between graphs
+        TypeMatchings: {}, // contains all acceptable type matchings, e.g. {"TEXTURE":["IMGAE", "LATENT"]} 
 
         searchbox_extras: {}, //used to add extra features to the search box
         auto_sort_node_types: false, // [true!] If set to true, will automatically sort node types / categories in the context menus
@@ -637,6 +638,21 @@
             // Enforce string type to handle toLowerCase call (-1 number not ok)
             type_a = String(type_a);
             type_b = String(type_b);
+
+            let type_a_upper = type_a.toUpperCase();
+            let type_b_upper = type_b.toUpperCase();
+            
+            // define ur custom available convertion by inheriting 'Adapter'(adapter.py)
+            if ((LiteGraph.TypeMatchings["*"] && LiteGraph.TypeMatchings["*"].includes(type_b_upper)) ||
+                (LiteGraph.TypeMatchings["ANY"] && LiteGraph.TypeMatchings["ANY"].includes(type_b_upper))) {    
+                return true;
+            }
+
+            // check if TypeMatchings[type_a] is an array and if type_b is in it
+            if (LiteGraph.TypeMatchings[type_a_upper] && LiteGraph.TypeMatchings[type_a_upper].includes(type_b_upper)) {
+                return true;
+            }
+
             type_a = type_a.toLowerCase();
             type_b = type_b.toLowerCase();
 

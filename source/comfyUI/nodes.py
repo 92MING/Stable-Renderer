@@ -2052,15 +2052,10 @@ def load_custom_nodes(raise_err=False):
     for advance_node_cls in NodeBase._AllSubclasses():
         if advance_node_cls._IsAbstract:
             continue
-        cls_qual_name = advance_node_cls.__qualname__
         cls_real_name = advance_node_cls._RealClsName
         cls_namespace = advance_node_cls.NameSpace or ""
-        advance_node_mapping[(cls_qual_name, cls_namespace)] = advance_node_cls._RealComfyUINodeCls
-        advance_node_name_mapping[(cls_qual_name, cls_namespace)] = advance_node_cls._ReadableName
-        
-        if cls_qual_name != cls_real_name:
-            advance_node_mapping[(cls_real_name, cls_namespace)] = advance_node_cls._RealComfyUINodeCls
-            advance_node_name_mapping[(cls_real_name, cls_namespace)] = advance_node_cls._ReadableName
+        advance_node_mapping[(cls_real_name, cls_namespace)] = advance_node_cls._RealComfyUINodeCls
+        advance_node_name_mapping[(cls_real_name, cls_namespace)] = advance_node_cls._ReadableName
             
     NODE_CLASS_MAPPINGS.update(advance_node_mapping)
     NODE_DISPLAY_NAME_MAPPINGS.update(advance_node_name_mapping)

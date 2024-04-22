@@ -7,9 +7,11 @@ if __name__ == '__main__':  # for debugging
     sys.path.append(_proj_path)
     __package__ = 'common_utils'
 
+import torch
+import numpy as np
 import inspect
 import re
-
+import json
 from dataclasses import dataclass
 from inspect import Parameter, signature, _empty, getmro
 from collections import OrderedDict
@@ -17,7 +19,8 @@ from typing import (Any, Sequence, Union, ForwardRef, get_args as tp_get_args, g
                     Iterable, Mapping, Literal, TypeAlias, Tuple, _SpecialForm, Type, Dict)
 from types import UnionType
 from inspect import getmro, signature
-
+from pydantic.v1 import BaseModel as BaseModelV1
+from pydantic import BaseModel as BaseModelV2
 from typeguard import check_type as tg_check_type
 try:
     from typeguard import TypeCheckError    # type: ignore
@@ -29,7 +32,7 @@ _tg_check_type_required_param_count = sum(1 for p in _tg_check_type_params.value
 def _wrapped_tg_check_type(val, t):
     if _tg_check_type_required_param_count >= 3:
         try:
-            tg_check_type("", val, t)
+            tg_check_type("", val, t)   # type: ignore
             return True
         except TypeCheckError:
             return False
@@ -39,15 +42,13 @@ def _wrapped_tg_check_type(val, t):
             return True
         except TypeCheckError:
             return False
-    
-from functools import cache
+
 from pathlib import Path
 
 from .path_utils import SOURCE_DIR
 from .global_utils import GetOrCreateGlobalValue
 
 # region type checking
-@cache
 def _direct_check_sub_cls(sub_cls:Union[TypeAlias, str], super_cls:Union[TypeAlias, str]):
     if super_cls in (Any, any):
         return True
@@ -146,8 +147,7 @@ def valueTypeCheck(value:Any, types: Union[str, type, TypeAlias, Sequence[Union[
                 return True
             except (TypeError, TypeCheckError):
                 return False
-
-@cache  
+  
 def subClassCheck(sub_cls:Union[str, type, TypeAlias, Any], super_cls: Union[str, type, TypeAlias, Any, Sequence[Union[TypeAlias, str]]])->bool:
     '''
     Check if sub_cls is a subclass of super_cls.
@@ -454,7 +454,60 @@ def is_empty_method(method):
     lines = [line for line in lines if not line.startswith(('#', '"""',"'''")) and not line == 'pass']
     return not lines
 
-__all__.extend(['pack_param', 'func_param_type_check', 'is_empty_method'])
+def _check_dumpable(val):
+    if isinstance(val, (BaseModelV1, BaseModelV2)):
+        try:
+            return True, val.json()
+        except:
+            return False, None
+    elif isinstance(val, (np.ndarray, torch.Tensor)):
+        return True, val.tolist()
+    try:
+        _ = json.dumps(val)
+        return True, val    # do not need to really dump, just return the original value
+    except TypeError:
+        return False, None
+
+def brute_dump_json(data):
+    '''
+    Try the best to dump the data to json format.
+    Warning: this method may consumes a lot.
+    '''
+    if isinstance(data, dict):
+        data_dict = {}
+        for key, val in data.items():
+            key_dumpable, key_python_dump = _check_dumpable(key)
+            if not key_dumpable:
+                tidy_key = hash(key)
+            else:
+                tidy_key = key  # still using the original key
+            val_dumpable, val_python_dump = _check_dumpable(val)
+            if not val_dumpable:
+                val = brute_dump_json(val)
+            else:
+                val = val_python_dump
+            data_dict[tidy_key] = val
+        return data_dict
+            
+    elif isinstance(data, (list, tuple)):
+        data_array = []
+        for val in data:
+            val_dumpable, val_python_dump = _check_dumpable(val)
+            if not val_dumpable:
+                val = brute_dump_json(val)
+            else:
+                val = val_python_dump
+            data_array.append(val)
+        return data_array
+    
+    else:
+        dumpable, python_dump_val = _check_dumpable(data)
+        if dumpable:
+            return python_dump_val
+        else:
+            return str(data)
+
+__all__.extend(['pack_param', 'func_param_type_check', 'is_empty_method', 'brute_dump_json'])
 # endregion
 
 
@@ -540,3 +593,13 @@ globals()['DynamicLiteral'] = GetableFunc(_DynamicLiteral)    # trick for faking
 
 __all__.extend(['NameCheckMetaCls', 'GetableFunc', 'DynamicLiteral'])
 # endregion
+
+
+if __name__=='__main__':
+    class A:
+        def __hash__(self):
+            return super().__hash__()
+        
+    d = {A():A(), 'b': {'123': torch.Tensor()}}
+    data = brute_dump_json(d)
+    print(data, type(data['b']['123']))

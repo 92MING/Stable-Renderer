@@ -562,7 +562,7 @@ class RenderManager(Manager):
         # output map data for debug
         if self.engine.DiffusionManager.ShouldOutputFrame:    
             idData = self.idFBOTex.numpy_data(flipY=True)
-            posData = self.posFBOTex.numpy_data(True)
+            posData = self.posFBOTex.numpy_data(flipY=True)
             
             normal_and_depth_data = self.normal_and_depth_FBOTex.numpy_data(flipY=True)
             # depth data is in the alpha channel of `normal_and_depth_data`
