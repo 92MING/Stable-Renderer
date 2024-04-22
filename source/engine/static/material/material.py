@@ -226,7 +226,7 @@ class Material(ResourcesObj):
 
     # region variables
     def setVariable(self, name:str, value:SupportedShaderValueTypes):
-        if not valueTypeCheck(value, SupportedShaderValueTypes):
+        if not valueTypeCheck(value, SupportedShaderValueTypes):    # type: ignore
             raise TypeError(f'Unsupported value type {type(value)} for material variable {name}. Supported types are {get_args(SupportedShaderValueTypes)}')
         self._variables[name] = value
     # endregion

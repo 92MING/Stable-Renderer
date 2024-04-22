@@ -1,7 +1,8 @@
 import os.path
+import cv2
 import numpy as np
 import multiprocessing
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
@@ -68,12 +69,15 @@ class DiffusionManager(Manager):
     # endregion
 
     # region output maps
-    def _outputNumpyData(self, name:str, data:np.ndarray):
+    def _outputNumpyData(self, name:str, data:np.ndarray, frame_num: Optional[int]=None):
         '''output data in .npy format directly'''
         outputPath = os.path.join(self._outputPath, name)
         if not os.path.exists(outputPath):
             os.makedirs(outputPath)
-        np.save(os.path.join(outputPath, f'{name}_{self.engine.RuntimeManager.FrameCount}.npy'), data)
+        if frame_num is not None:
+            np.save(os.path.join(outputPath, f'{name}_{frame_num}.npy'), data)
+        else:
+            np.save(os.path.join(outputPath, f'{name}.npy'), data)
         
     def OutputNumpyData(self, name:str, data:np.ndarray):
         '''
@@ -83,9 +87,9 @@ class DiffusionManager(Manager):
         :return:
         '''
         if self._needOutputMaps:
-            self._threadPool.submit(self._outputNumpyData, name, data)
+            self._threadPool.submit(self._outputNumpyData, name, data, self.engine.RuntimeManager.FrameCount)
         
-    def _outputMap(self, name:str, mapData:np.ndarray, multi255=True, dataType=np.uint8):
+    def _outputMap(self, name:str, mapData:np.ndarray, multi255=True, dataType=np.uint8, frame_num:Optional[int]=None):
         '''this method will be pass to thread pool for saving maps asynchronously'''
         outputFormat = "RGBA"
         if multi255:
@@ -106,7 +110,11 @@ class DiffusionManager(Manager):
         outputPath = os.path.join(self._outputPath, name)
         if not os.path.exists(outputPath):
             os.makedirs(outputPath)
-        img.save(os.path.join(outputPath, f'{name}_{self.engine.RuntimeManager.FrameCount}.png'))
+        
+        if frame_num is not None:
+            img.save(os.path.join(outputPath, f'{name}_{frame_num}.png'))
+        else:
+            img.save(os.path.join(outputPath, f'{name}.png'))
 
     def OutputMap(self, name:str, mapData:np.ndarray, multi255=True, dataType=np.uint8):
         '''
@@ -118,9 +126,9 @@ class DiffusionManager(Manager):
         :return:
         '''
         if self._needOutputMaps:
-            self._threadPool.submit(self._outputMap, name, mapData, multi255, dataType)
+            self._threadPool.submit(self._outputMap, name, mapData, multi255, dataType, self.engine.RuntimeManager.FrameCount)
 
-    def _outputDepthMap(self, mapData:np.ndarray):
+    def _outputDepthMap(self, mapData:np.ndarray, frame_num: Optional[int]=None):
         depth_data_max, depth_data_min = np.max(mapData), np.min(mapData[mapData > 0])
         diff = depth_data_max - depth_data_min
         if diff != 0:
@@ -133,26 +141,33 @@ class DiffusionManager(Manager):
         outputPath = os.path.join(self._outputPath, 'depth')
         if not os.path.exists(outputPath):
             os.makedirs(outputPath)
-        depth_img.save(os.path.join(outputPath, f'depth_{self.engine.RuntimeManager.FrameCount}.png'))
-
+        
+        if frame_num is not None:
+            depth_img.save(os.path.join(outputPath, f'depth_{frame_num}.png'))
+        else:
+            depth_img.save(os.path.join(outputPath, f'depth.png'))
+            
     def OutputDepthMap(self, mapData:np.ndarray):
         '''output method especially for depth map'''
         if self._needOutputMaps:
-            self._threadPool.submit(self._outputDepthMap, mapData)
+            self._threadPool.submit(self._outputDepthMap, mapData, self.engine.RuntimeManager.FrameCount)
     
-    def _outputCannyMap(self, mapData:np.ndarray):
-        import cv2
+    def _outputCannyMap(self, mapData:np.ndarray, frame_num: Optional[int]=None):
         mapData = (mapData * 255).astype(np.uint8)
         canny = cv2.Canny(mapData, 100, 200)
         outputPath = os.path.join(self._outputPath, 'canny')
         if not os.path.exists(outputPath):
             os.makedirs(outputPath)
-        cv2.imwrite(os.path.join(outputPath, f'canny_{self.engine.RuntimeManager.FrameCount}.png'), canny)
+        
+        if frame_num is not None:
+            cv2.imwrite(os.path.join(outputPath, f'canny_{frame_num}.png'), canny)
+        else:
+            cv2.imwrite(os.path.join(outputPath, 'canny.png'), canny)
     
     def OutputCannyMap(self, mapData:np.ndarray):
         '''output method especially for canny map'''
         if self._needOutputMaps:
-            self._threadPool.submit(self._outputCannyMap, mapData)
+            self._threadPool.submit(self._outputCannyMap, mapData, self.engine.RuntimeManager.FrameCount)
     # endregion
 
     

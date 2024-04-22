@@ -19,6 +19,7 @@ class Renderer(Component):
     def material(self)->Material:
         '''Return the first material in the list. If the list is empty, return None.'''
         return self._materials[0] if len(self._materials) > 0 else None
+    
     @material.setter
     def material(self, value):
         '''Set the first material in the list. If the list is empty, add the material to the list.'''

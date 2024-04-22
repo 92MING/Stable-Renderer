@@ -603,8 +603,8 @@ class Texture(ResourcesObj):
     
     @staticmethod
     def CreateNoiseTex(name:Optional[str]=None,
-                       height: int = 512,
-                       width: int = 512,
+                       height: Optional[int] = None,
+                       width: Optional[int] = None,
                        sigma: float = 1.0,
                        channel_count = 4,
                        data_size: Literal[16, 32] = 16,
@@ -633,6 +633,11 @@ class Texture(ResourcesObj):
             - internalFormat: The specific OpenGL internal format of the texture. If not given, it will be set to the default internal format of the format.
             - share_to_torch: If true, the texture will be shared to torch by using cuda.
         '''
+        
+        from engine.engine import Engine
+        height = height or Engine.Instance().WindowManager.WindowHeight
+        width = width or Engine.Instance().WindowManager.WindowWidth
+        
         if not name:
             name = f"RandomNoiseTex_{width}x{height}"
             count = 0
@@ -644,7 +649,7 @@ class Texture(ResourcesObj):
         
         assert data_size in (16, 32), 'Invalid data size: {}'.format(data_size)
         dtype = {16: np.float16, 32: np.float32}[data_size]
-        data = np.random.normal(0, sigma, (height, width, channel_count)).astype(dtype)
+        data = np.random.normal(0, sigma, (height, width, channel_count)).astype(dtype) # type: ignore
         
         if not internalFormat:
             if channel_count == 1:

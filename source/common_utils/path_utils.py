@@ -42,7 +42,7 @@ EXAMPLE_MAP_OUTPUT_DIR = RESOURCES_DIR / 'example-map-outputs'
 
 __all__.extend(['RESOURCES_DIR', 'EXAMPLE_3D_MODEL_DIR', 'EXAMPLE_MAP_OUTPUT_DIR',])
 
-TEMP_DIR = PROJECT_DIR / 'temp'
+TEMP_DIR = PROJECT_DIR / 'tmp'
 '''temp directory, for temporary files/ test codes. This folder will not be pushed to git.'''
 COMFYUI_TEMP_DIR = TEMP_DIR / 'comfyui'
 '''comfyui temp directory, for temporary files/ test codes. This folder will not be pushed to git.'''

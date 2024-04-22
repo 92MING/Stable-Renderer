@@ -628,6 +628,7 @@ SamplerCallback: TypeAlias = Union[
     Callable[[SamplingCallbackContext], Any],    # pass context
     Callable[[int, torch.Tensor, torch.Tensor, int], Any]   # pass (i, denoised, x, total_steps)
 ]
+'''callback when a inference step is finished''' 
 
 
 __all__ = ['InferenceContext', 'SamplingCallbackContext', 'SamplerCallback',

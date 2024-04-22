@@ -52,6 +52,12 @@ class Engine:
     Create and run the engine by calling `Engine.Run()`. It will create a singleton instance of the engine and run it.
     '''
     
+    @staticmethod
+    def Instance():
+        if not _EngineInstance:
+            raise RuntimeError('Engine is not initialized yet.')
+        return _EngineInstance
+    
     @class_or_ins_property  # type: ignore
     def IsLooping(cls_or_self)->bool:
         '''Whether the engine is within running stage(FrameBegin, FrameRun, FrameEnd).'''
