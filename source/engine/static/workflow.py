@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 def _get_comfy_node_type(type_name: str):
     from comfyUI.types import get_node_type_by_name
-    if not (t := get_node_type_by_name(type_name)):
+    if not (t := get_node_type_by_name(type_name, init_nodes_if_not_yet=True)):
         raise ValueError(f'Cannot find the type {type_name}.')
     return t
 
@@ -73,14 +73,17 @@ class WorkflowNodeInputParam:
 @dataclass
 class WorkflowNodeOutputParam:
     '''The output parameter of a node.'''
-    
     name: str
     '''the name of the output parameter.'''
     type_name: str
     '''the output type's name.'''
+    slot: int
+    '''the slot of the output parameter.'''
     to_nodes: List[str] = field(default_factory=list)
     '''ids of the nodes that the output parameter links to.'''
-    
+
+class InvalidNodeError(Exception): ...
+
 class WorkflowNodeInfo(Dict[str, Any]):
     
     _cls_type: Type['ComfyUINode']
@@ -137,7 +140,7 @@ class WorkflowNodeInfo(Dict[str, Any]):
                                                                               None, 
                                                                               node_cls_input_types['optional'][input_name][0])
                     else:
-                        raise ValueError(f'Cannot find the link id for input {input_name}.')
+                        raise InvalidNodeError(f'Cannot find the link id for input {input_name}.')
                 else:
                     link = links[link_id]
                     param_type = 'required' if input_name in required_input_names else 'optional'
@@ -177,11 +180,16 @@ class WorkflowNodeInfo(Dict[str, Any]):
         # init outputs
         formatted_outputs = []
         if 'outputs' in self:
-            for output in self['outputs']:
+            for i, output in enumerate(self['outputs']):
                 output_name = output['name']
                 output_type = output['type']
-                output_to_nodes = [str(i) for i in output.get('links', [])]
-                formatted_outputs.append(WorkflowNodeOutputParam(output_name, output_type, output_to_nodes))        
+                output_links = output.get('links', [])
+                if output_links:    # can be None if no nodes are linked to this output.
+                    output_to_nodes = [str(i) for i in output_links]
+                    formatted_outputs.append(WorkflowNodeOutputParam(name=output_name, 
+                                                                     type_name=output_type, 
+                                                                     slot=i, 
+                                                                     to_nodes=output_to_nodes))        
         self._outputs = formatted_outputs
         
     @property
@@ -239,10 +247,51 @@ class WorkflowNodeInfo(Dict[str, Any]):
     
     @staticmethod
     def _ParseNodeInfos(infos: List[Dict], links: Dict[int, WorkflowNodeLink])->'Dict[str, WorkflowNodeInfo]':
-        datas = {}
+        datas: Dict[str, WorkflowNodeInfo] = {}
+        invalid_node_ids = set()
         for info in infos:
             info['id'] = str(info['id'])
-            datas[info['id']] = WorkflowNodeInfo(info, links)
+            try:
+                datas[info['id']] = WorkflowNodeInfo(info, links)
+            except InvalidNodeError:  
+                # the node's input is not complete, means this node is not a valid node
+                # e.g a useless node but forgot to delete it. So we just skip it.
+                if 'type' in info:
+                    node_type = info['type']
+                    EngineLogger.warning(f'Node {info["id"]}({node_type}) is not a valid node, skipped.')
+                else:
+                    EngineLogger.warning(f'Node {info["id"]} is not a valid node, skipped.')
+                try:
+                    del datas[info['id']]
+                except KeyError:
+                    pass
+                invalid_node_ids.add(info['id'])
+        
+        from comfyUI.types import NodeBindingParam
+        has_add_new_invalid = True
+        while has_add_new_invalid:
+            need_break = False
+            for node_id in datas.keys():
+                data = datas[node_id]
+                for input_param in data.inputs.values():
+                    if isinstance(input_param.value, NodeBindingParam):
+                        if input_param.value[0] in invalid_node_ids:
+                            EngineLogger.warning(f'Node {node_id}({data.cls_type_name}) has an invalid input link to node {input_param.value[0]}, skipped.')
+                            del datas[node_id]
+                            invalid_node_ids.add(node_id)
+                            has_add_new_invalid = True
+                            need_break = True
+                            break
+                if need_break:
+                    break
+                else:
+                    for output_param in data.outputs:
+                        if any([to_node_id in invalid_node_ids for to_node_id in output_param.to_nodes]):
+                            output_param.to_nodes = [to_node_id for to_node_id in output_param.to_nodes if to_node_id not in invalid_node_ids]
+                    if need_break:
+                        break
+            else:
+                has_add_new_invalid = False
         return datas
 
 class Workflow(Dict[str, Any]):
@@ -359,7 +408,7 @@ __all__ = ['Workflow']
 
 
 if __name__ == '__main__':
-    from common_utils.path_utils import TEMP_DIR
+    from common_utils.path_utils import TEMP_DIR, COMFYUI_DIR
+    __file__ = COMFYUI_DIR / 'main.py'  # some comfyUI packages need this to do init.
     test_workflow_path = TEMP_DIR / 'test_workflow.json'
     workflow = Workflow.Load(test_workflow_path)
-    print(workflow)

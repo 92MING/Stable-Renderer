@@ -5,6 +5,8 @@ from enum import Enum
 from pathlib import Path
 
 from common_utils.type_utils import get_cls_name
+from common_utils.global_utils import GetGlobalValue
+
 
 if TYPE_CHECKING:
     from .basic import NodeInputParamType
@@ -128,12 +130,20 @@ def get_input_param_type(param: Parameter,
     
     return 'required'  
 
-def get_node_type_by_name(name: str, namespace: Optional[str]=None)->Optional[Type["ComfyUINode"]]:
+def get_node_type_by_name(name: str, namespace: Optional[str]=None, init_nodes_if_not_yet=False)->Optional[Type["ComfyUINode"]]:
     '''this method will only return corret result when custom nodes are initialized'''
     from comfyUI.nodes import NODE_CLASS_MAPPINGS
     try:
         return NODE_CLASS_MAPPINGS[(name, namespace)]
     except KeyError:
+        if not GetGlobalValue("__COMFYUI_CUSTOM_NODES_INITED__", False):
+            if init_nodes_if_not_yet:
+                from comfyUI.nodes import init_custom_nodes
+                init_custom_nodes()
+                try:
+                    return NODE_CLASS_MAPPINGS[(name, namespace)]
+                except KeyError:
+                    return None 
         return None
 
 __all__ = ['get_comfy_name', 'get_comfy_type_definition', 'get_input_param_type', 'get_node_type_by_name']
