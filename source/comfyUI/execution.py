@@ -17,8 +17,11 @@ import comfy.model_management
 
 from common_utils.debug_utils import ComfyUILogger, get_log_level_by_name
 from common_utils.decorators import singleton, class_property, Overload
+from common_utils.global_utils import is_dev_mode
+
 from comfyUI.types import *
 from comfyUI.adapters import find_adapter
+
 
 if TYPE_CHECKING:
     from comfyUI.server import PromptServer
@@ -572,6 +575,9 @@ class PromptExecutor:
             return RecursiveExecuteResult(False, error_details, iex)
         
         except Exception as ex:
+            if is_dev_mode():
+                raise ex
+            
             typ, _, tb = sys.exc_info()
             exception_type = _get_full_type_name(typ)
             input_data_formatted = {}
@@ -893,7 +899,7 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
     obj_class = nodes.NODE_CLASS_MAPPINGS[class_type]
 
     class_inputs = obj_class.INPUT_TYPES()
-    required_inputs = class_inputs['required']
+    required_inputs = class_inputs.get('required', [])
 
     errors = []
     valid = True
@@ -971,6 +977,9 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
                     valid = False
                     continue
             except Exception as ex:
+                if is_dev_mode():
+                    raise ex
+                
                 typ, _, tb = sys.exc_info()
                 valid = False
                 exception_type = _get_full_type_name(typ)
@@ -1001,6 +1010,8 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
                     val = str(val)
                     inputs[x] = val
             except Exception as ex:
+                if is_dev_mode():
+                    raise ex
                 error = {
                     "type": "invalid_input_type",
                     "message": f"Failed to convert an input value to a {type_input} value",
@@ -1148,6 +1159,9 @@ def validate_prompt(prompt: Union[dict, PROMPT], prompt_id: Optional[str]=None) 
             valid = m[0]
             reasons: list = m[1]    # type: ignore
         except Exception as ex:
+            if is_dev_mode():
+                raise ex
+
             typ, _, tb = sys.exc_info()
             valid = False
             exception_type = _get_full_type_name(typ)

@@ -626,10 +626,10 @@ def _call_no_arg_callback(c, data_form_upper):
 
 def _call_1_arg_callback(callback, total_steps, dict_data_from_upper: dict):
     from comfyUI.types import SamplingCallbackContext
-    context = SamplingCallbackContext(dict_data_from_upper.pop("i"), 
-                                      dict_data_from_upper.pop("denoised"), 
-                                      dict_data_from_upper.pop("x"),
-                                      total_steps)
+    context = SamplingCallbackContext(step_index=dict_data_from_upper.pop("i"), 
+                                      denoised=dict_data_from_upper.pop("denoised"), 
+                                      noise=dict_data_from_upper.pop("x"), 
+                                      total_steps=total_steps)
     for key, val in dict_data_from_upper.items():
         setattr(context, key, val)
     return callback(context)

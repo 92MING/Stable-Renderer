@@ -24,7 +24,6 @@ class Overlap:
     def __init__(
         self,
         alpha_scheduler: 'Scheduler',
-        corr_map_decay_scheduler: 'Scheduler',
         kernel_radius_scheduler: Scheduler,
         algorithm: OverlapAlgorithm,
         max_workers: int = 1,
@@ -46,7 +45,6 @@ class Overlap:
 
         # Module for scheduling alpha, no need to be private
         self.alpha_scheduler = alpha_scheduler
-        self.corr_map_decay_scheduler = corr_map_decay_scheduler
         self.kernel_radius_scheduler = kernel_radius_scheduler
 
     @property
@@ -182,7 +180,6 @@ class ResizeOverlap(Overlap):
     def __init__(
         self,
         alpha_scheduler: Scheduler,
-        corr_map_decay_scheduler: Scheduler,
         kernel_radius_scheduler: Scheduler,
         algorithm: OverlapAlgorithm,
         max_workers: int = 1,
@@ -191,7 +188,6 @@ class ResizeOverlap(Overlap):
     ):
         super().__init__(
             alpha_scheduler=alpha_scheduler,
-            corr_map_decay_scheduler=corr_map_decay_scheduler,
             kernel_radius_scheduler=kernel_radius_scheduler,
             algorithm=algorithm,
             max_workers=max_workers,
