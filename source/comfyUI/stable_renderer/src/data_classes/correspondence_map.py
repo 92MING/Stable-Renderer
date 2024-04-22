@@ -75,7 +75,8 @@ class CorrespondenceMap:
                      directory: Union[str, Path, None] = None,
                      num_frames: Optional[int] = None,
                      get_pixel_position_callback: Optional[Callable[[int, int], Tuple[int, int]]] = None,
-                     enable_strict_checking: bool = True,):
+                     enable_strict_checking: bool = False,
+                     enable_cache: bool = True) -> "CorrespondenceMap":
         r"""
         Create CorrespondenceMap instance from using the numpy files in an existing output path .
         Directory should exist and numeric values should be present in the filename for every files.
@@ -100,17 +101,18 @@ class CorrespondenceMap:
         if is_windows():
             directory = directory.replace('/', '\\')
 
-        cache_path = None
-        if os.path.isfile(directory) and directory.endswith('.pkl'):
-            cache_path = directory
-        elif 'corr_map.pkl' in os.listdir(directory):   # if the cache file is in the directory
-            cache_path = os.path.join(directory, 'corr_map.pkl')
-        elif directory.endswith('id') and 'corr_map.pkl' in os.listdir(os.path.join(directory, '..')):
-            cache_path = os.path.join(directory, '..', 'corr_map.pkl')
-        if cache_path is not None:
-            cache_corr_map = cls.load_correspondence_map_from_cache(cache_path)
-            if cache_corr_map is not None:
-                return cache_corr_map
+        if enable_cache:
+            cache_path = None
+            if os.path.isfile(directory) and directory.endswith('.pkl'):
+                cache_path = directory
+            elif 'corr_map.pkl' in os.listdir(directory):   # if the cache file is in the directory
+                cache_path = os.path.join(directory, 'corr_map.pkl')
+            elif directory.endswith('id') and 'corr_map.pkl' in os.listdir(os.path.join(directory, '..')):
+                cache_path = os.path.join(directory, '..', 'corr_map.pkl')
+            if cache_path is not None:
+                cache_corr_map = cls.load_correspondence_map_from_cache(cache_path)
+                if cache_corr_map is not None:
+                    return cache_corr_map
         
         assert os.path.exists(directory), f"Directory {directory} not found"
         assert os.path.isdir(directory), f"{directory} is not a directory"

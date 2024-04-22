@@ -14,10 +14,14 @@ class CorrespondenceMapLoader(StableRendererNodeBase):
     Category = "loader"
 
     def __call__(self,
-                 directory: Path,
+                 directory: STRING(forceInput=True),
                  num_frames: INT(min=0),  # type: ignore
+                 merge_nearby: INT(min=0) = 5,
+                 enable_cache: bool = True # type: ignore
         ) -> CorrespondenceMap:
-        return CorrespondenceMap.from_existing(directory, num_frames)
+        corr_map = CorrespondenceMap.from_existing(directory, num_frames, enable_cache=enable_cache)
+        corr_map.merge_nearby(merge_nearby)
+        return corr_map
 
 
 class ImageSequenceLoader(StableRendererNodeBase):
