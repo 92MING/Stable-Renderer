@@ -14,7 +14,7 @@ import safetensors.torch
 
 from PIL import Image, ImageOps, ImageSequence
 from PIL.PngImagePlugin import PngInfo
-from typing import (Dict, Tuple, List, Any, Optional, Callable, Type, TYPE_CHECKING)
+from typing import (Dict, Tuple, List, Literal, Any, Optional, Callable, Type, TYPE_CHECKING)
 
 from common_utils.global_utils import GetGlobalValue, SetGlobalValue, GetOrAddGlobalValue, is_dev_mode, should_run_web_server
 from common_utils.debug_utils import ComfyUILogger
@@ -1364,17 +1364,27 @@ def custom_ksampler(model: "ModelPatcher",
                     negative: "Conditioning",
                     latent: Dict[str, Any],
                     denoise: float = 1.0,
-                    disable_noise: bool = False,
+                    noise_option: Literal['disable', 'default', 'incoming'] = 'default',
                     start_step: Optional[int] = None,
                     last_step: Optional[int] = None,
                     force_full_denoise: bool = False,
                     callbacks: List[Callable] = []) -> Tuple[Dict[str, Any]]:
     latent_image = latent["samples"]
-    if disable_noise:
-        noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
-    else:
-        batch_inds = latent["batch_index"] if "batch_index" in latent else None
-        noise = comfy.sample.prepare_noise(latent_image, seed, batch_inds)
+    match noise_option:
+        case 'disable':
+            noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
+        case 'default':
+            batch_inds = latent["batch_index"] if "batch_index" in latent else None
+            noise = comfy.sample.prepare_noise(latent_image, seed, batch_inds)
+        case 'incoming':
+            noise = latent["noise"]
+        case _:
+            raise ValueError(f"Invalid noise option: {noise_option}")
+    # if disable_noise:
+    #     noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
+    # else:
+    #     batch_inds = latent["batch_index"] if "batch_index" in latent else None
+    #     noise = comfy.sample.prepare_noise(latent_image, seed, batch_inds)
 
     noise_mask = None
     if "noise_mask" in latent:
@@ -1383,7 +1393,7 @@ def custom_ksampler(model: "ModelPatcher",
     callbacks.append(latent_preview.prepare_callback(model, steps))
     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
-                                  denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step, # type: ignore
+                                  denoise=denoise, disable_noise=(noise_option == 'disable'), start_step=start_step, last_step=last_step, # type: ignore
                                   force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)
     out = latent.copy()
     out["samples"] = samples

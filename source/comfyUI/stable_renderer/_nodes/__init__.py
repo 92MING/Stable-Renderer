@@ -9,3 +9,4 @@ from .loaders import *
 from .samplers import *
 from .schedulers import *
 from .processing import *
+from .latent import *

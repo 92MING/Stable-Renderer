@@ -113,8 +113,6 @@ class Overlap:
         mask_seq = torch.zeros((num_frames, batch_size, channels, frame_h, frame_w), dtype=torch.uint8, device=frame_seq[0].device)  # [T, 1, H, W]
 
         alpha = self.alpha_scheduler(step, timestep)
-        corr_map_decay = self.corr_map_decay_scheduler(step, timestep)
-        apply_corr_map_decay = False
         kernel_radius = int(self.kernel_radius_scheduler(step, timestep))
 
         # rectangle = Rectangle((170, 168), (351, 297))
@@ -122,7 +120,7 @@ class Overlap:
         # rectangle = Rectangle((0, 0), (frame_w, frame_h))
         at_frame = 0
 
-        logu.info(f"Scheduler: alpha: {alpha} | corr_map_decay: {corr_map_decay:.2f} | kernel_radius: {kernel_radius} | timestep: {timestep:.2f}")
+        logu.success(f"Scheduler: alpha: {alpha} | kernel_radius: {kernel_radius} | timestep: {timestep:.2f}")
         
         len_1_vertex_count = index_decay_count = avg_trace_length = 0
 
@@ -156,22 +154,13 @@ class Overlap:
                 
                 del average_pool_nearby_pixels_latent_seq
                 
-                # apply_corr_map = any([
-                #     rectangle.is_in_rectangle((x, y)) and f == at_frame
-                #     for f, y, x in zip(frame_index_trace, y_position_trace, x_position_trace)
-                # ])
-                apply_corr_map_decay = False
-                if apply_corr_map_decay:
-                    frame_seq_stack_copy[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * corr_map_decay * overlapped_seq + (1 - alpha * corr_map_decay) * latent_seq
-                    index_decay_count += 1
-                else:
-                    frame_seq_stack_copy[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * overlapped_seq + (1 - alpha) * latent_seq
+                frame_seq_stack_copy[frame_index_trace, :, :, y_position_trace, x_position_trace] = alpha * overlapped_seq + (1 - alpha) * latent_seq
                 del overlapped_seq, latent_seq
         else:
             raise NotImplementedError("Multiprocessing not implemented")
         toc = time.time()
-        logu.debug(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame") if self.verbose else ...
-        logu.debug(f"Vertex appeared once: {len_1_vertex_count * 100 / max(len(corr_map), 1) :.2f}% | Average trace length: {avg_trace_length / max(len(corr_map), 1) :.2f} | Index decayed: {index_decay_count}")
+        logu.success(f"Overlap cost: {toc - tic:.2f}s in total | {(toc-tic)/num_frames:.2f}s per frame") if self.verbose else ...
+        logu.success(f"Vertex appeared once: {len_1_vertex_count * 100 / max(len(corr_map), 1) :.2f}% | Average trace length: {avg_trace_length / max(len(corr_map), 1) :.2f} | Index decayed: {index_decay_count}")
 
         return frame_seq_stack_copy
 
@@ -219,6 +208,9 @@ class ResizeOverlap(Overlap):
         :param timestep: current inference timestep
         :return: A list of overlapped frame latents.
         """
+        print("Calling resized overlap")
+        print("Received frame_seq with length", len(frame_seq))
+        print("Received frame_seq with shape ", frame_seq[0].shape)
         alpha = self.alpha_scheduler(step, timestep)
         if alpha == 0:
             return frame_seq
@@ -228,6 +220,7 @@ class ResizeOverlap(Overlap):
         align_corners = False if self.interpolate_mode in ['linear', 'bilinear', 'bicubic', 'trilinear'] else None
 
         ovlp_seq = [F.interpolate(latents, size=(screen_h, screen_w), mode=self.interpolate_mode, align_corners=align_corners) for latents in frame_seq]
+        print("resized as ", ovlp_seq[0].shape)
         ovlp_seq = super().__call__(
             ovlp_seq,
             corr_map=corr_map,
