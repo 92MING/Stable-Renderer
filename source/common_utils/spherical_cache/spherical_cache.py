@@ -3,10 +3,11 @@ import os
 import math
 import json
 import warnings
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, ABCMeta
 
 import torch
 import numpy as np
+import einops
 from torchvision.io import read_image
 
 from pydantic import BaseModel
@@ -46,11 +47,62 @@ class ViewPoint(BaseModel):
 
 class SphereCache(ABC):
     def __init__(self, num_possible_views: int = 1):
-        self.num_possible_views = num_possible_views
+        self._num_possible_views = num_possible_views
+        self._init_view_normal_thresholds()
 
+    def _init_view_normal_thresholds(self):
+        thetas = [
+            i * (2 * math.pi) / self.sqrt_num_possible_views
+            for i in range(self.num_possible_views - 1)
+        ]
+        print(thetas)
+        phis = [
+            i * (math.pi / 2) / self.sqrt_num_possible_views
+            for i in range(1, self.sqrt_num_possible_views)
+        ]
+        
+        view_normal_thresholds = torch.tensor([
+            [round(n, 5) for n in self.get_cartesian_coordinates(1, theta, phi)]
+            for theta in thetas for phi in phis
+        ])
+        print(view_normal_thresholds)
+        # for i in range(self.sqrt_num_possible_views):
+        #     for j in range(self.sqrt_num_possible_views):
+        #         if i == self.sqrt_num_possible_views // 2 and j == self.sqrt_num_possible_views // 2:
+        #             view_normal_thresholds[i, j] = [0, 0, 1]
+        #         else:
+        #             view_normal_thresholds[i, j] = 
+        # view_normal_thresholds[self.sqrt_num_possible_views // 2, self.sqrt_num_possible_views // 2] = [0, 0, 1]
+
+
+
+
+        view_normal_thresholds = torch.nn.functional.normalize(view_normal_thresholds, dim=-1)
+        self._view_normal_thresholds = einops.rearrange(view_normal_thresholds, 'h w c -> h w 1 c')
+
+    @property
+    def num_possible_views(self) -> int:
+        return self._num_possible_views
+    
     @property
     def sqrt_num_possible_views(self) -> int:
         return int(math.sqrt(self.num_possible_views))
+    
+    @property
+    def view_normal_thresholds(self) -> torch.Tensor:
+            """
+            Returns the view normal thresholds.
+            Assuming num_possible_views = 3, the view normal thresholds are organized as:
+            [
+                [top_left, top_center, top_right],
+                [middle_left, middle_center, middle_right],
+                [bottom_left, bottom_center, bottom_right]
+            ]
+
+            Returns:
+                A torch.Tensor representing the view normal thresholds.
+            """
+            return self._view_normal_thresholds
     
     @abstractmethod
     def get_view(self, view_point: torch.Tensor) -> torch.Tensor:
@@ -70,9 +122,9 @@ class SphereCache(ABC):
         pass
 
     @staticmethod
-    def get_cartesian_coordinates(theta: float,
+    def get_cartesian_coordinates(radius: float,
+                                  theta: float,
                                   phi: float,
-                                  radius: float
         ) -> tuple[float, float, float]:
         x = radius * math.sin(phi) * math.cos(theta)
         y = radius * math.cos(phi)
@@ -160,7 +212,8 @@ class OpenGLSphereCache(SphereCache):
                 Number of possible views to one cache. It should be a square number. Defaults to 1.
         """
         assert math.sqrt(num_possible_views) % 1 == 0, "num_possible_views must be a perfect square"
-        self._num_possible_views = num_possible_views
+        assert math.sqrt(num_possible_views) % 2 == 1, "sqrt of num_possible_views must be an odd number"
+        super().__init__(num_possible_views)
         self._view_texture_size = view_texture_size
         self._possible_view_texture_maps = torch.zeros(size=(
             self.sqrt_num_possible_views,
@@ -169,17 +222,7 @@ class OpenGLSphereCache(SphereCache):
             view_texture_size[1],
             3
         ))
-        self._possible_view_normal_thresholds = torch.zeros(size=(
-            self.sqrt_num_possible_views,
-            self.sqrt_num_possible_views,
-            3)
-        )
-        
     
-    @property
-    def num_possible_views(self) -> int:
-        return self._num_possible_views
-
     @property
     def view_texture_size(self) -> tuple[int, int]:
         return self._view_texture_size
@@ -252,7 +295,6 @@ class OpenGLSphereCache(SphereCache):
             historical_positions, object_views, sphere_view_ids, sphere_view_normals):
             cache.store_view(historical_position, object_view, sphere_view_id, sphere_view_normal)
 
-
     def get_view(self,
                  view_point: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
@@ -274,17 +316,33 @@ class OpenGLSphereCache(SphereCache):
         assert view.shape[0] == 3, f"view must be a 3D vector, got {view.shape}"
         assert view.shape[-2:] == normal_map.shape[-2:], f"View and normal map must have the same shape, got {view.shape} and {normal_map.shape}"
 
-        return 
-        
         h, w = view.shape[-2:]
-        x, y, z = view_point.to_cartesian()
-        for i in range(h):
-            for j in range(w):
-                num_possible_view_horizontal_offset = 0
-                # if normal_map[i, j] 
-                
+        view_normal = torch.tensor([[0, 0, 1]], dtype=torch.float32)
+        similarity = torch.einsum('ijkl,kl->ij', self.view_normal_thresholds, view_normal)
+        print(similarity)
+        exit()
 
+        # non_zero_indices = torch.nonzero(torch.all(normal_map[0:3, :, :] != 0, dim=0))
+        # for i, j in non_zero_indices:
+        #     possible_view_horizontal_offset = 0
+        #     possible_view_vertical_offset = 0
+        #     closest_distance = float('inf')
 
+        #     for h_index, horizontal_threshold in enumerate(self.view_normal_thresholds):
+        #         for v_index, threshold in enumerate(horizontal_threshold):
+        #             normal_vector = normal_map[0:3, i, j].to(torch.float32)
+        #             if torch.dot(normal_vector, threshold) < closest_distance:
+        #                 closest_distance = torch.dot(normal_vector, threshold)
+        #                 possible_view_horizontal_offset = h_index
+        #                 possible_view_vertical_offset = v_index
+
+        #     texture_coordinates = id_map[i, j, 2:3]
+        #     self._possible_view_texture_maps[
+        #         possible_view_horizontal_offset,
+        #         possible_view_vertical_offset,
+        #         texture_coordinates[0],
+        #         texture_coordinates[1]
+        #     ] = view[:, i, j]
 
     def clear(self):
         self._possible_view_texture_maps = torch.zeros(size=(
