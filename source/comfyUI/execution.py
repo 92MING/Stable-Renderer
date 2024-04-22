@@ -417,6 +417,8 @@ class PromptExecutor:
             - outputs (list of list of values, e.g. [[val1, val2], [val3, val4], ...])
             - ui values (values to be shown on UI, e.g. {key: [val1, val2, ...], ...})
         '''
+        print(context.current_node_id)
+        print(context.current_node_type)
         node = context.current_node
         if not node:
             raise ValueError("No node to execute for `_get_output_data`.")
@@ -747,8 +749,13 @@ class PromptExecutor:
                     d = prompt.pop(o)
                     del d
         for o in to_delete:
-            d = self.outputs.pop(o)
-            del d
+            try:
+                d = context.outputs.pop(o)
+                if hasattr(d, 'destroy'):
+                    d.destroy()
+                del d
+            except KeyError:
+                pass
 
     @Overload
     def execute(self, context: InferenceContext)->InferenceContext:     # type: ignore

@@ -507,9 +507,10 @@ def sample_dpm_adaptive(model, x, sigma_min, sigma_max, extra_args=None, callbac
         dpm_solver = DPMSolver(model, extra_args, eps_callback=pbar.update)
 
         if callbacks:
+            callback_info = {'sigma': dpm_solver.sigma(sigma_max.clone().detach()), 'sigma_hat': dpm_solver.sigma(sigma_min.clone().detach())}
             for callback in callbacks:
                 dpm_solver.info_callbacks.append(
-                    lambda info: callback({'sigma': dpm_solver.sigma(info['t']), 'sigma_hat': dpm_solver.sigma(info['t_up']), **info})
+                    partial(sampling_solver_callback, callback, callback_info)
                 )
     
         x, info = dpm_solver.dpm_solver_adaptive(x, dpm_solver.t(torch.tensor(sigma_max)), dpm_solver.t(torch.tensor(sigma_min)), order, rtol, atol, h_init, pcoeff, icoeff, dcoeff, accept_safety, eta, s_noise, noise_sampler)

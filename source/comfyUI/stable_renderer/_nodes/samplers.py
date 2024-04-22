@@ -23,8 +23,8 @@ class StableRenderSampler(StableRendererNodeBase):
                  scheduler: COMFY_SCHEDULERS=_default_scheduler,
                  denoise: FLOAT(0, 1) = 1.0)->LATENT:
         callbacks = [
-            lambda a: print("fuck"),
-            lambda b: print("fuck 2"),
+            lambda a: print("test 1"),
+            lambda b: print("test 2"),
         ]
 
         return custom_ksampler(model,
