@@ -107,23 +107,23 @@ class WorkflowNodeInfo(Dict[str, Any]):
         
         node_cls = self.cls_type
         node_cls_input_types = node_cls.INPUT_TYPES()
-        required_input_names = [i[0] for i in node_cls_input_types.get('required', [])]
-        optional_input_names = [i[0] for i in node_cls_input_types.get('optional', [])]
+        required_input_names = tuple((node_cls_input_types.get('required', {})).keys())
+        optional_input_names = tuple((node_cls_input_types.get('optional', {})).keys())
         # no need to add hidden input types.
         
         def get_input_default_value(input_name:str):
-            if input_name in node_cls_input_types.get('required', {}):
+            if input_name in required_input_names:
                 input_info = node_cls_input_types['required'][input_name]
                 if len(input_info)>=2:
                     return input_info[1].get('default', None)
                 return None
-            elif input_name in node_cls_input_types.get('optional', {}):
+            elif input_name in optional_input_names:
                 input_info = node_cls_input_types['optional'][input_name]
                 if len(input_info)>=2:
                     return input_info[1].get('default', None)
                 return None
             return None
-            
+        
         for input_name in (required_input_names + optional_input_names):
             if input_name in workflow_inputs:   # input is a binding(means from another node's output)
                 input_info = workflow_inputs.pop(input_name)
@@ -170,8 +170,8 @@ class WorkflowNodeInfo(Dict[str, Any]):
                         widget_value = widget_values.pop(0)
                         param_type = 'required' if input_name in required_input_names else 'optional'
                         formatted_inputs[input_name] = WorkflowNodeInputParam(input_name, 
-                                                                            widget_value, 
-                                                                            node_cls_input_types[param_type][input_name][0])
+                                                                              widget_value, 
+                                                                              node_cls_input_types[param_type][input_name][0])
         self._inputs = formatted_inputs
         
         # init outputs
@@ -266,7 +266,10 @@ class Workflow(Dict[str, Any]):
     @property
     def version(self)->Optional[str]:
         '''Get the version of the workflow.'''
-        return self.get('version')
+        ver = self.get('version')
+        if ver is None:
+            return ver
+        return str(ver)
     
     @property
     def extra(self)->Optional[dict]:
@@ -323,7 +326,7 @@ class Workflow(Dict[str, Any]):
         self.original_data = self.copy()
         
         if version:=self.get('version'):
-            versions = [int(val) for val in version.split('.')]
+            versions = [int(val) for val in str(version).split('.')]
             if versions[0] >= 1:
                 EngineLogger.warning(f'Workflow version {version} may not be supported. Latest supported version is 0.4')
             elif versions[1] >= 5:
@@ -357,6 +360,6 @@ __all__ = ['Workflow']
 
 if __name__ == '__main__':
     from common_utils.path_utils import TEMP_DIR
-    test_workflow_path = TEMP_DIR / 'workflow.json'
+    test_workflow_path = TEMP_DIR / 'test_workflow.json'
     workflow = Workflow.Load(test_workflow_path)
     print(workflow)
