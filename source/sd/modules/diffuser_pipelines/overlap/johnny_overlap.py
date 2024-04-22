@@ -10,7 +10,7 @@ from .overlap_scheduler import Scheduler
 from .utils import overlap_rate
 from ...data_classes.correspondenceMap import CorrespondenceMap
 # from ..multi_frame_stable_diffusion import  StableDiffusionImg2VideoPipeline
-from ... import log_utils as logu
+from common_utils.debug_utils import DefaultLogger as logu
 
 def overlap(
     frame_seq: List[torch.Tensor],

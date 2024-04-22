@@ -1,9 +1,10 @@
 import math
-
-from scipy import integrate
 import torch
-from torch import nn
 import torchsde
+
+from typing import Optional, List, Callable
+from scipy import integrate
+from torch import nn
 from tqdm.auto import trange, tqdm
 
 from . import utils
@@ -136,8 +137,9 @@ def sample_euler(model, x, sigmas, extra_args=None, callbacks=[], disable=None, 
             x = x + eps * (sigma_hat ** 2 - sigmas[i] ** 2) ** 0.5
         denoised = model(x, sigma_hat * s_in, **extra_args)
         d = to_d(x, sigma_hat, denoised)
-        for callback in callbacks:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
+        if callbacks:
+            for callback in callbacks:
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
         dt = sigmas[i + 1] - sigma_hat
         # Euler method
         x = x + d * dt
@@ -153,8 +155,9 @@ def sample_euler_ancestral(model, x, sigmas, extra_args=None, callbacks=[], disa
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model(x, sigmas[i] * s_in, **extra_args)
         sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
-        for callback in callbacks:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+        if callbacks:
+            for callback in callbacks:
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         d = to_d(x, sigmas[i], denoised)
         # Euler method
         dt = sigma_down - sigmas[i]
@@ -177,8 +180,9 @@ def sample_heun(model, x, sigmas, extra_args=None, callbacks=[], disable=None, s
             x = x + eps * (sigma_hat ** 2 - sigmas[i] ** 2) ** 0.5
         denoised = model(x, sigma_hat * s_in, **extra_args)
         d = to_d(x, sigma_hat, denoised)
-        for callback in callbacks:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
+        if callbacks:
+            for callback in callbacks:
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
         dt = sigmas[i + 1] - sigma_hat
         if sigmas[i + 1] == 0:
             # Euler method
@@ -206,8 +210,9 @@ def sample_dpm_2(model, x, sigmas, extra_args=None, callbacks=[], disable=None, 
             x = x + eps * (sigma_hat ** 2 - sigmas[i] ** 2) ** 0.5
         denoised = model(x, sigma_hat * s_in, **extra_args)
         d = to_d(x, sigma_hat, denoised)
-        for callback in callbacks:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
+        if callbacks:
+            for callback in callbacks:
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
         if sigmas[i + 1] == 0:
             # Euler method
             dt = sigmas[i + 1] - sigma_hat
@@ -233,8 +238,9 @@ def sample_dpm_2_ancestral(model, x, sigmas, extra_args=None, callbacks=[], disa
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model(x, sigmas[i] * s_in, **extra_args)
         sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
-        for callback in callbacks:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+        if callbacks:
+            for callback in callbacks:
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         d = to_d(x, sigmas[i], denoised)
         if sigma_down == 0:
             # Euler method
@@ -278,8 +284,9 @@ def sample_lms(model, x, sigmas, extra_args=None, callbacks=[], disable=None, or
         ds.append(d)
         if len(ds) > order:
             ds.pop(0)
-        for callback in callbacks:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+        if callbacks:
+            for callback in callbacks:
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         cur_order = min(i + 1, order)
         coeffs = [linear_multistep_coeff(cur_order, sigmas_cpu, i, j) for j in range(cur_order)]
         x = x + sum(coeff * d for coeff, d in zip(coeffs, reversed(ds)))
@@ -318,8 +325,9 @@ class PIDStepSizeController:
 class DPMSolver(nn.Module):
     """DPM-Solver. See https://arxiv.org/abs/2206.00927."""
 
-    def __init__(self, model, extra_args=None, eps_callback=None, info_callbacks=[]):
+    def __init__(self, model, extra_args=None, eps_callback=None, info_callbacks: Optional[List[Callable]]=None):
         super().__init__()
+        info_callbacks = info_callbacks or []
         self.model = model
         self.extra_args = {} if extra_args is None else extra_args
         self.eps_callback = eps_callback
@@ -471,10 +479,11 @@ def sample_dpm_fast(model, x, sigma_min, sigma_max, n, extra_args=None, callback
     with tqdm(total=n, disable=disable) as pbar:
         dpm_solver = DPMSolver(model, extra_args, eps_callback=pbar.update)
 
-        for callback in callbacks:
-            dpm_solver.info_callbacks.append(
-                lambda info: callback({'sigma': dpm_solver.sigma(info['t']), 'sigma_hat': dpm_solver.sigma(info['t_up']), **info})
-            )
+        if callbacks:
+            for callback in callbacks:
+                dpm_solver.info_callbacks.append(
+                    lambda info: callback({'sigma': dpm_solver.sigma(info['t']), 'sigma_hat': dpm_solver.sigma(info['t_up']), **info})
+                )
 
         return dpm_solver.dpm_solver_fast(x, dpm_solver.t(torch.tensor(sigma_max)), dpm_solver.t(torch.tensor(sigma_min)), n, eta, s_noise, noise_sampler)
 
@@ -487,10 +496,11 @@ def sample_dpm_adaptive(model, x, sigma_min, sigma_max, extra_args=None, callbac
     with tqdm(disable=disable) as pbar:
         dpm_solver = DPMSolver(model, extra_args, eps_callback=pbar.update)
 
-        for callback in callbacks:
-            dpm_solver.info_callbacks.append(
-                lambda info: callback({'sigma': dpm_solver.sigma(info['t']), 'sigma_hat': dpm_solver.sigma(info['t_up']), **info})
-            )
+        if callbacks:
+            for callback in callbacks:
+                dpm_solver.info_callbacks.append(
+                    lambda info: callback({'sigma': dpm_solver.sigma(info['t']), 'sigma_hat': dpm_solver.sigma(info['t_up']), **info})
+                )
     
         x, info = dpm_solver.dpm_solver_adaptive(x, dpm_solver.t(torch.tensor(sigma_max)), dpm_solver.t(torch.tensor(sigma_min)), order, rtol, atol, h_init, pcoeff, icoeff, dcoeff, accept_safety, eta, s_noise, noise_sampler)
     if return_info:
@@ -510,8 +520,9 @@ def sample_dpmpp_2s_ancestral(model, x, sigmas, extra_args=None, callbacks=[], d
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model(x, sigmas[i] * s_in, **extra_args)
         sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
-        for callback in callbacks:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+        if callbacks:
+            for callback in callbacks:
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         if sigma_down == 0:
             # Euler method
             d = to_d(x, sigmas[i], denoised)
@@ -545,8 +556,9 @@ def sample_dpmpp_sde(model, x, sigmas, extra_args=None, callbacks=[], disable=No
 
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model(x, sigmas[i] * s_in, **extra_args)
-        for callback in callbacks:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+        if callbacks:
+            for callback in callbacks:
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         if sigmas[i + 1] == 0:
             # Euler method
             d = to_d(x, sigmas[i], denoised)
@@ -586,8 +598,9 @@ def sample_dpmpp_2m(model, x, sigmas, extra_args=None, callbacks=[], disable=Non
 
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model(x, sigmas[i] * s_in, **extra_args)
-        for callback in callbacks:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+        if callbacks:
+            for callback in callbacks:
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         t, t_next = t_fn(sigmas[i]), t_fn(sigmas[i + 1])
         h = t_next - t
         if old_denoised is None or sigmas[i + 1] == 0:
@@ -619,8 +632,9 @@ def sample_dpmpp_2m_sde(model, x, sigmas, extra_args=None, callbacks=[], disable
 
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model(x, sigmas[i] * s_in, **extra_args)
-        for callback in callbacks:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+        if callbacks:
+            for callback in callbacks:
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         if sigmas[i + 1] == 0:
             # Denoising step
             x = denoised
@@ -661,8 +675,9 @@ def sample_dpmpp_3m_sde(model, x, sigmas, extra_args=None, callbacks=[], disable
 
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model(x, sigmas[i] * s_in, **extra_args)
-        for callback in callbacks:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+        if callbacks:
+            for callback in callbacks:
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         if sigmas[i + 1] == 0:
             # Denoising step
             x = denoised
@@ -751,8 +766,9 @@ def sample_lcm(model, x, sigmas, extra_args=None, callbacks=[], disable=None, no
     s_in = x.new_ones([x.shape[0]])
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model(x, sigmas[i] * s_in, **extra_args)
-        for callback in callbacks:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+        if callbacks:
+            for callback in callbacks:
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
 
         x = denoised
         if sigmas[i + 1] > 0:
@@ -775,8 +791,9 @@ def sample_heunpp2(model, x, sigmas, extra_args=None, callbacks=[], disable=None
             x = x + eps * (sigma_hat ** 2 - sigmas[i] ** 2) ** 0.5
         denoised = model(x, sigma_hat * s_in, **extra_args)
         d = to_d(x, sigma_hat, denoised)
-        for callback in callbacks:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
+        if callbacks:
+            for callback in callbacks:
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
         dt = sigmas[i + 1] - sigma_hat
         if sigmas[i + 1] == s_end:
             # Euler method

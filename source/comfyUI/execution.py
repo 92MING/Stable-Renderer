@@ -1049,7 +1049,7 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
 
             if x not in validate_function_inputs:
                 if isinstance(type_input, list):
-                    if val not in type_input:
+                    if val not in type_input:   # type: ignore
                         input_config = info
                         list_info = ""
 
@@ -1243,7 +1243,7 @@ class PromptQueue:
             self.server.queue_updated()
             self.not_empty.notify()
 
-    def get(self, timeout=None)->Tuple[QueueTask, int]:
+    def get(self, timeout=None)->Optional[Tuple[QueueTask, int]]:
         with self.not_empty:
             while len(self.queue) == 0:
                 self.not_empty.wait(timeout=timeout)

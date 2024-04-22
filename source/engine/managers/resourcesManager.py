@@ -2,6 +2,7 @@ import OpenGL.error
 from .manager import Manager
 from .sceneManager import SceneManager
 from common_utils.global_utils import GetOrAddGlobalValue
+from common_utils.debug_utils import EngineLogger
 import traceback
 
 class ResourcesManager(Manager):
@@ -21,9 +22,9 @@ class ResourcesManager(Manager):
                 try:
                     instance.sendToGPU()
                     if instance.__class__._BaseName == 'Texture':
-                        print('Sent to GPU:', instance.__class__._BaseName + ':' + instance.name, ', texID:', instance.textureID)
+                        EngineLogger.print('Sent to GPU:', instance.__class__._BaseName + ':' + instance.name, ', texID:', instance.textureID)
                     else:
-                        print('Sent to GPU:', instance.__class__._BaseName + ':' + instance.name)
+                        EngineLogger.print('Sent to GPU:', instance.__class__._BaseName + ':' + instance.name)
                 except Exception:
                     raise Exception(f'Error when sending {instance.__class__.__qualname__}:{instance.name} to GPU, traceback: {traceback.format_exc()}')
                 finally:
@@ -40,7 +41,7 @@ class ResourcesManager(Manager):
                     continue
                 try:
                     instance.clear()
-                    print('Cleared:', instance.__class__._BaseName + ':' + instance.name)
+                    EngineLogger.print('Cleared:', instance.__class__._BaseName + ':' + instance.name)
 
                 except OpenGL.error.NullFunctionError:
                     pass # opengl already released, ignore

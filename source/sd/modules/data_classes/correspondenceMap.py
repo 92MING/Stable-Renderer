@@ -8,7 +8,8 @@ from tqdm import tqdm
 from typing import Callable, Tuple, Union, List, TypeVar, Type, Optional
 
 from .common import Rectangle
-from .. import log_utils as logu, config
+from .. import config
+from common_utils.debug_utils import DefaultLogger as logu
 from common_utils.os_utils import is_windows, is_mac
 from common_utils.data_struct import SortableElement
 from common_utils.path_utils import MAP_OUTPUT_DIR

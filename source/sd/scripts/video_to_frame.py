@@ -1,5 +1,6 @@
 import cv2
 import os
+from common_utils.debug_utils import DefaultLogger
 
 if __name__ == '__main__':
     video_path = 'test/video/rick_roll.mp4'
@@ -19,7 +20,7 @@ if __name__ == '__main__':
         for i in range(fps):
             ret, frame = cap.read()
             if not ret:
-                print("Can't receive frame (stream end?). Exiting ...")
+                DefaultLogger.warn("Can't receive frame (stream end?). Exiting ...")
                 break
 
             # 构造图像的路径，并保存图像

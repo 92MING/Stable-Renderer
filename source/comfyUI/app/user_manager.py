@@ -3,6 +3,7 @@ import os
 import re
 import uuid
 from aiohttp import web
+from common_utils.debug_utils import ComfyUILogger
 from comfy.cli_args import args
 from folder_paths import user_directory
 from .app_settings import AppSettings
@@ -19,8 +20,8 @@ class UserManager():
         if not os.path.exists(user_directory):
             os.mkdir(user_directory)
             if not args.multi_user:
-                print("****** User settings have been changed to be stored on the server instead of browser storage. ******")
-                print("****** For multi-user setups add the --multi-user CLI argument to enable multiple user profiles. ******")
+                ComfyUILogger.print("****** User settings have been changed to be stored on the server instead of browser storage. ******")
+                ComfyUILogger.print("****** For multi-user setups add the --multi-user CLI argument to enable multiple user profiles. ******")
 
         if args.multi_user:
             if os.path.isfile(users_file):

@@ -10,7 +10,7 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 from torch import Tensor
 from torch.nn import functional as F
-
+from common_utils.debug_utils import ComfyUILogger
 from .timm.drop import DropPath
 from .timm.weight_init import trunc_normal_
 
@@ -196,7 +196,7 @@ class Spatial_Attention(nn.Module):
         elif idx == 1:
             W_sp, H_sp = self.split_size[0], self.split_size[1]
         else:
-            print("ERROR MODE", idx)
+            ComfyUILogger.print("ERROR MODE", idx)
             exit(0)
         self.H_sp = H_sp
         self.W_sp = W_sp

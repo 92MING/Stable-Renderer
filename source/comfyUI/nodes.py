@@ -14,12 +14,9 @@ import safetensors.torch
 
 from PIL import Image, ImageOps, ImageSequence
 from PIL.PngImagePlugin import PngInfo
-from typing import (
-    Dict, Tuple, List, Any, Optional, Callable,
-    Type, TYPE_CHECKING
-)
+from typing import (Dict, Tuple, List, Any, Optional, Callable, Type, TYPE_CHECKING)
 
-from common_utils.global_utils import GetGlobalValue, SetGlobalValue, GetOrAddGlobalValue, is_game_mode, is_game_editor_mode
+from common_utils.global_utils import GetGlobalValue, SetGlobalValue, GetOrAddGlobalValue, is_dev_mode, should_run_web_server
 from common_utils.debug_utils import ComfyUILogger
 
 sys.path.insert(2, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
@@ -41,8 +38,7 @@ if TYPE_CHECKING:
     from comfyUI.types import ComfyUINode, CONDITIONING as Conditioning, COMFY_SCHEDULERS as Schedulers
     from comfy.sd import VAE, CLIP
     from comfy.controlnet import ControlBase
-    from comfy.model_base import BaseModel
-
+    from comfy.model_patcher import ModelPatcher
 
 
 def before_node_execution():
@@ -777,12 +773,12 @@ class ControlNetApply:
             return (conditioning, )
 
         c = []
-        print("image dims", image.shape)
+        ComfyUILogger.print("image dims", image.shape)
         control_hint = image.movedim(-1,1)
-        print("control hint dim", control_hint.shape)
+        ComfyUILogger.print("control hint dim", control_hint.shape)
         for t in conditioning:
             n = [t[0], t[1].copy()]
-            c_net = control_net.copy().set_cond_hint(control_hint, strength)
+            c_net = control_net.copy().set_cond_hint(control_hint, strength)    # type: ignore
             if 'control' in t[1]:
                 c_net.set_previous_controlnet(t[1]['control'])
             n[1]['control'] = c_net
@@ -1352,13 +1348,13 @@ def common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, 
     callbacks.append(latent_preview.prepare_callback(model, steps))
     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
-                                  denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step,
-                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)
+                                  denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step, # type: ignore
+                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed) # type: ignore
     out = latent.copy()
     out["samples"] = samples
     return (out, )
 
-def custom_ksampler(model: "BaseModel",
+def custom_ksampler(model: "ModelPatcher",
                     seed: int,
                     steps: int,
                     cfg: float,
@@ -1388,8 +1384,8 @@ def custom_ksampler(model: "BaseModel",
     callbacks.append(latent_preview.prepare_callback(model, steps))
     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
-                                  denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step,
-                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)
+                                  denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step, # type: ignore
+                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)  # type: ignore
     out = latent.copy()
     out["samples"] = samples
     return (out, )
@@ -1941,11 +1937,13 @@ def _init_node_clses():
         
 _init_node_clses()
     
-def _load_custom_node(module_path, ignore=set(), raise_err=False):
+def _load_custom_node(module_path, ignore=set(), regist_name: Optional[str]=None, raise_err=False):
     module_name = os.path.basename(module_path)
     if os.path.isfile(module_path):
         sp = os.path.splitext(module_path)
         module_name = sp[0]
+    
+    module_name_for_regist = regist_name or module_name
     try:
         if os.path.isfile(module_path):
             module_spec = importlib.util.spec_from_file_location(module_name, module_path)  # type: ignore
@@ -1956,14 +1954,14 @@ def _load_custom_node(module_path, ignore=set(), raise_err=False):
 
         module = importlib.util.module_from_spec(module_spec)  # type: ignore
         sys.modules[module_name] = module
-        ComfyUILogger.debug(f'Importing custom nodes:{module_name}...')
+        ComfyUILogger.debug(f'Importing custom nodes:{module_name_for_regist}...')
         module_spec.loader.exec_module(module)  # type: ignore
 
-        need_init_web = not (is_game_mode() or is_game_editor_mode())
+        need_init_web = should_run_web_server()
         if need_init_web and hasattr(module, "WEB_DIRECTORY") and getattr(module, "WEB_DIRECTORY") is not None:
             web_dir = os.path.abspath(os.path.join(module_dir, getattr(module, "WEB_DIRECTORY")))
             if os.path.isdir(web_dir):
-                EXTENSION_WEB_DIRS[module_name] = web_dir
+                EXTENSION_WEB_DIRS[module_name_for_regist] = web_dir
 
         if hasattr(module, "NODE_CLASS_MAPPINGS") and getattr(module, "NODE_CLASS_MAPPINGS") is not None:
             for key in module.NODE_CLASS_MAPPINGS:
@@ -1978,7 +1976,7 @@ def _load_custom_node(module_path, ignore=set(), raise_err=False):
                         name, namespace = key
                 else:
                     name = key
-                    namespace = module_name
+                    namespace = module_name_for_regist
                 if name not in ignore:
                     NODE_CLASS_MAPPINGS[(name, namespace)] = module.NODE_CLASS_MAPPINGS[key]
             
@@ -1996,7 +1994,7 @@ def _load_custom_node(module_path, ignore=set(), raise_err=False):
                             name, namespace = key
                     else:
                         name = key
-                        namespace = module_name
+                        namespace = module_name_for_regist
                     if name not in ignore:
                         NODE_DISPLAY_NAME_MAPPINGS[(name, namespace)] = module.NODE_DISPLAY_NAME_MAPPINGS[key]
         return True
@@ -2041,10 +2039,8 @@ def load_custom_nodes(raise_err=False):
                 import_message = " (IMPORT FAILED)"
             ComfyUILogger.debug("{:6.1f} seconds{}:".format(n[0], import_message) + n[1])
     
-    ComfyUILogger.debug('loading stable-renderer nodes...')
-
     stable_renderer_nodes_path = os.path.join(folder_paths.base_path, 'stable_renderer', '_nodes')
-    success = _load_custom_node(stable_renderer_nodes_path, raise_err=raise_err)
+    success = _load_custom_node(stable_renderer_nodes_path, regist_name='stable-renderer', raise_err=raise_err)
     if not success:
         ComfyUILogger.warning('failed to load stable-renderer nodes.')
     else:

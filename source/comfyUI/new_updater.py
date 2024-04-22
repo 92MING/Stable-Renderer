@@ -1,6 +1,6 @@
 import os
 import shutil
-
+from common_utils.debug_utils import ComfyUILogger
 base_path = os.path.dirname(os.path.realpath(__file__))
 
 
@@ -32,4 +32,4 @@ def update_windows_updater():
     except:
         pass
     shutil.copy(bat_path, dest_bat_path)
-    print("Updated the windows standalone package updater.")
+    ComfyUILogger.print("Updated the windows standalone package updater.")

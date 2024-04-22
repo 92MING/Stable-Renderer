@@ -1,5 +1,6 @@
 import torch
 import sys
+from common_utils.debug_utils import ComfyUILogger
 from comfy.ldm.modules.diffusionmodules.openaimodel import UNetModel, Timestep
 from comfy.ldm.cascade.stage_c import StageC
 from comfy.ldm.cascade.stage_b import StageB
@@ -74,8 +75,8 @@ class BaseModel(torch.nn.Module):
         if self.adm_channels is None:
             self.adm_channels = 0
         self.inpaint_model = False
-        print("model_type", model_type.name)
-        print("adm", self.adm_channels)
+        ComfyUILogger.print("model_type", model_type.name)
+        ComfyUILogger.print("adm", self.adm_channels)
 
     def apply_model(self, x, t, c_concat=None, c_crossattn=None, control=None, transformer_options={}, **kwargs):
         sigma = t
@@ -191,10 +192,10 @@ class BaseModel(torch.nn.Module):
         to_load = self.model_config.process_unet_state_dict(to_load)
         m, u = self.diffusion_model.load_state_dict(to_load, strict=False)
         if len(m) > 0:
-            print("unet missing:", m)
+            ComfyUILogger.print("unet missing:", m)
 
         if len(u) > 0:
-            print("unet unexpected:", u)
+            ComfyUILogger.print("unet unexpected:", u)
         del to_load
         return self
 

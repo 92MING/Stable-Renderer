@@ -1,5 +1,7 @@
-from typing import (SupportsIndex, Union, TypeAlias, Literal, Optional, List, Any, Type, Dict, Tuple, TYPE_CHECKING, 
-                    Sequence, TypeVar, Generic, Set, NamedTuple)
+import torch
+from deprecated import deprecated
+from typing import (Union, TypeAlias, Literal, Optional, List, Any, Type, Dict, Tuple, TYPE_CHECKING, 
+                    Sequence, TypeVar, Generic, Set, NamedTuple, Union, Callable)
 from attr import attrs, attrib
 from dataclasses import dataclass
 from common_utils.debug_utils import ComfyUILogger
@@ -93,7 +95,6 @@ class InferenceContext:
     def destroy(self):
         if self.old_prompt:
             self.old_prompt.destroy()   # current prompt no need to be destroyed, it will be destroyed by the context
-
 
 @singleton(cross_module_singleton=True)
 class NodePool(Dict[Tuple[str, str], "ComfyUINode"]):
@@ -282,7 +283,6 @@ class NodeBindingParam(Tuple[str, int], metaclass=NameCheckMetaCls()):
         '''The output slot index of the source node. Wrapper for the second element of the tuple.'''
         return self[1]
 
-
 class NodeInputs(Dict[str, Union[NodeBindingParam, Any]], metaclass=NameCheckMetaCls()):
     '''
     {param_name: input_value, ...}
@@ -351,7 +351,6 @@ class NodeInputs(Dict[str, Union[NodeBindingParam, Any]], metaclass=NameCheckMet
             __value = NodeBindingParam(*__value)
         super().__setitem__(__key, __value)
 
-
 NodeOutputs_UI: TypeAlias = Dict[str, Dict[str, Any]]
 '''All outputs of nodes for ui'''
 
@@ -361,7 +360,7 @@ All outputs of nodes for execution.
 {node id: [output1, output2, ...], ...}
 '''
 
-StatusMsgEvent: TypeAlias = Literal['status', 'progress', 'executing', 'executed', 'execution_start', 'execution_error', 'execution_cached']
+StatusMsgEvent: TypeAlias = Literal['status', 'progress', 'executing', 'executed', 'execution_start', 'execution_error', 'execution_cached', 'execution_interrupted']
 '''The status message event type for PromptExecutor. See source/comfyUI/web/scripts/api.js'''
 
 StatusMsgs: TypeAlias = List[Tuple[StatusMsgEvent, Dict[str, Any]]]
@@ -590,9 +589,46 @@ class NODE_MAPPING(Dict[Tuple[str, str], _MT], Generic[_MT]):
         for key in super().keys():
             yield NODE_MAPPING.NodeMappingKey(key)
 
+@attrs
+class SamplingCallbackContext:
+    '''context during sampling.'''
+    
+    noise: torch.Tensor = attrib()
+    '''The noise tensor for sampling.'''
+    step_index: int = attrib()
+    '''The current step index'''
+    denoised: torch.Tensor = attrib()
+    '''the denoised latent'''
+    total_steps: int = attrib()
+    '''The total steps of sampling.'''
+    
+    # region deprecated
+    @property
+    @deprecated(reason='use `noise` instead.')
+    def x(self)->torch.Tensor:
+        '''The noise tensor for sampling.'''
+        return self.noise
+    
+    @property
+    @deprecated(reason='use `step_index` instead')
+    def i(self)->int:
+        return self.step_index
+    # endregion
+    
+    def __getitem__(self, item):
+        return getattr(self, item)
+    
+    def __setitem__(self, item, value):
+        setattr(self, item, value)
+
+SamplerCallback: TypeAlias = Union[
+    Callable[[], Any],  # no arguments
+    Callable[[SamplingCallbackContext], Any],    # pass context
+    Callable[[int, torch.Tensor, torch.Tensor, int], Any]   # pass (i, denoised, x, total_steps)
+]
 
 
-__all__ = ['InferenceContext', 
+__all__ = ['InferenceContext', 'SamplingCallbackContext', 'SamplerCallback',
                 
             'NodePool', 'NodeBindingParam', 'NodeInputs', 'NodeOutputs', 'NodeOutputs_UI',
             

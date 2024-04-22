@@ -9,7 +9,7 @@ from diffusers.pipelines.text_to_video_synthesis.pipeline_text_to_video_zero imp
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 
 from .multi_frame_stable_diffusion import StableRendererPipeline
-from .. import log_utils as logu
+from common_utils.debug_utils import DefaultLogger as logu
 from common_utils.global_utils import GetEnv
 
 def load_pipe(

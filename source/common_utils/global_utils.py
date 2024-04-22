@@ -86,7 +86,7 @@ def GetEnv(key: str, default: Optional[T] = None, type: Type[T] = str)->Optional
     except KeyError:
         return default
     try:
-        return _env_type_convert(val)   # type: ignore
+        return _env_type_convert(val, type) # type: ignore
     except ValueError:
         return default
     except TypeError:
@@ -103,8 +103,13 @@ def is_game_mode()->bool:
     Game mode means the engine should be ran without editor window.
     Default is True.
     '''
+    mode:bool = True
+    if 'COMFYUI_DIRECT_RUN' in os.environ:
+        mode = not GetEnv('COMFYUI_DIRECT_RUN', False, bool)   # type: ignore
+        if not mode:
+            return mode
     if 'GAME_MODE' in os.environ:
-        mode: bool = GetEnv('GAME_MODE', False, bool)   # type: ignore
+        mode = GetEnv('GAME_MODE', False, bool)   # type: ignore
         if not mode:
             if 'EDITOR_MODE' in os.environ:
                 return not GetEnv('EDITOR_MODE', False, bool)
@@ -121,7 +126,7 @@ def should_run_web_server()->bool:
     '''Indicates whether the comfyUI's web server should be started.'''
     should_run = GetEnv('COMFYUI_DIRECT_RUN', False, bool)
     if not should_run:
-        should_run = not is_game_mode()
+        should_run = not is_game_mode() and not (is_editor_mode() and is_engine_looping())
     return should_run
 
 def is_editor_mode():

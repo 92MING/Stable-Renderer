@@ -6,7 +6,7 @@ from comfy.cli_args import args, LatentPreviewMethod
 from comfy.taesd.taesd import TAESD
 import folder_paths
 import comfy.utils
-
+from common_utils.debug_utils import ComfyUILogger
 MAX_PREVIEW_RESOLUTION = 512
 
 class LatentPreviewer:
@@ -70,7 +70,7 @@ def get_previewer(device, latent_format):
                 taesd = TAESD(None, taesd_decoder_path).to(device)
                 previewer = TAESDPreviewerImpl(taesd)
             else:
-                print("Warning: TAESD previews enabled, but could not find models/vae_approx/{}".format(latent_format.taesd_decoder_name))
+                ComfyUILogger.warn("Warning: TAESD previews enabled, but could not find models/vae_approx/{}".format(latent_format.taesd_decoder_name))
 
         if previewer is None:
             if latent_format.latent_rgb_factors is not None:

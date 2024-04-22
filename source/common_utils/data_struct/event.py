@@ -17,7 +17,7 @@ from PyQt6.QtCore import QObject, pyqtSignal as Signal
 
 from common_utils.base_clses.cross_module_enum import CrossModuleEnum
 from common_utils.type_utils import valueTypeCheck, subClassCheck
-
+from common_utils.debug_utils import DefaultLogger
 
 # region helper functions
 def _SignalWrapper(*args):
@@ -396,7 +396,7 @@ class Event:
                     raise e
             except Exception as e:
                 if ignoreErr:
-                    print(f"Exception occurred in event {event}. Msg: {e}. Skipped.")
+                    DefaultLogger.print(f"Exception occurred in event {event}. Msg: {e}. Skipped.")
                 else:
                     raise e
         for event in self.tempEvents:
@@ -410,7 +410,7 @@ class Event:
                     raise e
             except Exception as e:
                 if ignoreErr:
-                    print(f"Exception occurred in event {event}. Msg: {e}. Skipped.")
+                    DefaultLogger.print(f"Exception occurred in event {event}. Msg: {e}. Skipped.")
                 else:
                     raise e
         self._tempEvents.clear()
@@ -756,7 +756,7 @@ class AutoSortTask(Tasks):
                     raise e
             except Exception as e:
                 if ignoreErr:
-                    print(f"Exception occurred in event {task}. Msg: {e}. Skipped.")
+                    DefaultLogger.print(f"Exception occurred in event {task}. Msg: {e}. Skipped.")
                 else:
                     raise e
         self._tempEvents.clear()

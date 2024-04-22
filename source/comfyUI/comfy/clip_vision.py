@@ -8,6 +8,7 @@ import comfy.model_patcher
 import comfy.model_management
 import comfy.utils
 import comfy.clip_model
+from common_utils.debug_utils import ComfyUILogger
 
 class Output:
     def __getitem__(self, key):
@@ -99,7 +100,7 @@ def load_clipvision_from_sd(sd, prefix="", convert_keys=False):
     clip = ClipVisionModel(json_config)
     m, u = clip.load_sd(sd)
     if len(m) > 0:
-        print("missing clip vision:", m)
+        ComfyUILogger.print("missing clip vision:", m)
     u = set(u)
     keys = list(sd.keys())
     for k in keys:
