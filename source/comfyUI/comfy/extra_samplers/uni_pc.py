@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import math
 from common_utils.debug_utils import ComfyUILogger
 from tqdm.auto import trange, tqdm
-
+from typing import Sequence
 
 class NoiseScheduleVP:
     def __init__(
@@ -753,7 +753,10 @@ class UniPC:
                                 model_x = self.model_fn(x, vec_t)
                             model_prev_list[-1] = model_x
                 if callback is not None:
-                    callback({'x': x, 'i': step_index, 'denoised': model_prev_list[-1]})
+                    if not isinstance(callback, Sequence):
+                        callback = [callback]
+                    for c in callback:
+                        c({'x': x, 'i': step_index, 'denoised': model_prev_list[-1]})
         else:
             raise NotImplementedError()
         # if denoise_to_zero:

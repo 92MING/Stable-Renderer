@@ -143,13 +143,13 @@ class _ModifiedLogger(logging.Logger):
     '''just a type hint for logger with success method.'''
     def success(self, msg, *args, **kwargs): ...
     
-    def print(self, *args, level:Union[str, int]=logging.INFO, sep:str=" "): ...
+    def print(self, *args, level:Union[str, int]=logging.DEBUG, sep:str=" "): ...
     
 def _log_success(self: logging.Logger, message: str, *args, **kws):
     if self.isEnabledFor(logging.SUCCESS):  # type: ignore
         self._log(logging.SUCCESS, message, args, **kws)    # type: ignore
 
-def _log_print(self: logging.Logger, *args, level:Union[str, int]=logging.INFO, sep:str=" "):
+def _log_print(self: logging.Logger, *args, level:Union[str, int]=logging.DEBUG, sep:str=" "):
     if isinstance(level, str):
         level = get_log_level_by_name(level)
     if self.isEnabledFor(level):  # type: ignore

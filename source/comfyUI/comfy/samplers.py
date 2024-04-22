@@ -2,17 +2,21 @@ import torch
 import collections
 import math
 
+from inspect import signature
 from abc import ABC, abstractmethod
 from deprecated import deprecated
-from typing import (List, Dict, Any, Tuple, Optional, Callable, Literal, TYPE_CHECKING, TypeAlias)
+from typing import (List, Dict, Any, Tuple, Optional, Callable, Literal, TYPE_CHECKING, Sequence, Union)
+from types import MethodType
+from functools import partial
 
 from common_utils.debug_utils import ComfyUILogger
+from common_utils.global_utils import GetOrCreateGlobalValue
 from .k_diffusion import sampling as k_diffusion_sampling
 from .extra_samplers import uni_pc
 from comfy import model_management, model_base
 
 if TYPE_CHECKING:
-    from comfyUI.types import ConvertedConditioning
+    from comfyUI.types import ConvertedConditioning, SamplerCallback
 
 
 def get_area_and_mult(conds, x_in, timestep_in):
@@ -612,6 +616,30 @@ SAMPLER_NAMES = KSAMPLER_NAMES + ["ddim", "uni_pc", "uni_pc_bh2"]
 SCHEDULER_NAMES = ["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform"]
 '''all possible schedulers'''
 
+_method_param_conut_cache: Dict[int, int] = GetOrCreateGlobalValue('__COMFY_SAMPLER_METHOD_PARAM_COUNT_CACHE__', dict)
+def _get_method_param_count(method: Callable) -> int:
+    method_id = id(method)
+    if method_id in _method_param_conut_cache:
+        return _method_param_conut_cache[method_id]
+    else:
+        if hasattr(method, '__code__'):
+            param_count = method.__code__.co_argcount
+        else:
+            param_count = len(signature(method).parameters)
+        if isinstance(method, MethodType):
+            param_count -= 1
+        _method_param_conut_cache[method_id] = param_count
+        return param_count
+
+def _call_context_callback(callback, total_steps, dict_data_from_upper: dict):
+    from comfyUI.types import SamplingCallbackContext
+    context = SamplingCallbackContext(dict_data_from_upper.pop("i"), 
+                                      dict_data_from_upper.pop("denoised"), 
+                                      dict_data_from_upper.pop("x"),
+                                      total_steps)
+    for key, val in dict_data_from_upper.items():
+        setattr(context, key, val)
+    return callback(context)
 
 class KSAMPLER_METHOD(Sampler):
     '''wrapper for sampling methods'''
@@ -627,14 +655,14 @@ class KSAMPLER_METHOD(Sampler):
                model_wrap: CFGNoisePredictor,
                sigmas: torch.Tensor,
                extra_args: Dict[str, Any],
-               callbacks: List[Callable],
                noise: torch.Tensor,
-               latent_image: torch.Tensor = None,
-               denoise_mask: torch.Tensor = None,
+               callbacks: Union["SamplerCallback", Sequence["SamplerCallback"], None]=None,
+               latent_image: Optional[torch.Tensor] = None,
+               denoise_mask: Optional[torch.Tensor] = None,
                disable_pbar: bool = False):
         extra_args["denoise_mask"] = denoise_mask
         model_k = KSamplerX0Inpaint(model_wrap, sigmas)
-        model_k.latent_image = latent_image
+        model_k.latent_image = latent_image # type: ignore
         if self.inpaint_options.get("random", False): #TODO: Should this be the default?
             generator = torch.manual_seed(extra_args.get("seed", 41) + 1)
             model_k.noise = torch.randn(noise.shape, generator=generator, device="cpu").to(noise.dtype).to(noise.device)
@@ -645,9 +673,18 @@ class KSAMPLER_METHOD(Sampler):
 
         k_callbacks = []
         total_steps = len(sigmas) - 1
-        for callback in callbacks:
-            k_callbacks.append(lambda x: callback(x["i"], x["denoised"], x["x"], total_steps))
-
+        if callbacks:
+            if not isinstance(callbacks, Sequence):
+                callbacks = [callbacks]
+            for callback in callbacks:
+                callback_arg_count = _get_method_param_count(callback)
+                if callback_arg_count == 0: # no arguments
+                    k_callbacks.append(lambda x: callback())
+                elif callback_arg_count == 1: # pass context
+                    k_callbacks.append(partial(_call_context_callback, callback, total_steps))
+                elif callback_arg_count == 4:   # pass (i, denoised, x, total_steps)
+                    k_callbacks.append(lambda x: callback(x["i"], x["denoised"], x["x"], total_steps))
+                
         samples = self.sampler_function(model_k, noise, sigmas, extra_args=extra_args, callbacks=k_callbacks, disable=disable_pbar, **self.extra_options)
         return samples
 
@@ -716,7 +753,7 @@ def sample(model: model_base.BaseModel,
            model_options: Dict = {},
            latent_image: torch.Tensor = None,
            denoise_mask: Optional[torch.Tensor] = None,
-           callbacks: List[Callable] = [],
+           callbacks: Union["SamplerCallback", Sequence["SamplerCallback"], None] = None,
            disable_pbar: Optional[bool] = False,
            seed: Optional[int] = None,
            **kwargs):
@@ -752,7 +789,7 @@ def sample(model: model_base.BaseModel,
 
     extra_args = {"cond":positive, "uncond":negative, "cond_scale": cfg, "model_options": model_options, "seed":seed}
 
-    samples = sampler.sample(model_wrap, sigmas, extra_args, callbacks, noise, latent_image, denoise_mask, disable_pbar)
+    samples = sampler.sample(model_wrap, sigmas, extra_args, noise, callbacks, latent_image, denoise_mask, disable_pbar)
     return model.process_latent_out(samples.to(torch.float32))
 
 
@@ -834,7 +871,7 @@ class KSampler:
                force_full_denoise: bool = False,
                denoise_mask: Optional[torch.Tensor] = None,
                sigmas: Optional[torch.Tensor] = None,
-               callbacks: List[Callable] = [],
+               callbacks: Union["SamplerCallback", Sequence["SamplerCallback"], None] = None,
                disable_pbar: bool = False,
                seed: Optional[int] = None) -> torch.Tensor:
         """

@@ -16,7 +16,7 @@ from PIL import Image, ImageOps, ImageSequence
 from PIL.PngImagePlugin import PngInfo
 from typing import (Dict, Tuple, List, Any, Optional, Callable, Type, TYPE_CHECKING)
 
-from common_utils.global_utils import GetGlobalValue, SetGlobalValue, GetOrAddGlobalValue, is_game_mode, is_game_editor_mode, is_dev_mode
+from common_utils.global_utils import GetGlobalValue, SetGlobalValue, GetOrAddGlobalValue, is_dev_mode, should_run_web_server
 from common_utils.debug_utils import ComfyUILogger
 
 sys.path.insert(2, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
@@ -1937,11 +1937,13 @@ def _init_node_clses():
         
 _init_node_clses()
     
-def _load_custom_node(module_path, ignore=set(), raise_err=False):
+def _load_custom_node(module_path, ignore=set(), regist_name: Optional[str]=None, raise_err=False):
     module_name = os.path.basename(module_path)
     if os.path.isfile(module_path):
         sp = os.path.splitext(module_path)
         module_name = sp[0]
+    
+    module_name_for_regist = regist_name or module_name
     try:
         if os.path.isfile(module_path):
             module_spec = importlib.util.spec_from_file_location(module_name, module_path)  # type: ignore
@@ -1952,14 +1954,14 @@ def _load_custom_node(module_path, ignore=set(), raise_err=False):
 
         module = importlib.util.module_from_spec(module_spec)  # type: ignore
         sys.modules[module_name] = module
-        ComfyUILogger.debug(f'Importing custom nodes:{module_name}...')
+        ComfyUILogger.debug(f'Importing custom nodes:{module_name_for_regist}...')
         module_spec.loader.exec_module(module)  # type: ignore
 
-        need_init_web = not (is_game_mode() or is_game_editor_mode())
+        need_init_web = should_run_web_server()
         if need_init_web and hasattr(module, "WEB_DIRECTORY") and getattr(module, "WEB_DIRECTORY") is not None:
             web_dir = os.path.abspath(os.path.join(module_dir, getattr(module, "WEB_DIRECTORY")))
             if os.path.isdir(web_dir):
-                EXTENSION_WEB_DIRS[module_name] = web_dir
+                EXTENSION_WEB_DIRS[module_name_for_regist] = web_dir
 
         if hasattr(module, "NODE_CLASS_MAPPINGS") and getattr(module, "NODE_CLASS_MAPPINGS") is not None:
             for key in module.NODE_CLASS_MAPPINGS:
@@ -1974,7 +1976,7 @@ def _load_custom_node(module_path, ignore=set(), raise_err=False):
                         name, namespace = key
                 else:
                     name = key
-                    namespace = module_name
+                    namespace = module_name_for_regist
                 if name not in ignore:
                     NODE_CLASS_MAPPINGS[(name, namespace)] = module.NODE_CLASS_MAPPINGS[key]
             
@@ -1992,7 +1994,7 @@ def _load_custom_node(module_path, ignore=set(), raise_err=False):
                             name, namespace = key
                     else:
                         name = key
-                        namespace = module_name
+                        namespace = module_name_for_regist
                     if name not in ignore:
                         NODE_DISPLAY_NAME_MAPPINGS[(name, namespace)] = module.NODE_DISPLAY_NAME_MAPPINGS[key]
         return True
@@ -2037,10 +2039,8 @@ def load_custom_nodes(raise_err=False):
                 import_message = " (IMPORT FAILED)"
             ComfyUILogger.debug("{:6.1f} seconds{}:".format(n[0], import_message) + n[1])
     
-    ComfyUILogger.debug('loading stable-renderer nodes...')
-
     stable_renderer_nodes_path = os.path.join(folder_paths.base_path, 'stable_renderer', '_nodes')
-    success = _load_custom_node(stable_renderer_nodes_path, raise_err=raise_err)
+    success = _load_custom_node(stable_renderer_nodes_path, regist_name='stable-renderer', raise_err=raise_err)
     if not success:
         ComfyUILogger.warning('failed to load stable-renderer nodes.')
     else:
