@@ -3,7 +3,7 @@ import OpenGL.GL as gl
 import numpy as np
 import ctypes
 import math
-from typing import List, Final, Union, Type
+from typing import List, Final, Union, Type, Optional
 
 from common_utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
 from engine.static.resourcesObj import ResourcesObj
@@ -184,7 +184,7 @@ class Mesh(ResourcesObj):
         '''Load data from file. Override this function to implement loading data from file'''
         raise NotImplementedError
 
-    def draw(self, group:int=None):
+    def draw(self, group:Optional[int]=None):
         '''
         Draw the mesh. Override this function to implement drawing the mesh.
         Make sure you have called Material.use() before calling this function. (So that textures & shaders are ready)

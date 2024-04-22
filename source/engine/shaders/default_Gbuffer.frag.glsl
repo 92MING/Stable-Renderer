@@ -2,6 +2,7 @@
 #version 430 core
 #define MAX_LIGHTS_NUM 256  // this constant will be edit by python script
 #define RUNTIME_UBO_BINDING 0
+#define PI 3.14159265359
 
 // runtime datastruct contains all runtime-update values
 layout (std140, binding=RUNTIME_UBO_BINDING) uniform Runtime {
@@ -57,8 +58,7 @@ uniform int materialID;
 
 //AI
 uniform int isBaking;	// whether in baking mode
-uniform int isAIMesh;	// whether it is rendering an AI-Mesh
-uniform int aiMesh_k;	// constant k, 3D-pixel baking count = k^2
+uniform int baking_k;	// constant k, 3D-pixel baking count = k^2
 
 // from VS
 in vec3 modelPos;
@@ -91,14 +91,13 @@ void main() {
 	float depth = 1.0 - gl_FragCoord.z;	// reverse depth to make closer object as white
 
 	// get normal
-	vec3 real_model_normal = modelNormal;
 	if (hasNormalTex == 0){  // if no normal texture, use normal from mesh data
 		out_normal_and_depth = vec4(normalize(viewNormal) * 0.5 + 0.5, depth);
 	}
 	else{
 		vec3 bitangent = cross(modelNormal, modelTangent);
 		mat3 TBN = mat3(modelTangent, bitangent, modelNormal);
-		real_model_normal = normalize(TBN * normalize(texture(normalTex, uv).rgb * 2.0 - 1.0));
+		vec3 real_model_normal = normalize(TBN * normalize(texture(normalTex, uv).rgb * 2.0 - 1.0));
 		vec3 real_view_normal = normalize(vec3(MV_IT * vec4(real_model_normal, 0.0)));
 		out_normal_and_depth = vec4(real_view_normal, depth);
 	}
@@ -108,7 +107,26 @@ void main() {
 	if (isBaking == 1){
 		// baking mode
 		vec3 posToCamDir = normalize(worldPos - cameraPos);
-		outID = ivec4(objID, materialID, uvi.x, uvi.y);
+		vec3 bitangent = cross(modelNormal, modelTangent);
+		mat3 TBN_inverse = transpose(mat3(modelTangent, bitangent, modelNormal)); // transpose of orthonormal matrix is its inverse
+		vec3 posToCamDirInTangetSpace = TBN_inverse * posToCamDir;
+		float theta = dot(posToCamDirInTangetSpace, vec3(0.0, 1.0, 0.0));
+		float phi = dot(posToCamDirInTangetSpace, vec3(1.0, 0.0, 0.0));
+		
+		float vertical_angle;
+		if (posToCamDirInTangetSpace.x > 0.0) vertical_angle = PI/2 - theta;
+		else vertical_angle = PI/2 + theta;
+
+		float horizontal_angle;
+		if (posToCamDirInTangetSpace.z > 0.0) horizontal_angle = PI/2 + phi;
+		else horizontal_angle = PI/2 - phi;
+
+		float angle_step = PI / float(baking_k);
+		int x_index = clamp(int(horizontal_angle / angle_step), 0, baking_k-1);		// from left to right
+		int y_index = clamp(int(vertical_angle / angle_step), 0, baking_k-1);		// from top to bottom
+		int pixel_index = x_index + y_index * baking_k;
+
+		outID = ivec4(pixel_index, materialID, uvi.x, uvi.y);
 	}
 	else{
 		outID = ivec4(objID, materialID, uvi.x, uvi.y);

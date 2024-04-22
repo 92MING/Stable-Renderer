@@ -84,3 +84,5 @@ class HelicalOrbit(CircularOrbit):
                          **kwargs)
         self.phi_speed_per_full_theta = phi_speed_per_full_theta
 
+
+__all__ = ['CircularOrbit', 'HelicalOrbit']
