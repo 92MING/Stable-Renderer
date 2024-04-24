@@ -14,7 +14,7 @@ class CorrMapLatentNoiseInitializer(StableRendererNodeBase):
                  batch_size: int,
                  seed: INT(0, 0xffffffffffffffff),
                  correspondence_map: CorrespondenceMap,) -> LATENT:
-        """Initialize latent noise from correspondence map"""
+        """Initialize both latent image and noise from correspondence map"""
         latent_generator = torch.manual_seed(seed)
         noise_generator = torch.manual_seed(seed + 1)
         corrMap_width, corrMap_height = correspondence_map.size
@@ -25,18 +25,15 @@ class CorrMapLatentNoiseInitializer(StableRendererNodeBase):
         noise = torch.randn([1, 4, corrMap_height, corrMap_width], device="cpu", generator=noise_generator)
         noise = noise.repeat(batch_size, 1, 1, 1)
         
-        printed = False
         for v_info in correspondence_map.Map.values():
             if len(v_info) == 1:
                 continue
             position_trace, frame_index_trace = zip(*v_info)
             y_position_trace, x_position_trace = zip(*position_trace)
+
             latent[frame_index_trace, :, y_position_trace, x_position_trace] = torch.randn(4)
             noise[frame_index_trace, :, y_position_trace, x_position_trace] = torch.randn(4)
-            if not printed:
-                print("Latent: ", latent[frame_index_trace, :, y_position_trace, x_position_trace])
-                print("Noise: ", noise[frame_index_trace, :, y_position_trace, x_position_trace])
-                printed = True
+
         latent = F.interpolate(latent, size=(height // 8, width // 8), mode="nearest")
         noise = F.interpolate(noise, size=(height // 8, width // 8), mode="nearest")
 
