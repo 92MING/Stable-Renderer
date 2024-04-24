@@ -96,7 +96,7 @@ void main() {
 	}
 	else{
 		vec3 bitangent = cross(modelNormal, modelTangent);
-		mat3 TBN = mat3(modelTangent, bitangent, modelNormal);
+		mat3 TBN = mat3(modelTangent, bitangent, modelNormal); // TBN converts normal from tangent space to model space
 		vec3 real_model_normal = normalize(TBN * normalize(texture(normalTex, uv).rgb * 2.0 - 1.0));
 		vec3 real_view_normal = normalize(vec3(MV_IT * vec4(real_model_normal, 0.0)));
 		out_normal_and_depth = vec4(real_view_normal, depth);
@@ -106,10 +106,14 @@ void main() {
 	ivec2 uvi = ivec2(uv * ivec2(textureSize(diffuseTex, 0)));
 	if (isBaking == 1){
 		// baking mode
-		vec3 posToCamDir = normalize(worldPos - cameraPos);
 		vec3 bitangent = cross(modelNormal, modelTangent);
-		mat3 TBN_inverse = transpose(mat3(modelTangent, bitangent, modelNormal)); // transpose of orthonormal matrix is its inverse
-		vec3 posToCamDirInTangetSpace = TBN_inverse * posToCamDir;
+		mat3 TBN_inverse = transpose(mat3(modelTangent, bitangent, modelNormal)); // transpose(TBN) = inverse(TBN)
+		mat3 M_inverse = transpose(mat3(model));
+		
+		vec3 posToCamDirInWorldSpace = normalize(worldPos - cameraPos);
+		vec3 posToCamDirInModelSpace = M_inverse * posToCamDirInWorldSpace;
+		vec3 posToCamDirInTangetSpace = TBN_inverse * posToCamDirInModelSpace;
+
 		float theta = dot(posToCamDirInTangetSpace, vec3(0.0, 1.0, 0.0));
 		float phi = dot(posToCamDirInTangetSpace, vec3(1.0, 0.0, 0.0));
 		

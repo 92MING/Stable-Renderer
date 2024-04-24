@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 
 
 def _get_comfy_node_type(type_name: str):
-    from comfyUI.types import get_node_type_by_name
-    if not (t := get_node_type_by_name(type_name, init_nodes_if_not_yet=True)):
+    from comfyUI.types import get_node_cls_by_name
+    if not (t := get_node_cls_by_name(type_name, init_nodes_if_not_yet=True)):
         raise ValueError(f'Cannot find the type {type_name}.')
     return t
 

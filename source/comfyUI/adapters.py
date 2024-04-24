@@ -1,10 +1,15 @@
+import torch
+import numpy as np
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar, Union, Dict, Tuple, List, Type
+from typing import Any, ClassVar, Union, Dict, Tuple, List, Type, TYPE_CHECKING
 from inspect import getmro
 
 from common_utils.decorators import class_or_ins_property
 from common_utils.global_utils import GetOrCreateGlobalValue
-from comfyUI.types import get_comfy_name
+from comfyUI.types import *
+
+if TYPE_CHECKING:
+    from engine.static.texture import Texture
 
 
 AdaptersMap: Dict[Tuple[str, str], 'Adapter'] = GetOrCreateGlobalValue('__COMFYUI_ADAPTERS_MAP__', dict)
@@ -44,7 +49,7 @@ class Adapter(ABC):
     def __init_subclass__(cls, From: Union[type, str], To: Union[type, str]):
         cls.From = From
         cls.To = To
-        cls()   # for registering & initializing the adapter
+        s = cls()   # for registering & initializing the adapter
         
     @abstractmethod
     def __call__(self, val):
@@ -74,27 +79,6 @@ class Adapter(ABC):
     
     Instance: ClassVar['Adapter'] = None    # type: ignore
     '''The instance of the adapter. It's a class variable.'''
-    
-
-__all__ = ['Adapter', 'AdaptersMap', ]
-
-
-class AnyToStr(Adapter, From=Any, To=str):
-    def __call__(self, val):
-        return str(val)
-
-class StrToInt(Adapter, From=str, To=int):
-    def __call__(self, val: str):
-        return int(val)
-
-class StrToFloat(Adapter, From=str, To=float):
-    def __call__(self, val: str):
-        return float(val)
-
-class StrToCombo(Adapter, From=str, To="COMBO"):
-    def __call__(self, val):
-        return val  # just return the value
-
 
 def find_adapter(t1: Union[type, str], t2: Union[type, str]) -> Union[Adapter, None]:
     '''find proper adapter for converting from t1 to t2. Return None if not found.'''
@@ -122,5 +106,47 @@ def find_adapter(t1: Union[type, str], t2: Union[type, str]) -> Union[Adapter, N
         if ('ANY', t2_name) in AdaptersMap:
             return AdaptersMap[('ANY', t2_name)]
         return None
+    
+__all__ = ['Adapter', 'AdaptersMap', 'find_adapter']
 
-__all__.extend(['find_adapter', ])
+
+class AnyToStr(Adapter, From=Any, To=str):
+    def __call__(self, val):
+        return str(val)
+
+class StrToInt(Adapter, From=str, To=int):
+    def __call__(self, val: str):
+        return int(val)
+
+class StrToFloat(Adapter, From=str, To=float):
+    def __call__(self, val: str):
+        return float(val)
+
+class StrToCombo(Adapter, From=str, To="COMBO"):
+    def __call__(self, val):
+        return val  # just return the value
+
+
+class TextureToTensor(Adapter, From="Texture", To=torch.Tensor):
+    def __call__(self, val: "Texture"):
+        return val.tensor(update=True)
+
+class TextureToIMAGE(Adapter, From="Texture", To=IMAGE):
+    def __call__(self, val: "Texture"):
+        return val.tensor(update=True)
+
+class TextureToMASK(Adapter, From="Texture", To=MASK):
+    def __call__(self, val: "Texture"):
+        origin_tensor = val.tensor(update=True)
+        if val.channel_count == 4:
+            alpha_only = origin_tensor[:, :, 3]
+            return alpha_only
+        elif val.channel_count !=1:
+            first_channel = origin_tensor[:, :, 0]
+            return first_channel
+        else:
+            return origin_tensor
+            
+class TextureToNumpy(Adapter, From="Texture", To=np.ndarray):
+    def __call__(self, val: "Texture"):
+        return val.numpy_data()

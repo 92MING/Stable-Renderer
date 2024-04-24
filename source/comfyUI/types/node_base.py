@@ -41,13 +41,13 @@ class ComfyUINode(Protocol, metaclass=_ComfyUINodeMeta):
     __IS_COMFYUI_NODE__: ClassVar[bool]
     '''internal flag for identifying comfyUI nodes.'''
     
-    __IS_ADVANCED_COMFYUI_NODE__: ClassVar[bool] = False
+    __IS_ADVANCED_NODE__: ClassVar[bool] = False
     '''if u create nodes by inheriting from `NodeBase`, this flag will be set to True.'''
     
-    __ADVANCED_NODE_CLASS__: ClassVar[Optional[Type['NodeBase']]] = None
+    __ADVANCED_NODE_CLASS__: ClassVar[Optional[Type['AdvancedNodeBase']]] = None
     '''If u create nodes by inheriting from `NodeBase`, this will be the real node class.'''
     
-    __real_node_instance__: 'NodeBase'
+    __real_node_instance__: 'AdvancedNodeBase'
     '''real node instance after creation. This is only available for advanced comfyUI nodes which inherit from `NodeBase`.'''
     
     ID: str
@@ -161,7 +161,7 @@ def _pack_param(sig: Signature, args, kwargs)-> OrderedDict[str, Any]:
         
     return packed_params
 
-class NodeBase(CrossModuleABC):
+class AdvancedNodeBase(CrossModuleABC):
     '''
     This is an advance base class for customizing nodes.
     As ComfyUI is lack of documents on customization, inheritance from this class helps you to define nodes easily and correctly.
@@ -377,7 +377,7 @@ class NodeBase(CrossModuleABC):
         newcls: Type[ComfyUINode] = type(cls._RealClsName, (), {})  # type: ignore
         
         setattr(newcls, '__IS_COMFYUI_NODE__', True)
-        setattr(newcls, '__IS_ADVANCED_COMFYUI_NODE__', True)
+        setattr(newcls, '__IS_ADVANCED_NODE__', True)
         setattr(newcls, '__ADVANCED_NODE_CLASS__', cls)
         
         def newcls_init(newcls_self):
@@ -479,11 +479,11 @@ class NodeBase(CrossModuleABC):
                 proper_name = param.proper_param_name or param_name
                 cls._ParamNameMap[proper_name] = param_name
             
-            cls._HasIsChangedMethod = cls.IsChanged != NodeBase.IsChanged
+            cls._HasIsChangedMethod = cls.IsChanged != AdvancedNodeBase.IsChanged
             if cls._HasIsChangedMethod:
                 cls._HasIsChangedMethod = not is_empty_method(cls.IsChanged)
                 
-            cls._HasValidateInputMethod = cls.ValidateInput != NodeBase.ValidateInput
+            cls._HasValidateInputMethod = cls.ValidateInput != AdvancedNodeBase.ValidateInput
             if cls._HasValidateInputMethod:
                 cls._HasValidateInputMethod = not is_empty_method(cls.ValidateInput)
             
@@ -523,9 +523,9 @@ class NodeBase(CrossModuleABC):
         return ret
         
     @staticmethod
-    def _AllSubclasses(non_abstract_only: bool = True)->Tuple[Type["NodeBase"]]:
+    def _AllSubclasses(non_abstract_only: bool = True)->Tuple[Type["AdvancedNodeBase"]]:
         '''return all subclasses of `NodeBase`.'''
-        all_clses = list(NodeBase.__subclasses__())
+        all_clses = list(AdvancedNodeBase.__subclasses__())
         subclses = set()
         while all_clses:
             cls = all_clses.pop()
@@ -587,7 +587,7 @@ class NodeBase(CrossModuleABC):
 
 
 
-class StableRendererNodeBase(NodeBase):
+class StableRendererNodeBase(AdvancedNodeBase):
     '''For inheritance category of stable-renderer nodes.'''
     
     Category = 'stable-renderer'
@@ -596,4 +596,4 @@ class StableRendererNodeBase(NodeBase):
 
 
 
-__all__.extend(['NodeBase', 'StableRendererNodeBase'])
+__all__.extend(['AdvancedNodeBase', 'StableRendererNodeBase'])

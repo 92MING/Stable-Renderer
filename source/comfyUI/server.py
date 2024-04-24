@@ -27,7 +27,7 @@ from aiohttp import web
 
 from common_utils.type_utils import brute_dump_json
 from common_utils.decorators import singleton, class_or_ins_property
-from common_utils.global_utils import GetOrCreateGlobalValue, SetGlobalValue
+from common_utils.global_utils import GetOrCreateGlobalValue, SetGlobalValue, is_verbose_mode, is_dev_mode
 from common_utils.debug_utils import ComfyUILogger
 from comfy.cli_args import args
 from app.user_manager import UserManager
@@ -48,6 +48,7 @@ def reload_nodes():
     SetGlobalValue("__COMFYUI_NODE_CLASS_MAPPINGS__", None)
     SetGlobalValue("__COMFYUI_NODE_DISPLAY_NAME_MAPPINGS__", None)
     SetGlobalValue("__COMFYUI_EXTENSION_WEB_DIRS__", None)
+    SetGlobalValue('__COMFY_GET_INPUT_TYPE_NAME_CACHE__', {})
     nodes_module_spec.loader.exec_module(nodes)  # type: ignore
     nodes.init_custom_nodes(True)
     ComfyUILogger.debug('Nodes reloaded.')
@@ -575,6 +576,8 @@ class PromptServer:
                     extra_data["client_id"] = json_data["client_id"]
                 if valid.result:
                     outputs_to_execute = valid.nodes_with_good_outputs
+                    if is_verbose_mode():
+                        ComfyUILogger.debug(f'server received prompt: {prompt}')
                     self.prompt_queue.put((number, prompt_id, valid.formatted_prompt, extra_data, outputs_to_execute))
                     response = {"prompt_id": prompt_id, "number": number, "node_errors": valid[3]}
                     return _validate_response(response)
@@ -741,8 +744,7 @@ class PromptServer:
         await site.start()
 
         if verbose:
-            ComfyUILogger.info("Starting server\n")
-            ComfyUILogger.info("To see the GUI go to: http://{}:{}".format(address, port))
+            ComfyUILogger.success("Started server on: http://{}:{}".format(address, port))
         if call_on_start is not None:
             call_on_start(address, port)
 

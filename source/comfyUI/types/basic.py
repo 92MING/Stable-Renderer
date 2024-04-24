@@ -5,9 +5,13 @@ from types import NoneType
 from inspect import Parameter
 from enum import Enum
 from pathlib import Path
+from attr import attrs, attrib
 from functools import partial
 
+from common_utils.decorators import cache_property
 from common_utils.type_utils import valueTypeCheck, NameCheckMetaCls, GetableFunc, DynamicLiteral
+from common_utils.global_utils import is_dev_mode, is_verbose_mode
+from common_utils.debug_utils import ComfyUILogger
 try:
     from comfy.samplers import KSampler
 except ModuleNotFoundError as e:
@@ -22,10 +26,12 @@ from comfy.sd import VAE as comfy_VAE, CLIP as comfy_CLIP
 from comfy.controlnet import ControlBase as comfy_ControlNetBase
 from comfy.model_patcher import ModelPatcher
 
+if TYPE_CHECKING:
+    from .runtime import InferenceContext
+    from .node_base import ComfyUINode
+
 from ._utils import *
 
-if TYPE_CHECKING:
-    from comfyUI.execution import PromptExecutor
 
 _T = TypeVar('_T')
 
@@ -607,6 +613,7 @@ __all__.extend(['Named', 'UI', 'UIImage', 'UILatent'])
 
 
 # region special types
+@attrs
 class Lazy(Generic[_T]):
     '''
     Mark the type as lazy, for lazy loading in ComfyUI.
@@ -618,45 +625,100 @@ class Lazy(Generic[_T]):
         real_type = tp.origin_type if isinstance(tp, AnnotatedParam) else tp
         return Annotated[real_type, AnnotatedParam(tp, tags=['lazy'])]
     
-    _value: _T = None    # type: ignore
+    from_node_id: str = attrib()
+    '''from which node id'''
+    from_output_slot: int = attrib()
+    '''from which output slot'''
+    to_node_id: str = attrib()
+    '''to which node id'''
+    to_param_name: str = attrib()
+    '''to which param name'''
+    context: "InferenceContext" = attrib()
+    '''which context this lazy value belongs to'''
     
-    _from_node_id: str = None   # type: ignore
-    _from_slot: str = None  # type: ignore
-    _to_type_name: str = None   # type: ignore
+    _gotten: bool = attrib(default=False)
+    '''whether the value has been gotten.'''
+    _value: _T = attrib(default=None)
+    '''the real value of the lazy type. It will only be resolved when it is accessed.'''
     
-    @overload
-    def __init__(self, from_node_id: str, from_slot: int, to_type: Union[type, str]):
-        '''Create a lazy type from another node's output.'''
-    @overload
-    def __init__(self, value: _T):
-        '''Create a lazy type from a real value.'''
+    @cache_property  # type: ignore
+    def from_node_cls_name(self)->str:
+        prompt = self.context.prompt
+        return prompt[self.from_node_id]['class_type']
     
-    def __init__(self, *args):  # type: ignore
-        if len(args) not in (1, 3):
-            raise ValueError(f'Invalid arguments: {args}. It should be `value` or `(from_node_id, from_slot)`.')
-        if len(args) == 1:
-            self._value = args[0]
-        else:
-            self._from_node_id, self._from_slot = args[0], args[1]
-            to_type = args[2]
-            if isinstance(to_type, type):
-                to_type_name = get_comfy_name(to_type)
-            else:
-                to_type_name = to_type
-            self._to_type_name = to_type_name
+    @cache_property  # type: ignore
+    def from_node_cls(self)->Type["ComfyUINode"]:
+        return get_node_cls_by_name(self.from_node_cls_name)  # type: ignore
     
-    def _get_value(self)->_T:   # type: ignore
-        if self._value is None:
-            if not self._from_node_id or not self._from_slot:
-                raise ValueError(f'Invalid lazy type: {self}. It should be created from another node.')
-            self._value = PromptExecutor.Instance._get_node_output(self._from_node_id, self._from_slot, self._to_type_name) # type: ignore
-        return self._value
+    @cache_property  # type: ignore
+    def to_node_cls_name(self)->str:
+        prompt = self.context.prompt
+        return prompt[self.to_node_id]['class_type']
+    
+    @cache_property  # type: ignore
+    def to_node_cls(self)->Type["ComfyUINode"]:
+        return get_node_cls_by_name(self.to_node_cls_name)    # type: ignore
+    
+    @cache_property # type: ignore
+    def to_type_name(self)->str:
+        if not hasattr(self, '_to_type_name'):
+            from ._utils import get_comfy_node_input_type
+            self._to_type_name = get_comfy_node_input_type(self.to_node_cls, self.to_param_name)
+        return self._to_type_name
+    
+    @cache_property # type: ignore
+    def is_list_val(self)->bool:
+        return check_input_param_is_list_type(self.to_param_name, self.to_node_cls)
+    
+    @cache_property # type: ignore
+    def from_val_type(self)->str:
+        from_node_type = self.from_node_cls
+        return from_node_type.RETURN_TYPES[self.from_output_slot]
     
     @property
-    def value(self)->_T:
-        '''The real value of the lazy type. The value will only be resolved when it is accessed.'''
-        return self._get_value()
-
+    def value(self)->_T:   # type: ignore
+        if not self._gotten:
+            if is_dev_mode() and is_verbose_mode():
+                ComfyUILogger.debug(f"Lazy[{self.to_type_name}] is getting the value from node: {self.from_node_cls_name}({self.from_node_id}) for {self.to_node_cls_name}({self.to_node_id})'s {self.to_param_name}, slot: {self.from_output_slot}...")
+            
+            from comfyUI.adapters import find_adapter
+            from .runtime import NodePool
+            from comfyUI.execution import PromptExecutor
+            pool = NodePool()
+            executor: PromptExecutor = PromptExecutor.Instance  # type: ignore
+            
+            from_node_id = self.from_node_id
+            from_node = pool.get_node(from_node_id, self.from_node_cls_name, create_new=True, raise_err=False)
+            if not from_node:
+                raise ValueError(f"Node `{self.from_node_cls_name}`({from_node_id}) not found.")
+            slot_index = self.from_output_slot
+            to_type_name = self.to_type_name
+            is_list_val = self.is_list_val
+            
+            context = self.context
+            
+            if from_node_id in context.outputs and from_node_id in context.executed_node_ids:
+                if is_dev_mode() and is_verbose_mode():
+                    ComfyUILogger.debug(f"Lazy[{self.to_type_name}] got its value from context's executed output.")
+                val = context.outputs[from_node_id][slot_index]
+            else:
+                if is_dev_mode() and is_verbose_mode():
+                    ComfyUILogger.debug(f"Lazy[{self.to_type_name}] is getting the value from node's output...")
+                context.current_node_id = from_node_id
+                executor._recursive_execute(context)    # continue execution
+                val = context.outputs[from_node_id][slot_index]
+            
+            if not is_list_val and isinstance(val, list) and len(val) == 1:
+                val = val[0]
+                
+            if adapter := find_adapter(self.from_val_type, to_type_name):
+                val = adapter(val)
+            
+            self._value = val   # type: ignore
+            self._gotten = True
+            
+        return self._value  # type: ignore
+    
 class Array(list, Generic[_T]):
     '''
     Mark the type as array, to allow the param accept multiple values and pack as a list.

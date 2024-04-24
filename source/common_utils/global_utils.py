@@ -157,7 +157,7 @@ def is_release_mode():
         return not GetEnv('DEV_MODE', False, bool)
     return False # default is not release mode
  
-def is_dev_mode():
+def is_dev_mode()->bool:
     '''
     Development mode makes the engine is running with more debug information, etc.
     
@@ -169,10 +169,14 @@ def is_dev_mode():
     '''
     return not is_release_mode()
 
-def is_backend_mode():
-    return GetEnv('BACKEND_MODE', False, bool)
+def is_backend_mode()->bool:
+    '''backend mode is for making this system as a backend services, e.g. for web application'''
+    return GetEnv('BACKEND_MODE', False, bool)  # type: ignore
 
-__all__ = ['GetEnv', 'should_run_web_server', 'is_game_mode', 'is_editor_mode', 'is_release_mode', 'is_dev_mode',
+def is_verbose_mode()->bool:
+    return GetEnv('VERBOSE', False, bool)   # type: ignore
+
+__all__ = ['GetEnv', 'is_verbose_mode', 'should_run_web_server', 'is_game_mode', 'is_editor_mode', 'is_release_mode', 'is_dev_mode',
            'is_engine_looping', 'is_game_editor_mode', 'is_backend_mode']
 # endregion
 

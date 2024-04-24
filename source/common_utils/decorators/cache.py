@@ -93,14 +93,11 @@ class _CachedFunc:
             return self.func(*args, **kwargs)
 
 @overload
-def cache(func:Callable):
-    ...
+def cache(func:Callable): ...
 @overload
-def cache(prop:Union[property, class_property]):
-    ...
+def cache(prop:Union[property, class_property]): ...
 @overload
-def cache(maxsize:int=128, typed:bool=False):
-    ...
+def cache(maxsize:int=128, typed:bool=False): ...
 
 def cache(*args, **kwargs):
     '''
@@ -164,6 +161,45 @@ def cache(*args, **kwargs):
                 real_args['typed'] = args[1]    # type: ignore
         real_args.update(kwargs)
         return lambda func: _CachedFunc(func, **real_args)
+
+
+class cache_property(property):
+    '''
+    Cache a property value and set the cached value to the object by adding prefix and sufix to the property name.
+    Default prefix and sufix are '__'(double underscore).
+    '''
+
+    @overload
+    def __init__(func: Callable):...
+    @overload
+    def __init__(prefix:str="__", sufix:str="__"):...
+
+def _cache_property(*args, **kwargs):
+    '''
+    Cache a property value and set the cached value to the object by adding prefix and sufix to the property name.
+    Default prefix and sufix are '__'(double underscore).
+    '''
+    if (len(args) + len(kwargs)) == 1:
+        func = args[0] if args else kwargs[tuple(kwargs.keys())[0]]
+        return _cache_property("__", "__")(func)
+    else:
+        prefix = args[0] if len(args)>=1 else kwargs.get('prefix', "__")
+        sufix = args[1] if len(args)>=2 else kwargs.get('sufix', "__")
+        if prefix == sufix == "":
+            raise ValueError("prefix and sufix can't be both empty.")
+        def _decorator(func):
+            @property
+            @wraps(func)
+            def _cached_property(self):
+                key = prefix + func.__name__ + sufix
+                if not hasattr(self, key):
+                    setattr(self, key, func(self))
+                return getattr(self, key)
+            return _cached_property
+        return _decorator
+
+globals()['cache_property'] = _cache_property
     
-    
-__all__ = ['cache']
+__all__ = ['cache', 'cache_property']
+
+

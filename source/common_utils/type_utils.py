@@ -507,7 +507,25 @@ def brute_dump_json(data):
         else:
             return str(data)
 
-__all__.extend(['pack_param', 'func_param_type_check', 'is_empty_method', 'brute_dump_json'])
+def format_data_for_console_log(data):
+    if isinstance(data, dict):
+        data_str_dict = {}
+        for k, v in data.items():
+            data_str_dict[k] = format_data_for_console_log(v)
+        return data_str_dict
+    elif isinstance(data, (list, tuple)):
+        data_strs = []
+        for d in data:
+            data_strs.append(format_data_for_console_log(d))
+        return data_strs
+    else:
+        data_str = str(data)
+        if len(data_str) > 20:
+            data_str = f'`{data_str[:15]}...`'
+        return data_str
+
+
+__all__.extend(['pack_param', 'func_param_type_check', 'is_empty_method', 'brute_dump_json', 'format_data_for_console_log'])
 # endregion
 
 

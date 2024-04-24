@@ -17,151 +17,77 @@ import comfy.model_management
 
 from common_utils.debug_utils import ComfyUILogger, get_log_level_by_name
 from common_utils.decorators import singleton, class_property, Overload
-from common_utils.global_utils import is_dev_mode, GetOrCreateGlobalValue
-
+from common_utils.global_utils import is_dev_mode, is_verbose_mode
+from common_utils.type_utils import format_data_for_console_log
 from comfyUI.types import *
-from comfyUI.adapters import find_adapter, AdaptersMap
-
+from comfyUI.types._utils import (get_comfy_node_input_type as _get_comfy_node_input_type_name,
+                                  check_input_param_is_list_type as _check_input_param_is_list_origin,
+                                    check_input_param_is_lazy as _check_input_param_is_lazy)
+from comfyUI.adapters import find_adapter
 
 if TYPE_CHECKING:
     from comfyUI.server import PromptServer
 
-_comfy_get_input_type_name_cache: Dict[Tuple[int, str], str] = GetOrCreateGlobalValue("__COMFY_GET_INPUT_TYPE_NAME_CACHE__", dict)
-def _get_comfy_node_input_type_name(node_type: Type[ComfyUINode], input_name: str)->str:
-    if not isinstance(node_type, type):
-        node_type = node_type.__class__
-    node_type_id = id(node_type)
-    if (node_type_id, input_name) in _comfy_get_input_type_name_cache:
-        return _comfy_get_input_type_name_cache[(node_type_id, input_name)]
-    
-    input_param_dict = node_type.INPUT_TYPES()
-    all_input_params = {}
-    all_input_params.update(input_param_dict.get("required", {}))
-    all_input_params.update(input_param_dict.get("optional", {}))
-    all_input_params.update(input_param_dict.get("hidden", {}))
-    if input_name not in all_input_params:
-        raise ValueError(f"Input name {input_name} not found in node {node_type}.")
-    t_name = all_input_params[input_name][0]
-    if isinstance(t_name, (list, tuple)):
-        t_name = "COMBO"
-    _comfy_get_input_type_name_cache[(node_type_id, input_name)] = t_name
-    return t_name
-    
+
+def _check_output_param_only_output_to(from_node_id: str, 
+                                       from_node_output_slot_index: int, 
+                                       to_node_id: str, 
+                                       to_node_input_param: str, 
+                                       prompt: PROMPT)->bool:
+    from_node_output_list = prompt.links[from_node_id]
+    that_output_connects = from_node_output_list.get(from_node_output_slot_index, [])
+    if len(that_output_connects)==1 and that_output_connects[0][0]==to_node_id and that_output_connects[0][1]==to_node_input_param:
+        return True
+    return False
+
+@deprecated(reason='Use `PromptExecutor.get_input_data` instead.')
 def get_input_data(inputs: dict, 
-                   class_def: Type[ComfyUINode], 
-                   unique_id: str, 
+                   node_cls: Type[ComfyUINode], 
+                   node_id: str, 
                    outputs: Optional[dict]=None, 
-                   prompt: Optional[dict]=None, 
+                   prompt: Union[dict, PROMPT, None]=None, 
                    extra_data: Optional[dict]=None):
     '''
+    !! Deprecated !! Use Executor._get_input_data now.
     Pack inputs form value/nodes into a dict for the node to use.
     
     Args:
         - inputs: {param name, value}. Values can be:
             * [from_node_id, from_node_output_slot_index] (means the value is from another node's output)
             * a value
-        - class_def: the class of the node
-        - unique_id: the id of this node
+        - node_cls: the class of the node
+        - node_id: the id of the target node
         - outputs: {node_id: [output1, output2, ...], ...}
         - prompt: the prompt dict
     
     Returns:
         a dict of {param name: value}. !Values from node bindings are not resolved yet!
     '''
-    outputs = outputs or {}
-    prompt = prompt or {}
-    extra_data = extra_data or {}
-    valid_inputs = class_def.INPUT_TYPES()
-    lazy_inputs = class_def.LAZY_INPUTS if hasattr(class_def, "LAZY_INPUTS") else []
-    
-    input_data_all = {}
-    for input_param_name in inputs:
-        input_data = inputs[input_param_name]
+    e = PromptExecutor()
+    context = e.current_context
+    if not context:
+        context = InferenceContext(prompt=prompt,   # type: ignore
+                                   extra_data=extra_data or {},
+                                   current_node_id=node_id,
+                                   old_prompt=None,
+                                   outputs=outputs or {},
+                                   outputs_ui={},
+                                   frame_data=None,
+                                   baking_data=None,
+                                   status_messages=[],
+                                   executed_node_ids=set(),
+                                   success=False)
+        return e._get_input_data(inputs, context)    
+    else:
+        context.prompt = prompt # type: ignore
+        context.extra_data = extra_data or {}
+        context.current_node_id = node_id
+        context.outputs = outputs or {}
+        return e._get_input_data(inputs, context)
+
         
-        if isinstance(input_data, NodeBindingParam):    # [from_node_id, from_node_output_slot_index]
-            from_node_id = input_data[0]
-            output_slot_index = input_data[1]
-            
-            if input_param_name in lazy_inputs:
-                val = Lazy(from_node_id, output_slot_index, _get_comfy_node_input_type_name(class_def, input_param_name))
-            elif from_node_id not in outputs:
-                val = (None,)
-            else:
-                val = outputs[from_node_id][output_slot_index]
-                from_node_type_name = prompt[from_node_id]['class_type']
-                from_node_type = get_node_type_by_name(from_node_type_name)
-                from_type_name = from_node_type.RETURN_TYPES[output_slot_index]
-                to_type_name = _get_comfy_node_input_type_name(class_def, input_param_name)
-                if from_type_name != to_type_name:
-                    if adapter := find_adapter(from_type_name, to_type_name):
-                        val = adapter(val)
-                    else:
-                        val_type_name = get_comfy_name(type(val))
-                        if val_type_name != from_type_name and val_type_name != to_type_name:
-                            if adapter := find_adapter(val_type_name, to_type_name):
-                                val = adapter(val)
-            input_data_all[input_param_name] = val
-            
-        else:   # a value
-            if input_param_name in lazy_inputs:
-                input_data_all[input_param_name] = Lazy(input_data)
-                
-            elif ("required" in valid_inputs and input_param_name in valid_inputs["required"]) or ("optional" in valid_inputs and input_param_name in valid_inputs["optional"]):
-                val = input_data
-                val_type_name = get_comfy_name(type(val))
-                to_type_name = _get_comfy_node_input_type_name(class_def, input_param_name)
-                if val_type_name != to_type_name:
-                    if adapter := find_adapter(val_type_name, to_type_name):
-                        val = adapter(val)
-                
-                input_data_all[input_param_name] = [val]
-
-    def get_proper_hidden_keys(key: str):
-        keys = set()
-        keys.add(key)
-        no_bottom_bar_key = key
-        while no_bottom_bar_key.startswith("_"):
-            no_bottom_bar_key = key[1:]
-        keys.add(no_bottom_bar_key)
-        for k in keys.copy():
-            keys.add(k.lower())
-            keys.add(k.upper())
-        return keys
-    
-    def try_put_hidden_value(origin_param_name: str):
-        if not extra_data:
-            return
-        possible_keys = get_proper_hidden_keys(origin_param_name)
-        for k in possible_keys:
-            if k in extra_data:
-                input_data_all[origin_param_name] = [extra_data[k]]
-                break
-    
-    if "hidden" in valid_inputs:
-        h = valid_inputs["hidden"]
-        for input_param_name in h:
-            if h[input_param_name] == "PROMPT":
-                input_data_all[input_param_name] = [prompt]
-            if h[input_param_name] == "EXTRA_PNGINFO":
-                if "extra_pnginfo" in extra_data:
-                    input_data_all[input_param_name] = [extra_data['extra_pnginfo']]
-            if h[input_param_name] == "UNIQUE_ID":
-                input_data_all[input_param_name] = [unique_id]
-            elif hidden_cls := HIDDEN.FindHiddenClsByName(h[input_param_name]): # type: ignore
-                node = NodePool().get(unique_id)
-                context = PromptExecutor().current_context
-                context.current_node = node # type: ignore
-                input_data_all[input_param_name] = [hidden_cls.GetValue(context)] # type: ignore
-            else:
-                try_put_hidden_value(input_param_name)
-    return input_data_all
-
-@deprecated # changed name to `get_node_func_ret`
+@deprecated # changed to use `get_node_func_ret` now
 def map_node_over_list(obj, input_data_all, func, allow_interrupt=False):
-    '''
-    Name of `map_node_over_list` is misleading, i.e. it's actually a general function to get the return of a node's specific function.
-    The name has now changed to `_get_node_func_ret`, so please use the new name instead.
-    '''
     return get_node_func_ret(obj, input_data_all, func, allow_interrupt)
 
 _node_ins_methods = {"IS_CHANGED", "ON_DESTROY"}
@@ -172,10 +98,14 @@ def get_node_func_ret(node: Union[str, ComfyUINode, Type[ComfyUINode]],
                       allow_interrupt: bool = False,
                       create_node_if_need: bool = True):
     '''return the result of the given function name of the node.'''
-    if isinstance(node, str):   # node id
-        node = NodePool().get(node, create_new=False)
-        if not node:
-            raise ValueError(f"Node {node} not found.")
+    if isinstance(node, str):
+        if node.isdigit():   # node id
+            node = NodePool().get_node(node, create_new=False)  #  type: ignore
+            if not node:
+                raise ValueError(f"Node {node} not found.")
+        else:   # node type name
+            node_type = get_node_cls_by_name(node)
+            node = node_type()  # type: ignore
     
     temp_node_ins = None
     if not isinstance(node, type):
@@ -222,6 +152,7 @@ def get_node_func_ret(node: Union[str, ComfyUINode, Type[ComfyUINode]],
     if not callable(real_func):
         raise AttributeError(f"Node type `{node_type}` has no function {func}.")
     
+    first_param = None
     if func in (*_node_ins_methods, node_type.FUNCTION):    # type: ignore
         params = inspect.signature(real_func).parameters
         first_param = list(params.keys())[0]
@@ -236,16 +167,11 @@ def get_node_func_ret(node: Union[str, ComfyUINode, Type[ComfyUINode]],
                 func_params[first_param] = node
     
     results = []
-    if input_is_list:
+    if input_is_list or max_len_input == 0: # TODO: this logic should be verify more carefully?
         if allow_interrupt:
             nodes.before_node_execution()
         results.append(real_func(**func_params))
-    
-    elif max_len_input == 0:
-        if allow_interrupt:
-            nodes.before_node_execution()
-        results.append(real_func())
-        
+            
     else:   # target node accepts single val, but list is provided, so cut into slices
         for i in range(max_len_input):
             if allow_interrupt:
@@ -439,21 +365,14 @@ class PromptExecutor:
         else:
             return str(x)
     
-    def _get_output_data(self, context: InferenceContext, input_data_all: dict, save_to_current_output=True)->Tuple[List[Any], Dict[str, Any]]:
-        '''
-        Get the output data of the given node.
-        
-        Return:
-            - outputs (list of list of values, e.g. [[val1, val2], [val3, val4], ...])
-            - ui values (values to be shown on UI, e.g. {key: [val1, val2, ...], ...})
-        '''
-        node = context.current_node
-        if not node:
+    def _get_node_output_data(self, context: InferenceContext, input_data_all: dict, save_to_current_output=True)->Tuple[List[Any], Dict[str, Any]]:
+        '''Get the output data of the given node.'''
+        current_node = context.current_node
+        if not current_node:
             raise ValueError("No node to execute for `_get_output_data`.")
         results = []
         uis = {}
-        return_values = get_node_func_ret(node, input_data_all, node.FUNCTION, allow_interrupt=True)
-
+        return_values = get_node_func_ret(current_node, input_data_all, current_node.FUNCTION, allow_interrupt=True)
         for r in return_values:
             if isinstance(r, dict):
                 if 'ui' in r:
@@ -469,10 +388,16 @@ class PromptExecutor:
         output = []
         if len(results) > 0:
             # check which outputs need concatenating
-            if hasattr(node, "OUTPUT_IS_LIST"):
-                output_is_list = node.OUTPUT_IS_LIST
+            if hasattr(current_node, "OUTPUT_IS_LIST"):
+                output_is_list = current_node.OUTPUT_IS_LIST
             else:
-                output_is_list = [False] * len(results[0])
+                if hasattr(current_node, '__ADVANCED_NODE_CLASS__') and current_node.__ADVANCED_NODE_CLASS__:
+                    output_is_list = []
+                    output_infos = current_node.__ADVANCED_NODE_CLASS__._ReturnFields
+                    for _, anno in output_infos:
+                        output_is_list.append(True if ('list' in anno.tags) else False)
+                else:    
+                    output_is_list = [False] * len(results[0])
 
             # merge node execution results
             for i, is_list in zip(range(len(results[0])), output_is_list):
@@ -482,10 +407,159 @@ class PromptExecutor:
                     output.append([o[i] for o in results])
         
         if save_to_current_output:
-            context.outputs[node.ID] = output
-            context.outputs_ui[node.ID] = uis
+            context.outputs[current_node.ID] = output
+            context.outputs_ui[current_node.ID] = uis
         return output, uis
+
+    def _get_input_data(self, inputs: dict, context: InferenceContext):
+        node_id = context.current_node_id
+        node_cls = context.current_node_cls
+        if not node_id or not node_cls:
+            raise ValueError("No node id or node class to get input data.")
+        node = self.node_pool.get_node(node_id, node_cls, create_new=True)
         
+        valid_inputs = node_cls.INPUT_TYPES()
+        lazy_inputs = node_cls.LAZY_INPUTS if hasattr(node_cls, "LAZY_INPUTS") else []
+        
+        input_data_all = {}
+        for input_param_name in inputs:
+            input_data = inputs[input_param_name]
+            
+            if isinstance(input_data, NodeBindingParam):    # [from_node_id, from_node_output_slot_index]
+                from_node_id = input_data[0]
+                from_node_type_name = context.prompt[from_node_id]['class_type']
+                output_slot_index = input_data[1]
+                
+                if is_dev_mode() and is_verbose_mode():
+                    this_node_type_name = context.prompt[node_id]['class_type']
+                    ComfyUILogger.debug(f"finding input data for {this_node_type_name}({node_id})'s input `{input_param_name}` from {from_node_type_name}({from_node_id})'s output {output_slot_index}")
+
+                if from_node_id not in context.outputs:
+                    if input_param_name in lazy_inputs:
+                        val = [Lazy(from_node_id, 
+                                    output_slot_index, 
+                                    node_id,
+                                    input_param_name,
+                                    PromptExecutor().current_context) # type: ignore
+                            ]
+                        if _check_output_param_only_output_to(from_node_id, 
+                                                            output_slot_index, 
+                                                            node_id, 
+                                                            input_param_name, 
+                                                            context.prompt):
+                            context.remove_to_be_excuted_node(from_node_id) # will ignore if not in the list
+                    else:
+                        if is_dev_mode() and is_verbose_mode():
+                            ComfyUILogger.warn(f'Cannot find output from node `{from_node_type_name}`({from_node_id}) for input `{input_param_name}` of node `{node_cls.__qualname__}`({node_id}). The value will be set to `None`.')
+                        val = (None,)
+                        
+                else:   # in outputs
+                    input_param_is_list = _check_input_param_is_list_origin(input_param_name, node_cls)
+                    val = context.outputs[from_node_id][output_slot_index]
+                    if not input_param_is_list and isinstance(val, list) and len(val) == 1:
+                            val = val[0]
+                    if val is not None:
+                        if isinstance(val, Lazy) and not _check_input_param_is_lazy(input_param_name, node_cls):
+                            val = val.value
+                        
+                        from_node_type_name = context.prompt[from_node_id]['class_type']
+                        from_node_type = get_node_cls_by_name(from_node_type_name)
+                        from_type_name = from_node_type.RETURN_TYPES[output_slot_index]    # type: ignore
+                        to_type_name = _get_comfy_node_input_type_name(node_cls, input_param_name)
+                        if from_type_name != to_type_name:
+                            if adapter := find_adapter(from_type_name, to_type_name):
+                                val = adapter(val)
+                            else:
+                                val_type_name = get_comfy_name(type(val))
+                                if val_type_name != from_type_name and val_type_name != to_type_name:
+                                    if adapter := find_adapter(val_type_name, to_type_name):
+                                        val = adapter(val)
+                                        
+                    if is_dev_mode() and is_verbose_mode():
+                        val_str = str(val)
+                        if len(val_str) > 18:
+                            val_str = val_str[:15] + '...'
+                        ComfyUILogger.debug(f"got output={val_str} (index={output_slot_index}) from {from_node_type_name}({from_node_id})'s executed output.")
+                    
+                    val = [val]
+
+                input_data_all[input_param_name] = val
+                
+            else:   # a value
+                if input_param_name in lazy_inputs:
+                    if not isinstance(input_data, Lazy):
+                        input_data_all[input_param_name] = [
+                            Lazy(from_node_id, 
+                                output_slot_index, 
+                                node_id,
+                                input_param_name,
+                                current_context,   # type: ignore
+                                _gotten=True,
+                                _value=input_data)
+                            ]
+                    else:
+                        input_data_all[input_param_name] = [input_data]
+                        
+                elif ("required" in valid_inputs and input_param_name in valid_inputs["required"]) or ("optional" in valid_inputs and input_param_name in valid_inputs["optional"]):
+                    val = input_data
+                    if val is not None:
+                        val_type_name = get_comfy_name(type(val))
+                        to_type_name = _get_comfy_node_input_type_name(node_cls, input_param_name)
+                        if val_type_name != to_type_name:
+                            if adapter := find_adapter(val_type_name, to_type_name):
+                                val = adapter(val)
+                    input_data_all[input_param_name] = [val]
+
+        def get_proper_hidden_keys(key: str):
+            keys = set()
+            keys.add(key)
+            no_bottom_bar_key = key
+            while no_bottom_bar_key.startswith("_"):
+                no_bottom_bar_key = key[1:]
+            keys.add(no_bottom_bar_key)
+            for k in keys.copy():
+                keys.add(k.lower())
+                keys.add(k.upper())
+            return keys
+        
+        def try_put_hidden_value(origin_param_name: str, extra_data: dict, input_data_all:dict):
+            if not extra_data:
+                return input_data_all
+            possible_keys = get_proper_hidden_keys(origin_param_name)
+            for k in possible_keys:
+                if k in extra_data:
+                    input_data_all[origin_param_name] = [extra_data[k]]
+                    break
+            return input_data_all
+        
+        if "hidden" in valid_inputs:
+            h = valid_inputs["hidden"]
+            for input_param_name in h:
+                input_param_type = h[input_param_name]
+                if isinstance(input_param_type, tuple):
+                    if len(input_param_type) > 0 and isinstance(input_param_type[0], str):
+                        input_param_type = input_param_type[0]
+                    else:
+                        raise ValueError(f"Invalid hidden input type {input_param_type} for {input_param_name}.")
+                
+                if input_param_type == "PROMPT":
+                    input_data_all[input_param_name] = [context.prompt]
+                    
+                if input_param_type == "EXTRA_PNGINFO":
+                    if "extra_pnginfo" in context.extra_data:
+                        input_data_all[input_param_name] = [context.extra_data['extra_pnginfo']]
+                
+                if input_param_type == "UNIQUE_ID":
+                    input_data_all[input_param_name] = [node_id]
+                
+                elif hidden_cls := HIDDEN.FindHiddenClsByName(input_param_type):
+                    context.current_node = node # type: ignore
+                    input_data_all[input_param_name] = [hidden_cls.GetHiddenValue(context)]
+                else:
+                    input_data_all = try_put_hidden_value(input_param_name, context.extra_data, input_data_all)
+                    
+        return input_data_all
+
     def _recursive_will_execute(self, context:"InferenceContext", current_node_id: Optional[str]=None, memo:Optional[dict]=None):
         memo = memo or {}
         outputs = context.outputs
@@ -514,74 +588,80 @@ class PromptExecutor:
         memo[unique_id] = will_execute + [unique_id]
         return memo[unique_id]
     
-    def _get_node_output(self, node_id: str, slot_index: int, to_type_name: str):
-        '''special method for "Lazy" type values, to get the real value from a binding'''
-        context = self.current_context
-        if not context:
-            raise ValueError("No context to get node output.")
-        
-        node = self.node_pool.get(node_id, create_new=False)
-        if not node:
-            raise ValueError(f"Node with id `{node_id}` not found.")
-        from_val_type = node.RETURN_TYPES[slot_index]
-        
-        if hasattr(self, 'outputs') and self.outputs and node_id in self.outputs:
-            val = self.outputs[node_id][slot_index]
-        else:
-            context.current_node_id = node_id
-            self._recursive_execute(context)    # continue execution
-            val = self.outputs[node_id][slot_index]
-            
-        if adapter := find_adapter(from_val_type, to_type_name):
-            val = adapter(val)
-        return val
-    
     def _recursive_execute(self, context: InferenceContext)->RecursiveExecuteResult:
         prompt = context.prompt
         if not prompt:
             return RecursiveExecuteResult(False, None, ValueError("No prompt to execute."))
         
-        extra_data = context.extra_data
-        executed = context.executed_node_ids
-        if not context.current_node_id:
+        executed_node_ids = context.executed_node_ids
+        
+        current_node_id=context.current_node_id
+        if current_node_id is None:
             return RecursiveExecuteResult(False, None, ValueError("No node specify to execute in the context."))
         
-        current_node_id = context.current_node_id
         inputs = prompt[current_node_id]['inputs']
-        class_type = prompt[current_node_id]['class_type']
-        class_def = nodes.NODE_CLASS_MAPPINGS[class_type]
+        current_node_type_name = prompt[current_node_id]['class_type']
+        current_node_type = nodes.NODE_CLASS_MAPPINGS[current_node_type_name]
+        lazy_input_params = current_node_type.LAZY_INPUTS if hasattr(current_node_type, "LAZY_INPUTS") else []
         
         if current_node_id in context.outputs:
             return RecursiveExecuteResult(True, None, None)
         
-        for param_name in inputs:
-            input_data = inputs[param_name]
-
+        for input_param_name in inputs:
+            input_data = inputs[input_param_name]
+            if is_dev_mode() and is_verbose_mode():
+                ComfyUILogger.debug(f"(recursive_execute)checking input `{input_param_name}`=`{input_data}` for node `{current_node_type.__qualname__}`({current_node_id})")
             if isinstance(input_data, NodeBindingParam):
-                node_id = input_data[0]
-                if node_id not in context.outputs:
-                    context.current_node_id = node_id
-                    result = self._recursive_execute(context)
-                    if result.success is not True:
-                        return result # Another node failed further upstream
+                from_node_id, from_slot = input_data[0], input_data[1]
+                from_node_type_name = prompt.get_node_type_name(from_node_id)
+                
+                if from_node_id not in context.outputs:
+                    if input_param_name in lazy_input_params:
+                        
+                        if is_dev_mode() and is_verbose_mode():
+                            ComfyUILogger.debug(f"skip lazy input `{input_param_name}` for node `{current_node_type.__qualname__}`({current_node_id})")
+                        
+                        val = Lazy(from_node_id, 
+                                   from_slot, 
+                                   current_node_id,
+                                   input_param_name,
+                                   context)
+                        context.outputs[current_node_id] = [val]
+                        if _check_output_param_only_output_to(from_node_id, 
+                                                              from_slot, 
+                                                              current_node_id, 
+                                                              input_param_name, 
+                                                              prompt):
+                            context.remove_to_be_excuted_node(from_node_id) # will ignore if not in the list
+                    else:
+                        if is_dev_mode() and is_verbose_mode():
+                            ComfyUILogger.debug(f"start recursive execute for node `{current_node_type.__qualname__}`({current_node_id})'s input `{input_param_name}` from `{from_node_type_name}`({from_node_id})'s output {input_data[1]}")
+                        
+                        context.current_node_id = from_node_id
+                        result = self._recursive_execute(context)
+                        if not result.success:
+                            return result # Another node failed further upstream
 
         input_data_all = None
         try:
-            input_data_all = get_input_data(inputs,
-                                            class_def, 
-                                            current_node_id,
-                                            context.outputs, 
-                                            prompt, 
-                                            extra_data)
+            context.current_node_id = current_node_id
+            input_data_all = self._get_input_data(inputs, context)
+            
             if self.server:
                 if self.server.client_id is not None:
                     self.server.last_node_id = current_node_id
                     self.server.send_sync("executing", 
                                           {"node": current_node_id, "prompt_id": prompt.id if prompt else None}, 
                                           self.server.client_id)
+            if is_dev_mode() and is_verbose_mode():
+                ComfyUILogger.debug(f"executing node `{current_node_type.__qualname__}`({current_node_id}) with inputs: {format_data_for_console_log(input_data_all)}")
             
             context.current_node_id = current_node_id
-            self._get_output_data(context, input_data_all, save_to_current_output=True)
+            self._get_node_output_data(context, input_data_all, save_to_current_output=True)
+            
+            if is_dev_mode() and is_verbose_mode():
+                ComfyUILogger.debug(f"executed node `{current_node_type.__qualname__}`({current_node_id}) with results: {format_data_for_console_log(context.outputs[current_node_id])}")
+            
             if len(context.outputs_ui) > 0:
                 if self.server:
                     if self.server.client_id is not None:
@@ -600,7 +680,7 @@ class PromptExecutor:
             return RecursiveExecuteResult(False, error_details, iex)
         
         except Exception as ex:
-            if is_dev_mode():
+            if is_dev_mode() and is_verbose_mode():
                 raise ex
             
             typ, _, tb = sys.exc_info()
@@ -631,7 +711,7 @@ class PromptExecutor:
             }
             return RecursiveExecuteResult(False, error_details, ex)
 
-        executed.add(current_node_id)
+        executed_node_ids.add(current_node_id)
 
         return RecursiveExecuteResult(True, None, None)
 
@@ -656,7 +736,8 @@ class PromptExecutor:
             if unique_id in old_prompt and 'is_changed' in old_prompt[unique_id]:
                 is_changed_old = old_prompt[unique_id]['is_changed']
             if 'is_changed' not in prompt[unique_id]:
-                input_data_all = get_input_data(inputs, class_def, unique_id, outputs)
+                context.current_node_id = unique_id
+                input_data_all = self._get_input_data(inputs, context)
                 if input_data_all is not None:
                     try:
                         is_changed = get_node_func_ret(class_def, input_data_all, "IS_CHANGED")
@@ -704,9 +785,9 @@ class PromptExecutor:
             self.current_context.destroy()
             self.current_context = None
     
-    def get_node(self, node_id:str, class_type_name: str)->ComfyUINode:
+    def get_node(self, node_id:str, class_type_name: str)->Optional[ComfyUINode]:
         '''Return the target node from the pool, or create a new one if not found.'''
-        return self.node_pool.get((node_id, class_type_name))
+        return self.node_pool.get_node(node_id, class_type_name)
     
     def add_message(self, 
                     event: StatusMsgEvent, 
@@ -878,21 +959,23 @@ class PromptExecutor:
                              broadcast=False,
                              level="info")
             output_node_id = None
-            to_execute = []
+            current_context.to_be_executed = []
 
             for node_id in list(node_ids_to_be_ran):
-                to_execute += [(0, node_id)]
+                current_context.to_be_executed.append((0, str(node_id)))
 
-            while len(to_execute) > 0:
-                #always execute the output that depends on the least amount of unexecuted nodes first
+            while len(current_context.to_be_executed) > 0:
+                # always execute the output that depends on the least amount of unexecuted nodes first
                 memo = {}
-                to_execute = sorted(list(map(lambda a: (len(self._recursive_will_execute(current_context, a[-1], memo)), a[-1]), to_execute)))
-                output_node_id = to_execute.pop(0)[-1]
-                current_context.current_node_id = output_node_id
+                current_context.to_be_executed = sorted(list(map(lambda a: (len(self._recursive_will_execute(current_context, a[-1], memo)), a[-1]), current_context.to_be_executed)))
+                if is_dev_mode() and is_verbose_mode():
+                    ComfyUILogger.debug(f"(in executor.execute)Nodes to be executed now: {current_context.to_be_executed}")
                 
                 # This call shouldn't raise anything if there's an error deep in
                 # the actual SD code, instead it will report the node where the
                 # error was raised
+                output_node_id = current_context.to_be_executed.pop(0)[-1]
+                current_context.current_node_id = output_node_id
                 success, error, ex = self._recursive_execute(current_context)
                 current_context.success = success
                 if success is not True:
@@ -1001,7 +1084,7 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
                     valid = False
                     continue
             except Exception as ex:
-                if is_dev_mode():
+                if is_dev_mode() and is_verbose_mode():
                     raise ex
                 
                 typ, _, tb = sys.exc_info()
@@ -1034,7 +1117,7 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
                     val = str(val)
                     inputs[x] = val
             except Exception as ex:
-                if is_dev_mode():
+                if is_dev_mode() and is_verbose_mode():
                     raise ex
                 error = {
                     "type": "invalid_input_type",
@@ -1184,7 +1267,7 @@ def validate_prompt(prompt: Union[dict, PROMPT], prompt_id: Optional[str]=None) 
             reasons: list = m[1]    # type: ignore
             
         except Exception as ex:
-            if is_dev_mode():
+            if is_dev_mode() and is_verbose_mode():
                 raise ex
 
             typ, _, tb = sys.exc_info()

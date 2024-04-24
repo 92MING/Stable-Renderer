@@ -2056,10 +2056,10 @@ def load_custom_nodes(raise_err=False):
         ComfyUILogger.debug('successfully loaded stable-renderer nodes.')
         
     # advance node registration
-    from comfyUI.types import NodeBase
+    from comfyUI.types import AdvancedNodeBase
     advance_node_mapping = {}
     advance_node_name_mapping = {}
-    for advance_node_cls in NodeBase._AllSubclasses():
+    for advance_node_cls in AdvancedNodeBase._AllSubclasses():
         if advance_node_cls._IsAbstract:
             continue
         cls_real_name = advance_node_cls._RealClsName

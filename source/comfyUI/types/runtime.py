@@ -5,10 +5,11 @@ from typing import (Union, TypeAlias, Literal, Optional, List, Any, Type, Dict, 
 from attr import attrs, attrib
 from dataclasses import dataclass
 from common_utils.debug_utils import ComfyUILogger
+from common_utils.global_utils import is_dev_mode, is_verbose_mode
 from common_utils.type_utils import get_cls_name, NameCheckMetaCls, valueTypeCheck
 from common_utils.decorators import singleton, class_property, class_or_ins_property, Overload
 
-from ._utils import get_node_type_by_name
+from ._utils import get_node_cls_by_name
 
 if TYPE_CHECKING:
     from .node_base import ComfyUINode
@@ -43,6 +44,9 @@ class InferenceContext:
     outputs_ui: 'NodeOutputs_UI' = attrib(factory=dict)
     '''The outputs of the nodes for ui. {node id: {output_name: output_value, ...}, ...}'''
     
+    to_be_executed: List[Tuple[int, str]] = attrib(factory=list)
+    '''node ids waiting to be executed. [(order, node_id), ...]'''
+    
     executed_node_ids: Set[str] = attrib(factory=set)
     '''The executed nodes' ids.'''
     
@@ -58,6 +62,19 @@ class InferenceContext:
     success:bool = attrib(default=False)
     '''Whether the execution is successful.'''
     
+    def node_is_waiting_to_execute(self, node_id: Union[str, int])->bool:
+        node_id = str(node_id)
+        for (_, id) in self.to_be_executed:
+            if id == node_id:
+                return True
+        return False
+    
+    def remove_to_be_excuted_node(self, node_id: Union[str, int]):
+        node_id = str(node_id)
+        for (_, id) in tuple(self.to_be_executed):
+            if id == node_id:
+                self.to_be_executed.remove((_, id))
+            
     @property
     def prompt_id(self)->str:
         '''The prompt id for current execution.'''
@@ -74,19 +91,33 @@ class InferenceContext:
             value = str(value)
         elif isinstance(value, ComfyUINode):
             value = value.ID
-        self._current_node_id = value
-    
+        if value != self._current_node_id:
+            self._current_node_id = value
+            if is_dev_mode() and is_verbose_mode():
+                if self.current_node_cls_name:
+                    ComfyUILogger.debug(f'Current running node id is set to: {value}({self.current_node_cls_name})')
+                else:
+                    ComfyUILogger.debug(f'Current running node id is set to: {value}')
     @property
-    def current_node_type(self)->Optional[str]:
+    def current_node_cls_name(self)->Optional[str]:
+        '''return the class name of current node.'''
         if not self.current_node_id:
             return None
         return self.prompt[self.current_node_id]['class_type']
     
     @property
+    def current_node_cls(self)->Optional[Type["ComfyUINode"]]:
+        '''return the origin type of current node.'''
+        if not self.current_node_cls_name:
+            return None
+        return get_node_cls_by_name(self.current_node_cls_name)
+    
+    @property
     def current_node(self)->Optional["ComfyUINode"]:
+        '''return the current node instance.'''
         if not self.current_node_id:
             return None
-        return NodePool().get(self.current_node_id, self.current_node_type, create_new=True)   # type: ignore
+        return NodePool().get_node(self.current_node_id, self.current_node_cls_name, create_new=True)   # type: ignore
 
     @current_node.setter
     def current_node(self, value: Union[str, int, "ComfyUINode"]):
@@ -165,58 +196,104 @@ class NodePool(Dict[Tuple[str, str], "ComfyUINode"]):
         
         if node_type_name and not isinstance(node_type_name, str):
             node_type_name = str(node_type_name)
-        if (node_id, node_type_name) in self and type(self[node_id]).__qualname__ != node_type_name:
-            raise KeyError(f'The node id {node_id} is already used by another node type {type(self[node_id]).__qualname__}.')
         
-        if node_type_name is None:
-            for key in tuple(super().keys()):
-                if key[0] == node_id:
-                    return super().__getitem__(key)
-            raise KeyError(f'Node not found: {node_id}. If you wanna create a new node, please provide the node type name.')
+        try:
+            node = super().__getitem__((node_id, node_type_name))   # type: ignore
+        except KeyError:
+            node = None
+            
+        if (node is not None) and (node_type_name is not None) and (type(node).__qualname__ != node_type_name):
+            raise KeyError(f'The node id {node_id} is already used by another node type.')
         
-        elif (node_id, node_type_name) not in self:
-            node_type = get_node_type_by_name(node_type_name)
-            if not node_type:
-                raise KeyError(f'Invalid node type name: {node_type_name}.')
-            node = node_type()
-            setattr(node, 'ID', node_id)
-            # '__IS_COMFYUI_NODE__' should already be set in `nodes.py`
-            super().__setitem__((node_id, node_type_name), node)
+        if (node is None) or (node_type_name is None):
+            for _key, _n in tuple(super().items()):
+                if isinstance(_key, str):
+                    if _key == node_id:
+                        node = _n
+                        break
+                else:
+                    if _key[0] == node_id:
+                        node = _n
+                        break
+            else:
+                if node_type_name is None:
+                    raise KeyError(f'Node not found: {node_id}. If you wanna create a new node, please provide the node type name.')
         
-        node = super().__getitem__((node_id, node_type_name))
-        setattr(node, 'ID', node_id) if not hasattr(node, 'ID') else None
-        return node
+        if not node:
+            if node_type_name is not None:
+                node_type = get_node_cls_by_name(node_type_name)
+                if not node_type:
+                    raise KeyError(f'Invalid node type name: {node_type_name}. Cannot create a new node.')
+                node = node_type()
+                super().__setitem__((node_id, node_type_name), node)
+                if not hasattr(node, 'ID'):
+                    setattr(node, 'ID', node_id)
+                return node
+            else:
+                raise KeyError(f'Node not found: {node_id}. If you wanna create a new node, please provide the node type name.')
+        else:
+            if not hasattr(node, 'ID'):
+                setattr(node, 'ID', node_id)
+            return node
     
-    @Overload
-    def get(self, node_id: Union[str, int], node_type: Union[str, Type["ComfyUINode"]]=None, create_new=True, raise_err=False):  # type: ignore
+    def __contains__(self, key):
+        if isinstance(key, (list, tuple)):
+            assert len(key) in (1, 2), f'Invalid key: {key}, it should be a tuple with 2 elements(node_id, node_cls_name).'
+            key = (str(key[0]), str(key[1]))
+            return super().__contains__(key)
+        else:
+            key = str(key)
+            if self.get_node(key, create_new=False, raise_err=False):
+                return True
+            return False
+    
+    def get_node(self, node_id: Union[str, int], node_type: Union[str, Type["ComfyUINode"]]=None, create_new=True, raise_err=False):  # type: ignore
         '''Get the node instance by node_id.'''
         node_id = str(node_id) if isinstance(node_id, int) else node_id
         node_type = get_cls_name(node_type) if (node_type is not None and isinstance(node_type, type)) else node_type
         
         if not create_new:
-            node = self[node_id]    # will raise KeyError if not found
+            try:
+                node = self[node_id]    # will raise KeyError if not found
+            except KeyError as e:
+                if raise_err:
+                    raise e
+                if is_dev_mode() and is_verbose_mode():
+                    ComfyUILogger.debug(f'NodePool.get_node({node_id}, {node_type}, {create_new}, {raise_err}) error: {e}. Returns None.')
+                return None
             if node_type and node_type != get_cls_name(node):
                 if raise_err:
-                    raise ValueError(f'The given node type `{node_type}` is not same as the node instance type `{get_cls_name(node)}`.')
+                    raise KeyError(f'The given node type `{node_type}` is not same as the existing node instance with type `{get_cls_name(node)}`.')
+                else:
+                    if is_dev_mode() and is_verbose_mode():
+                        ComfyUILogger.debug(f'NodePool.get_node({node_id}, {node_type}, {create_new}, {raise_err}) error: The given node type `{node_type}` is not same as the existing node instance with type `{get_cls_name(node)}`. Returns None.')
                 return None
             return node
         else:
             try:
                 if not node_type:
-                    node = self[node_id]    # will raise KeyError if not found
+                    return self[node_id]    # will raise KeyError if not found
                 else:
-                    print("Node id", node_id, " node type ", node_type)
                     return self[(node_id, node_type)]   # will create if not found
             except KeyError as e:
                 if raise_err:
                     raise e
+                if is_dev_mode() and is_verbose_mode():
+                    ComfyUILogger.debug(f'NodePool.get_node({node_id}, {node_type}, {create_new}, {raise_err}) error: {e}. Returns None.')
                 return None
-                
-    @Overload
-    def get(self, key: Tuple[Union[str, int], str], default=None):
-        if valueTypeCheck(key, Tuple[int, str]):
+    
+    def get(self, key: Union[int, str, Tuple[Union[str, int], str]], default=None):
+        origin_key = key
+        if not isinstance(key, (list, tuple)):
+            key = str(key)
+        else:
             key = (str(key[0]), key[1])
-        return super().get(key, default)    # type: ignore
+        try:
+            return self[key]
+        except KeyError as e:
+            if is_dev_mode() and is_verbose_mode():
+                ComfyUILogger.debug(f'NodePool.get({origin_key}, {default}) error: {e}. Returns default.')
+            return default
 
     def clear(self):
         for _, node in self.items():
@@ -231,20 +308,21 @@ class NodePool(Dict[Tuple[str, str], "ComfyUINode"]):
         if isinstance(key, tuple):
             if not len(key) in (1, 2):
                 raise ValueError(f'Invalid key: {key}, it should be a tuple with 2 elements(node_id, node_cls_name).' )
-            id = str(key[0]) if isinstance(key[0], int) else key[0]
+            id = str(key[0])
             node_type = key[1] if len(key)==2 else None
         else:
-            id = str(key) if isinstance(key, int) else key
+            id = str(key)
             node_type = None
         
         node_type = get_cls_name(node_type) if node_type and isinstance(node_type, type) else node_type
+        
         if node_type:
-            node = super().pop((id, node_type))
+            node = super().pop((id, node_type), default)
         else:
-            node = self.get(id)
+            node = self.get_node(id, raise_err=False, create_new=False)
             if node:
                 node_type = get_cls_name(node)
-                super().pop((id, node_type))
+                super().pop((id, node_type), default)
         if node:
             if hasattr(node, 'ON_DESTROY'):
                 try:
@@ -312,12 +390,15 @@ class NodeInputs(Dict[str, Union[NodeBindingParam, Any]], metaclass=NameCheckMet
             
         for key, value in tuple(self.items()):
             param_type = all_param_dict[key][0] # (type, param info)
-            converted = False
+            converted_to_binding = False
             if isinstance(value, list):
                 if self._should_convert_to_bind_type(value):
                     self[key] = NodeBindingParam(value)
-                    converted = True
-            if not converted:
+                    if key not in self._links:
+                        self._links[key] = []
+                    self._links[key].append(self[key])
+                    converted_to_binding = True
+            if not converted_to_binding:
                 if isinstance(param_type, type):
                     if hasattr(param_type, "__ComfyLoad__"):
                         self[key] = param_type.__ComfyLoad__(value)
@@ -332,24 +413,34 @@ class NodeInputs(Dict[str, Union[NodeBindingParam, Any]], metaclass=NameCheckMet
     '''The origin node type of this input's node.'''
     node_type: Type["ComfyUINode"]
     '''The origin node type of this input's node.'''
+    _links: Dict[str, List[NodeBindingParam]]
+    '''input links from other nodes to this node. {input_name: (from_node_id, output_slot_index)}'''
+
+    @property
+    def links(self):
+        return self._links
 
     def __init__(self, node_id:str, node_type_name: str, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.node_id = node_id
         self.node_type_name = node_type_name
-        self.node_type = get_node_type_by_name(node_type_name)  # type: ignore
+        self.node_type = get_node_cls_by_name(node_type_name)  # type: ignore
         if not self.node_type:
             raise ValueError(f'Invalid node type name: {node_type_name}.')    
+        self._links = {}
         self._format_values() # make sure all values are Any/FromNodeInput
 
     def __setitem__(self, __key: str, __value: Union[NodeBindingParam, Any]) -> None:
-        if (isinstance(__value, list) and
+        if (
+            isinstance(__value, list) and
             len(__value)==2 and 
             not isinstance(__value, NodeBindingParam) and
             isinstance(__value[0], str) and
-            isinstance(__value[1], int)):
-            
+            isinstance(__value[1], int)
+        ):
             __value = NodeBindingParam(*__value)
+            self._links[__key] = [__value]
+            
         super().__setitem__(__key, __value)
 
 NodeOutputs_UI: TypeAlias = Dict[str, Dict[str, Any]]

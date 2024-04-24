@@ -1,3 +1,4 @@
+import os
 import argparse
 import enum
 import comfy.options
@@ -114,6 +115,7 @@ parser.add_argument("--disable-metadata", action="store_true", help="Disable sav
 
 parser.add_argument("--multi-user", action="store_true", help="Enables per-user storage.")
 parser.add_argument("--backend-mode", action="store_true", help="Enables backend mode, which means comfyUI will run as a backend server for appliation deployment.")
+parser.add_argument("--verbose", action="store_true", help="Enables verbose output.")
 
 if comfy.options.args_parsing:
     args = parser.parse_args()
@@ -125,3 +127,7 @@ if args.windows_standalone_build:
 
 if args.disable_auto_launch:
     args.auto_launch = False
+
+if args.verbose:
+    os.environ["VERBOSE"] = "1"
+    args.dont_print_server = False

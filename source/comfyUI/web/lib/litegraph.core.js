@@ -8767,7 +8767,10 @@ LGraphNode.prototype.executeAction = function(action)
                         slot_shape = LiteGraph.GRID_SHAPE;
                         slot.shape = LiteGraph.GRID_SHAPE;   // some methods are calling `slot.shape` instead of `slot_type` so we need to set it here
                     }
-                    else if (slot_type.toLowerCase() == "image" || slot_type.toLowerCase() == "latent"){
+                    else if (slot_type.toLowerCase() == "image" || 
+                             slot_type.toLowerCase() == "latent" ||
+                             slot_type.toLowerCase() == "tensor" ||
+                             slot_type.toLowerCase() == "texture"){
                         slot_shape = LiteGraph.BOX_SHAPE;
                         slot.shape = LiteGraph.BOX_SHAPE;   // some methods are calling `slot.shape` instead of `slot_type` so we need to set it here
                     }

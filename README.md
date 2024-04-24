@@ -1,15 +1,18 @@
 # Stable Renderer
 An engine connecting OpenGL & Stable Diffusion
 
-----------------------------------
+
 ## TODO
 
-### bug fix
-- [ ] depth map bug : currently only outputting last obj (when multiple objs are rendered)
-### features
-- [ ] tangent of default meshes (plane & sphere & cube)
-- [ ] shader for canny
-- [ ] shadow map
-- [ ] color cache
-- [ ] dev. mode UI
-- [ ] LCM lora support
+### BUGS
+- `depth map`: seems only outputting last obj? (when multiple objs are rendered)
+- `OBJ load`: error when :
+    - loading faces with more than 3 vertices 
+    - meets `g` label in .obj
+
+### Features
+- `general baking system`
+    - baking algorithms
+- `comfyUI`
+    - baking nodes
+

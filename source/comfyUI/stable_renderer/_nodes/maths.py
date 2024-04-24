@@ -1,6 +1,9 @@
 from typing import Any, Literal
 
 from comfyUI.types import *
+from common_utils.type_utils import get_cls_name
+from common_utils.debug_utils import ComfyUILogger
+from common_utils.global_utils import is_verbose_mode
 
 
 class IsNotNoneNode(StableRendererNodeBase):
@@ -14,11 +17,21 @@ class IsNotNoneNode(StableRendererNodeBase):
     
     Category = "Logic"
     
-    def __call__(self, value: Any, mode: Literal['strict', 'normal']='normal')->bool:
+    def __call__(self, value: Any, mode: Literal['strict', 'normal'] = 'strict')->bool:
         if mode == 'strict':
-            return value is not None    # strict mode only returns True if the value is not None
-        return bool(value)
+            result = value is not None    # strict mode only returns True if the value is not None
+        else:
+            try:
+                result = bool(value)
+            except:
+                result = value is not None
 
+        if is_verbose_mode():
+                val_str = str(value)
+                if len(val_str) > 18:
+                    val_str = val_str[:15] + '...'
+                ComfyUILogger.debug(f'IsNotNoneNode: value={val_str}, mode={mode}, result={result}')
+        return result
 
 class IfNode(StableRendererNodeBase):
     '''
@@ -37,7 +50,33 @@ class IfNode(StableRendererNodeBase):
     def __call__(self, 
                  condition: bool, 
                  true_value: Lazy[Any], 
-                 false_value: Lazy[Any])->Any: 
+                 false_value: Lazy[Any])->Any:
         if condition:
-            return true_value.value
-        return false_value.value
+            if is_verbose_mode():
+                val = true_value.value
+                str_val = str(val)
+                if len(str_val) > 18:
+                    str_val = str_val[:15] + '...'
+                ComfyUILogger.debug(f'IfNode: condition=True, return true_value={str_val}')
+                return val
+            else:
+                return true_value.value
+        else:
+            if is_verbose_mode():
+                val = false_value.value
+                str_val = str(val)
+                if len(str_val) > 18:
+                    str_val = str_val[:15] + '...'
+                ComfyUILogger.debug(f'IfNode: condition=False, return false_value={str_val}')
+                return val
+            else:
+                return false_value.value
+
+class IfValTypeEqual(StableRendererNodeBase):
+    '''check if the income value's type equals to your given string'''
+    
+    Category = "Logic"
+    
+    def __call__(self, val: Any, type_name: str)->bool:
+        val_cls_name = get_cls_name(val)
+        return val_cls_name.upper() == type_name.upper()
