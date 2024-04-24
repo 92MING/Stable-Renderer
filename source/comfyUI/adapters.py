@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar, Union, Dict, Tuple
+from typing import Any, ClassVar, Union, Dict, Tuple, List, Type
 from inspect import getmro
 
+from common_utils.decorators import class_or_ins_property
 from common_utils.global_utils import GetOrCreateGlobalValue
 from comfyUI.types import get_comfy_name
 
@@ -17,8 +18,17 @@ class Adapter(ABC):
     '''
     
     @staticmethod
-    def _AllAdapterClses():
+    def AllAdapterClses()->List[Type['Adapter']]:
         return Adapter.__subclasses__()
+
+    @staticmethod
+    def _AvailableTypeConvertionInfo()->Dict[str, List[str]]:
+        type_convertion_info = {}
+        for (from_type_name, to_type_name) in AdaptersMap.keys():
+            if from_type_name not in type_convertion_info:
+                type_convertion_info[from_type_name] = []
+            type_convertion_info[from_type_name].append(to_type_name)
+        return type_convertion_info
     
     def __new__(cls):
         if cls.Instance is not None:
@@ -28,21 +38,12 @@ class Adapter(ABC):
     def __init__(self):
         if self.__class__.Instance is not None:
             return
-        AdaptersMap[(self.From, self.To)] = self
+        AdaptersMap[(self.FromTypeName, self.ToTypeName)] = self
         self.__class__.Instance = self
 
-    
-    From: ClassVar[str]
-    '''from type's name'''
-    To: ClassVar[str]
-    '''to type's name'''
-    
-    Instance: ClassVar['Adapter'] = None    # type: ignore
-    '''The instance of the adapter. It's a class variable.'''
-    
     def __init_subclass__(cls, From: Union[type, str], To: Union[type, str]):
-        cls.From = get_comfy_name(From)
-        cls.To = get_comfy_name(To)
+        cls.From = From
+        cls.To = To
         cls()   # for registering & initializing the adapter
         
     @abstractmethod
@@ -50,7 +51,33 @@ class Adapter(ABC):
         '''override this method to implement the conversion.'''
         raise NotImplementedError
 
+    From: ClassVar[Union[str, type]]
+    '''from type's name'''
+    To: ClassVar[Union[str, type]]
+    '''to type's name'''
+    
+    @class_or_ins_property # type: ignore
+    def FromTypeName(cls_or_ins)->str:
+        '''The name of the from type. It's a class or instance property.'''
+        name = get_comfy_name(cls_or_ins.From)
+        if name == '*':
+            return 'ANY'
+        return name
+    
+    @class_or_ins_property  # type: ignore
+    def ToTypeName(cls_or_ins)->str:
+        '''The name of the to type. It's a class or instance property.'''
+        name = get_comfy_name(cls_or_ins.To)
+        if name == '*':
+            return 'ANY'
+        return name
+    
+    Instance: ClassVar['Adapter'] = None    # type: ignore
+    '''The instance of the adapter. It's a class variable.'''
+    
+
 __all__ = ['Adapter', 'AdaptersMap', ]
+
 
 class AnyToStr(Adapter, From=Any, To=str):
     def __call__(self, val):
@@ -71,8 +98,11 @@ class StrToCombo(Adapter, From=str, To="COMBO"):
 
 def find_adapter(t1: Union[type, str], t2: Union[type, str]) -> Union[Adapter, None]:
     '''find proper adapter for converting from t1 to t2. Return None if not found.'''
+    if t1 == '*': t1 = "ANY"
+    if t2 == '*': t2 = "ANY"
+
     if t1 == object:
-        return AdaptersMap.get(('Any', t2), None)   # type: ignore
+        return AdaptersMap.get(('ANY', t2), None)   # type: ignore
     
     if isinstance(t1, type):
         t2_cls_name = get_comfy_name(t2)
@@ -80,8 +110,8 @@ def find_adapter(t1: Union[type, str], t2: Union[type, str]) -> Union[Adapter, N
         for cls_name in t1_cls_names:
             if (cls_name, t2) in AdaptersMap:
                 return AdaptersMap[(cls_name, t2_cls_name)]
-        if ('Any', t2_cls_name) in AdaptersMap: 
-            return AdaptersMap[('Any', t2_cls_name)]
+        if ('ANY', t2_cls_name) in AdaptersMap: 
+            return AdaptersMap[('ANY', t2_cls_name)]
         return None
     
     else:
@@ -89,8 +119,8 @@ def find_adapter(t1: Union[type, str], t2: Union[type, str]) -> Union[Adapter, N
         t2_name = get_comfy_name(t2)
         if (t1_name, t2_name) in AdaptersMap:
             return AdaptersMap[(t1_name, t2_name)]
-        if ('Any', t2_name) in AdaptersMap:
-            return AdaptersMap[('Any', t2_name)]
+        if ('ANY', t2_name) in AdaptersMap:
+            return AdaptersMap[('ANY', t2_name)]
         return None
 
 __all__.extend(['find_adapter', ])

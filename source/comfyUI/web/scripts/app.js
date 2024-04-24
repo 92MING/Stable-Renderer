@@ -1499,6 +1499,7 @@ export class ComfyApp {
 
 		await this.#invokeExtensionsAsync("init");
 		await this.registerNodes();
+		await this.registerTypeMatchings();
 		initWidgets(this);
 
 		// Load previous workflow
@@ -1553,6 +1554,18 @@ export class ComfyApp {
 		await this.registerNodesFromDefs(defs);
 		await this.#invokeExtensionsAsync("registerCustomNodes");
 	}
+
+	/**
+	 * Registers all possible type matchings.
+	 */
+	async registerTypeMatchings(){
+		const typeMatchings = await api.getTypeMatchings();
+		LiteGraph.TypeMatchings = {
+			...LiteGraph.TypeMatchings,
+			...typeMatchings
+		};
+	}
+	
 
 	getWidgetType(inputData, inputName) {
 		const type = inputData[0];
@@ -1640,6 +1653,7 @@ export class ComfyApp {
 		await this.#invokeExtensionsAsync("beforeRegisterNodeDef", node, nodeData);
 		LiteGraph.registerNodeType(nodeId, node);
 		node.category = nodeData.category;
+		node.namespace = nodeData.namespace || "";
 	}
 
     async registerNodesFromDefs(defs) {

@@ -1,8 +1,7 @@
 import torch
-import inspect
 from deprecated import deprecated
 from typing import (Union, TypeAlias, Literal, Optional, List, Any, Type, Dict, Tuple, TYPE_CHECKING, 
-                    Sequence, TypeVar, Generic, Set, NamedTuple, Union, Callable)
+                    Sequence, TypeVar, Generic, Set, NamedTuple, Union, Callable, Any)
 from attr import attrs, attrib
 from dataclasses import dataclass
 from common_utils.debug_utils import ComfyUILogger
@@ -419,20 +418,18 @@ class RecursiveExecuteResult(NamedTuple):
 class ValidateInputsResult:
     '''dataclass for the result of `validate_inputs` function.'''
     
-    result: bool
+    success: bool
     '''whether the validation is successful or not'''
     errors: List[dict]
     '''list of error messages'''
     node_id: str
     '''the node id that is being validated'''
-    adapter: Optional["Adapter"] = None
-    '''the adapter that is used to convert the input'''
-    
+
     def __getitem__(self, item: int):
         if item not in (0, 1, 2, 3):
             raise IndexError(f"Index out of range: {item}")
         if item == 0:
-            return self.result
+            return self.success
         if item == 1:
             return self.errors
         if item == 2:
@@ -448,11 +445,11 @@ class ValidatePromptResult:
     '''whether the validation is successful or not'''
     errors: Optional[dict]
     '''the error messages if the validation failed'''
-    good_outputs: List[str]
+    nodes_with_good_outputs: List[str]
     '''list of output node ids that passed the validation.'''
     node_errors: Dict[str, dict]
     '''dict of node_id: error messages'''
-    
+
     _prompt: dict
     '''The real input prompt, a dictionary (converted from json)'''
     _prompt_id: str
@@ -478,7 +475,7 @@ class ValidatePromptResult:
         if item == 1:
             return self.errors
         if item == 2:
-            return self.good_outputs
+            return self.nodes_with_good_outputs
         if item == 3:
             return self.node_errors
         if item == 4:

@@ -17,18 +17,23 @@ import comfy.model_management
 
 from common_utils.debug_utils import ComfyUILogger, get_log_level_by_name
 from common_utils.decorators import singleton, class_property, Overload
-from common_utils.global_utils import is_dev_mode
+from common_utils.global_utils import is_dev_mode, GetOrCreateGlobalValue
 
 from comfyUI.types import *
-from comfyUI.adapters import find_adapter
+from comfyUI.adapters import find_adapter, AdaptersMap
 
 
 if TYPE_CHECKING:
     from comfyUI.server import PromptServer
 
+_comfy_get_input_type_name_cache: Dict[Tuple[int, str], str] = GetOrCreateGlobalValue("__COMFY_GET_INPUT_TYPE_NAME_CACHE__", dict)
 def _get_comfy_node_input_type_name(node_type: Type[ComfyUINode], input_name: str)->str:
     if not isinstance(node_type, type):
         node_type = node_type.__class__
+    node_type_id = id(node_type)
+    if (node_type_id, input_name) in _comfy_get_input_type_name_cache:
+        return _comfy_get_input_type_name_cache[(node_type_id, input_name)]
+    
     input_param_dict = node_type.INPUT_TYPES()
     all_input_params = {}
     all_input_params.update(input_param_dict.get("required", {}))
@@ -36,7 +41,11 @@ def _get_comfy_node_input_type_name(node_type: Type[ComfyUINode], input_name: st
     all_input_params.update(input_param_dict.get("hidden", {}))
     if input_name not in all_input_params:
         raise ValueError(f"Input name {input_name} not found in node {node_type}.")
-    return all_input_params[input_name][0]
+    t_name = all_input_params[input_name][0]
+    if isinstance(t_name, (list, tuple)):
+        t_name = "COMBO"
+    _comfy_get_input_type_name_cache[(node_type_id, input_name)] = t_name
+    return t_name
     
 def get_input_data(inputs: dict, 
                    class_def: Type[ComfyUINode], 
@@ -79,7 +88,18 @@ def get_input_data(inputs: dict,
                 val = (None,)
             else:
                 val = outputs[from_node_id][output_slot_index]
-            
+                from_node_type_name = prompt[from_node_id]['class_type']
+                from_node_type = get_node_type_by_name(from_node_type_name)
+                from_type_name = from_node_type.RETURN_TYPES[output_slot_index]
+                to_type_name = _get_comfy_node_input_type_name(class_def, input_param_name)
+                if from_type_name != to_type_name:
+                    if adapter := find_adapter(from_type_name, to_type_name):
+                        val = adapter(val)
+                    else:
+                        val_type_name = get_comfy_name(type(val))
+                        if val_type_name != from_type_name and val_type_name != to_type_name:
+                            if adapter := find_adapter(val_type_name, to_type_name):
+                                val = adapter(val)
             input_data_all[input_param_name] = val
             
         else:   # a value
@@ -87,7 +107,14 @@ def get_input_data(inputs: dict,
                 input_data_all[input_param_name] = Lazy(input_data)
                 
             elif ("required" in valid_inputs and input_param_name in valid_inputs["required"]) or ("optional" in valid_inputs and input_param_name in valid_inputs["optional"]):
-                input_data_all[input_param_name] = [input_data]
+                val = input_data
+                val_type_name = get_comfy_name(type(val))
+                to_type_name = _get_comfy_node_input_type_name(class_def, input_param_name)
+                if val_type_name != to_type_name:
+                    if adapter := find_adapter(val_type_name, to_type_name):
+                        val = adapter(val)
+                
+                input_data_all[input_param_name] = [val]
 
     def get_proper_hidden_keys(key: str):
         keys = set()
@@ -420,8 +447,6 @@ class PromptExecutor:
             - outputs (list of list of values, e.g. [[val1, val2], [val3, val4], ...])
             - ui values (values to be shown on UI, e.g. {key: [val1, val2, ...], ...})
         '''
-        print(context.current_node_id)
-        print(context.current_node_type)
         node = context.current_node
         if not node:
             raise ValueError("No node to execute for `_get_output_data`.")
@@ -543,11 +568,11 @@ class PromptExecutor:
         input_data_all = None
         try:
             input_data_all = get_input_data(inputs,
-                                             class_def, 
-                                             current_node_id,
-                                             context.outputs, 
-                                             prompt, 
-                                             extra_data)
+                                            class_def, 
+                                            current_node_id,
+                                            context.outputs, 
+                                            prompt, 
+                                            extra_data)
             if self.server:
                 if self.server.client_id is not None:
                     self.server.last_node_id = current_node_id
@@ -758,7 +783,7 @@ class PromptExecutor:
             try:
                 d = context.outputs.pop(o)
                 if hasattr(d, 'destroy'):
-                    d.destroy()
+                    d.destroy() # type: ignore
                 del d
             except KeyError:
                 pass
@@ -903,7 +928,6 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
 
     errors = []
     valid = True
-    adapter = None
 
     validate_function_inputs = []
     if hasattr(obj_class, "VALIDATE_INPUTS"):
@@ -927,7 +951,7 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
             continue
 
         val = inputs[x]
-        info = required_inputs[x]
+        info = required_inputs[x]   # type: ignore
         type_input = info[0]
         if isinstance(val, list) and isinstance(val[0], str) and isinstance(val[1], int):   # [str, int] means binding 
             if len(val) != 2:
@@ -952,10 +976,11 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
             if from_type_name == 'ANY':
                 from_type_name = '*'
             
-            if '*' not in (from_type_name, type_input) and from_type_name != type_input:
-                adapter = find_adapter(from_type_name, type_input)
+            type_input_name = get_comfy_name(type_input)
+            if '*' not in (from_type_name, type_input_name) and from_type_name != type_input_name:
+                adapter = find_adapter(from_type_name, type_input_name)
                 if adapter is None:
-                    details = f"{x}, {from_type_name} != {type_input}"
+                    details = f"{x}, {from_type_name} != {type_input_name}"
                     error = {
                         "type": "return_type_mismatch",
                         "message": "Return type mismatch between linked nodes",
@@ -969,7 +994,6 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
                     }
                     errors.append(error)
                     continue
-                
             try:
                 r = validate_inputs(prompt, o_id, validated)
                 if r[0] is False:
@@ -1110,9 +1134,9 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
                     continue
 
     if len(errors) > 0 or valid is not True:
-        ret = ValidateInputsResult(result=False, errors=errors, node_id=node_id, adapter=adapter)
+        ret = ValidateInputsResult(success=False, errors=errors, node_id=node_id)
     else:
-        ret = ValidateInputsResult(result=True, errors=[], node_id=node_id, adapter=adapter)
+        ret = ValidateInputsResult(success=True, errors=[], node_id=node_id)
     
     validated[node_id] = ret
     return ret
@@ -1132,32 +1156,33 @@ def validate_prompt(prompt: Union[dict, PROMPT], prompt_id: Optional[str]=None) 
             raise ValueError("Prompt id is required when prompt is a normal dictionary instead of `PROMPT` type")
         prompt_id = prompt.id
     
-    outputs = set()
+    output_node_ids = set()
     for node_id in prompt:
         node_class = nodes.NODE_CLASS_MAPPINGS[prompt[node_id]['class_type']]
         if hasattr(node_class, 'OUTPUT_NODE') and node_class.OUTPUT_NODE == True:
-            outputs.add(node_id)
+            output_node_ids.add(node_id)
 
-    if len(outputs) == 0:
+    if len(output_node_ids) == 0:
         error = {
             "type": "prompt_no_outputs",
             "message": "Prompt has no outputs",
             "details": "",
             "extra_info": {}
         }
-        return ValidatePromptResult(result=False, errors=error, good_outputs=[], node_errors={}, _prompt=prompt, _prompt_id=prompt_id)
+        return ValidatePromptResult(result=False, errors=error, nodes_with_good_outputs=[], node_errors={}, _prompt=prompt, _prompt_id=prompt_id)
 
     good_outputs = set()
     errors = []
     node_errors = {}
     validated = {}
-    for node_id in outputs:
+    for node_id in output_node_ids:
         valid = False
         reasons = []
         try:
             m = validate_inputs(prompt, node_id, validated)
             valid = m[0]
             reasons: list = m[1]    # type: ignore
+            
         except Exception as ex:
             if is_dev_mode():
                 raise ex
@@ -1221,14 +1246,14 @@ def validate_prompt(prompt: Union[dict, PROMPT], prompt_id: Optional[str]=None) 
 
         return ValidatePromptResult(result=False, 
                                     errors=error, 
-                                    good_outputs=list(good_outputs), 
+                                    nodes_with_good_outputs=list(good_outputs), 
                                     node_errors=node_errors, 
                                     _prompt=prompt,
                                     _prompt_id=prompt_id)
 
     return ValidatePromptResult(result=True, 
                                 errors=None, 
-                                good_outputs=list(good_outputs), 
+                                nodes_with_good_outputs=list(good_outputs), 
                                 node_errors=node_errors, 
                                 _prompt=prompt,
                                 _prompt_id=prompt_id)

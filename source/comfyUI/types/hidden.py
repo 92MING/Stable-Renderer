@@ -1,5 +1,8 @@
+import torch
+import numpy as np
 from typing import (Union, Annotated, Literal, Optional, Any, Type, Dict, TYPE_CHECKING, ClassVar,
                     TypeVar)
+from attr import attrs, attrib
 from abc import ABC, abstractmethod, ABCMeta
 from deprecated import deprecated
 from common_utils.global_utils import GetOrCreateGlobalValue
@@ -10,6 +13,7 @@ from ._utils import *
 from .basic import AnnotatedParam
 
 if TYPE_CHECKING:
+    from engine.static.texture import Texture
     from .runtime import InferenceContext, NodeInputs
     from .node_base import ComfyUINode
 
@@ -194,15 +198,35 @@ class UNIQUE_ID(str, HIDDEN):
             return cur_node.ID  # type: ignore
         return None
 
-
+@attrs
 class FrameData(HIDDEN):
     '''The prompt for submitting to ComfyUI during engine's runtime.'''
 
+    colorMap: "Texture" = attrib()
+    '''color of the current frame'''
+    idMap: "Texture" = attrib()
+    '''
+    ID of each pixels in the current frame. If the pixel is not containing any object, the id is 0,0,0,0.
+    ID data has two possible combinations:
+        - (objID, materialID, texX, texY): in rendering mode
+        - (baking pixel index, materialID, texX, texY): in baking mode
+    '''
+    posMap: "Texture" = attrib()
+    '''position of the origin 3d vertex in each pixels in the current frame'''
+    normalAndDepthMap: "Texture" = attrib()
+    '''
+    normal and depth of the origin 3d vertex in each pixels in the current frame.
+    Format: (nx, ny, nz, depth)
+    '''
+    noiseMap: "Texture" = attrib()
+    '''noise of each vertex in each pixels in the current frame'''
+    
     @classmethod
     def GetValue(cls, context):
         return context.frame_data
 
-    
+
+@attrs
 class BakingData(HIDDEN):
     '''TODO: Runtime data during baking.'''
     

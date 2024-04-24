@@ -25,6 +25,7 @@ from io import BytesIO
 from asyncio.events import AbstractEventLoop
 from aiohttp import web
 
+from common_utils.type_utils import brute_dump_json
 from common_utils.decorators import singleton, class_or_ins_property
 from common_utils.global_utils import GetOrCreateGlobalValue, SetGlobalValue
 from common_utils.debug_utils import ComfyUILogger
@@ -89,16 +90,16 @@ def _validate_response(data, *args, **kwargs):
     '''check if the data contains any object that has a __ComfyDump__ method, if so, call it to get the json serializable data.'''
     if isinstance(data, dict):
         for key, val in data.items():
-            if hasattr(val, '__ComfyDump__'):
+            if not isinstance(val, type) and hasattr(val, '__ComfyDump__'):
                 data[key] = val.__ComfyDump__()
     else:
         if isinstance(data, tuple):
             data = list(data)
         if isinstance(data, list):
             for i, val in enumerate(data):
-                if hasattr(val, '__ComfyDump__'):
+                if not isinstance(val, type) and hasattr(val, '__ComfyDump__'):
                     data[i] = val.__ComfyDump__()
-        else:
+        elif not isinstance(val, type):
             if hasattr(data, '__ComfyDump__'):
                 data = data.__ComfyDump__()
     return web.json_response(data, *args, **kwargs)
@@ -457,7 +458,7 @@ class PromptServer:
         async def get_prompt(request):
             return _validate_response(self.get_queue_info())
 
-        def node_info(node_class_name: str)->Dict[str, Any]:
+        def node_info(node_class_name: str, node_cls_namespace="")->Dict[str, Any]:
             obj_class: Type["ComfyUINode"] = nodes.NODE_CLASS_MAPPINGS[node_class_name]
             
             info = {}
@@ -475,7 +476,9 @@ class PromptServer:
             info['name'] = node_class_name
             info['display_name'] = nodes.NODE_DISPLAY_NAME_MAPPINGS[node_class_name] if node_class_name in nodes.NODE_DISPLAY_NAME_MAPPINGS.keys() else node_class_name
             info['description'] = obj_class.DESCRIPTION if hasattr(obj_class,'DESCRIPTION') else ''
-            info['namespace'] = obj_class.NAMESPACE if hasattr(obj_class, 'NAMESPACE') else ''
+            info['namespace'] = node_cls_namespace
+            if not node_cls_namespace and hasattr(obj_class, 'NAMESPACE') and obj_class.NAMESPACE:
+                info['namespace'] = obj_class.NAMESPACE
             info['lazy_inputs'] = obj_class.LAZY_INPUTS if hasattr(obj_class, 'LAZY_INPUTS') else []
             
             if not info['description']:
@@ -494,12 +497,18 @@ class PromptServer:
                 info['category'] = obj_class.CATEGORY
             return info
 
+        @routes.get("/type_matchings")
+        async def get_type_matchings(request):
+            '''available type matchings could be defined by creating `Adapters`.'''
+            from comfyUI.adapters import Adapter
+            return _validate_response(Adapter._AvailableTypeConvertionInfo())
+
         @routes.get("/object_info")
         async def get_object_info(request):
             out = {}
             for (node_cls_name, node_cls_namespace) in nodes.NODE_CLASS_MAPPINGS: # TODO: also returns the namespace to web client side.
                 try:
-                    out[node_cls_name] = node_info(node_cls_name)
+                    out[node_cls_name] = node_info(node_cls_name, node_cls_namespace)
                 except Exception as e:
                     ComfyUILogger.warning(f"[ERROR] An error occurred while retrieving information for the '{node_cls_name}' node, err: {e}")
                     traceback.print_exc()
@@ -565,7 +574,7 @@ class PromptServer:
                 if "client_id" in json_data:
                     extra_data["client_id"] = json_data["client_id"]
                 if valid.result:
-                    outputs_to_execute = valid.good_outputs
+                    outputs_to_execute = valid.nodes_with_good_outputs
                     self.prompt_queue.put((number, prompt_id, valid.formatted_prompt, extra_data, outputs_to_execute))
                     response = {"prompt_id": prompt_id, "number": number, "node_errors": valid[3]}
                     return _validate_response(response)
@@ -701,6 +710,10 @@ class PromptServer:
             await _send_socket_catch_exception(self.sockets[sid].send_bytes, message)
 
     async def send_json(self, event, data, sid=None):
+        try:
+            _ = json.dumps(data)
+        except TypeError:
+            data = brute_dump_json(data)   # make it always json serializable
         message = {"type": event, "data": data}
 
         if sid is None:
@@ -709,7 +722,7 @@ class PromptServer:
                 await _send_socket_catch_exception(ws.send_json, message)
         elif sid in self.sockets:
             await _send_socket_catch_exception(self.sockets[sid].send_json, message)
-
+            
     def send_sync(self, event, data, sid=None):
         self.loop.call_soon_threadsafe(self.messages.put_nowait, (event, data, sid))
 
