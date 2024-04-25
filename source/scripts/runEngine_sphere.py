@@ -37,5 +37,5 @@ if __name__ == '__main__':
                debug=False,
                mapSavingInterval=1,
                winSize=(512, 512),
-               needOutputMaps=True,
-               startComfyUI=False)
+               needOutputMaps=False,
+               startComfyUI=True)

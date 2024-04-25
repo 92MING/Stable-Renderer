@@ -363,9 +363,6 @@ class Texture(ResourcesObj):
         assert self._share_to_torch, 'This texture is not set to be sharing to torch.'
         assert self._texID is not None, 'This texture is not yet sent to GPU.'
         
-        self._support_gl_share_to_torch = False # temporarily set to False here
-        return
-        
         if self._tensor is None:
             self._tensor = torch.zeros((self.height, self.width, self.channel_count), 
                                         dtype=self.data_type.value.torch_dtype, 

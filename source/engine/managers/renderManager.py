@@ -3,7 +3,6 @@ import glfw
 import ctypes
 import OpenGL.GL as gl
 import numpy as np
-import pycuda.driver as cuda_driver
 
 from functools import partial
 from typing import Union, Optional, Callable
@@ -64,18 +63,13 @@ class RenderManager(Manager):
                  exposure=1.0,
                  saturation=1.0,
                  brightness=1.0,
-                 contrast=1.0,
-                 target_device: Optional[int] = None):
+                 contrast=1.0):
         super().__init__()
         self.engine._renderManager = self # special case, because renderManager is created before engine's assignment
         self._renderTasks = AutoSortTask()
         self._deferRenderTasks = AutoSortTask()
         self._postProcessTasks = AutoSortTask()
         
-        if not target_device:
-            target_device = get_cuda_device()
-        self._target_device = target_device
-        self._init_cuda()
         self._init_opengl()
         
         self._init_framebuffers()  # framebuffers for post-processing
@@ -83,19 +77,6 @@ class RenderManager(Manager):
                                 saturation=saturation, brightness=brightness, contrast=contrast)
         self._init_quad()  # quad for post-processing
         self._init_light_buffers()
-
-    def release(self):
-        self._cuda_context.pop()
-    
-    # region cuda
-    def _init_cuda(self):
-        target_device = self.TargetDevice
-        if is_dev_mode():
-            cuda_driver.set_debugging()
-        cuda_driver.init()
-        self._cuda_device = cuda_driver.Device(target_device)
-        self._cuda_context = self._cuda_device.make_context()
-    # endregion
     
     def _init_opengl(self):
         gl.glClearColor(0, 0, 0, 0)
