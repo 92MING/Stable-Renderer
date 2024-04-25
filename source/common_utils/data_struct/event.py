@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-'''事件类，用于实现事件机制。當QObject被刪除後，invoke event時，對應的監聽方法在運行到RuntimeError的時候，會自動刪除。'''
+'''
+Event class, used to implement event mechanism. 
+When the QObject is deleted, when the corresponding listener method is running and encounters a RuntimeError, it will be automatically deleted.
+'''
 
 if __name__ == '__main__':
     import os, sys
@@ -8,7 +11,7 @@ if __name__ == '__main__':
 
 import heapq, functools
 from types import FunctionType, MethodType
-from typing import ForwardRef, get_origin, get_args, Union, Iterable, Literal, Callable
+from typing import ForwardRef, get_origin, get_args, Union, Iterable, Literal, Callable, ParamSpecArgs
 from inspect import getfullargspec, signature, getmro
 from enum import Enum
 from functools import partial
@@ -18,6 +21,7 @@ from PyQt6.QtCore import QObject, pyqtSignal as Signal
 from common_utils.base_clses.cross_module_enum import CrossModuleEnum
 from common_utils.type_utils import valueTypeCheck, subClassCheck
 from common_utils.debug_utils import DefaultLogger
+
 
 # region helper functions
 def _SignalWrapper(*args):
@@ -78,14 +82,11 @@ def _findMostSuitableInputType(possibleInputs, values, acceptNone):
     return suitableInputs[mostSuitableDistances.index(mostSuitableDistance)]
 # endregion
 
-
-
 class ListenerNotFoundError(Exception):
     pass
 
 class NoneTypeNotSupportedError(Exception):
     pass
-
 
 class Event:
     
@@ -155,12 +156,18 @@ class Event:
     
     def __init__(self, *args, useQtSignal=False, acceptNone=False, noCheck=False):
         '''
-        :param args: 事件的参数类型（1個或多個），可以是 类型 或 类型名稱 。支持所有utils.TypeUtils.simpleTypeCheck的類型。
-        :param useQtSignal: 是否使用Qt的Signal作為事件機制。一般在QT需要跨線程時使用。如果使用此參數，則需要明確定義所有可能的參數類型,
-                    e.g: A繼承B, 如果A和B都可能作為參數類型，則需要Event(Union[A, B], useQtSignal=True), 否則QT的Signal會
-                    導致類型坍塌為基類。
-        :param acceptNone: 是否接受None作為參數。如果args中有None，則acceptNone會強制設置為True(僅限useQtSignal模式)。
-        :param noCheck: addListener/invoke 時不檢查參數數量/類型是否正確
+        :param args: 
+            types of event when invoke(can be multiple types, e.g: Event(int, str)). Supports type or typename(`str`)
+        :param useQtSignal: 
+            Whether to use Qt's Signal as the event mechanism. Generally used when crossing threads in QT. 
+            If this parameter is used, all possible parameter types need to be explicitly defined, 
+            e.g: A inherits from B, if both A and B can be used as parameter types, 
+            then Event(Union[A, B], useQtSignal=True) is required, 
+            
+            otherwise the QT Signal will cause the type to collapse to the base class. 
+        :param acceptNone: 
+            Whether to accept None as a parameter. If None is present in args, acceptNone will be forced to True (only in useQtSignal mode). 
+        :param noCheck: Do not check the number and types of parameters when adding listeners or invoking events
         '''
         self._init_params(*args, useQtSignal=useQtSignal, acceptNone=acceptNone, noCheck=noCheck)
         if useQtSignal:

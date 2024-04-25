@@ -193,3 +193,27 @@ def cuda_get_array_info(array: Union[cudart.cudaArray_t, int])->Tuple[CudaErrTyp
 __all__.extend(['GLRegisterFlag', 'cuda_register_gl_image', 
                 'cuda_map_resources', 'cuda_get_mapped_array', 'cuda_get_mapped_pointer', 'cuda_get_array_info'])
 # endregion
+
+
+
+if __name__ == '__main__':  # for debug
+    
+    def print_device_info(): 
+        import pycuda.driver as drv
+        for i in range(get_cuda_device_count()):
+            print('-------------------------------------')
+            drv.init()
+            device = drv.Device(i) # enter your gpu id here
+            ctx = device.make_context()
+
+            (free,total)=drv.mem_get_info()
+            print("Global memory occupancy:%f%% free"%(free*100/total))
+            attrs=device.get_attributes()
+
+            #Beyond this point is just pretty printing
+            print("\n===Attributes for device %d"% i)
+            for (key,value) in attrs.items():
+                print("%s:%s"%(str(key),str(value)))
+            ctx.pop()
+    
+    print_device_info()

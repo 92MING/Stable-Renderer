@@ -1,5 +1,5 @@
-import os.path
 import cv2
+import os.path
 import numpy as np
 import multiprocessing
 from typing import TYPE_CHECKING, Optional
@@ -7,10 +7,12 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
 from common_utils.path_utils import *
+from common_utils.global_utils import is_game_mode
 from .manager import Manager
 from engine.static import Workflow
 if TYPE_CHECKING:
     from comfyUI.execution import PromptExecutor
+
 
 class DiffusionManager(Manager):
     
@@ -39,8 +41,19 @@ class DiffusionManager(Manager):
     
     # region properties
     @property
+    def PromptExecutor(self)->"PromptExecutor":
+        '''
+        The PromptExecutor of ComfyUI. You can also get this in engine.
+        Note that this can only be called when `
+        '''
+        return self.engine.PromptExecutor
+    
+    @property
     def ShouldOutputFrame(self):
-        '''Return if the current frame's map data should be output to disk'''
+        '''
+        Return if the current frame's map data should be output to disk.
+        This is different from `NeedOutputMaps`: `NeedOutputMaps` is a global flag, while `ShouldOutputFrame` will only be True when the current frame fullfills the condition set by `MapSavingInterval`.
+        '''
         return self._needOutputMaps and self.engine.RuntimeManager.FrameCount % self._mapSavingInterval == 0
     
     @property
@@ -61,6 +74,7 @@ class DiffusionManager(Manager):
         
     @property
     def MapSavingInterval(self)->int:
+        '''every how many frame should maps be saved(when the `NeedOutputMaps` is True)'''
         return self._mapSavingInterval
     
     @MapSavingInterval.setter
@@ -68,7 +82,7 @@ class DiffusionManager(Manager):
         self._mapSavingInterval = value
     # endregion
 
-    # region output maps
+    # region outputs
     def _outputNumpyData(self, name:str, data:np.ndarray, frame_num: Optional[int]=None):
         '''output data in .npy format directly'''
         outputPath = os.path.join(self._outputPath, name)
@@ -170,6 +184,13 @@ class DiffusionManager(Manager):
             self._threadPool.submit(self._outputCannyMap, mapData, self.engine.RuntimeManager.FrameCount)
     # endregion
 
+    # region diffusion
+    def SubmitPrompt(self):
+        '''submit prompt to comfyUI's prompt executor'''
+        frameData = self.engine.RenderManager.frameData
+
+    
+    # endregion
     
 
 __all__ = ['DiffusionManager']

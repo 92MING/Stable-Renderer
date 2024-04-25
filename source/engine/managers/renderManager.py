@@ -3,7 +3,6 @@ import glfw
 import ctypes
 import OpenGL.GL as gl
 import numpy as np
-import pycuda.driver as cuda_driver
 
 from functools import partial
 from typing import Union, Optional, Callable
@@ -64,18 +63,13 @@ class RenderManager(Manager):
                  exposure=1.0,
                  saturation=1.0,
                  brightness=1.0,
-                 contrast=1.0,
-                 target_device: Optional[int] = None):
+                 contrast=1.0):
         super().__init__()
         self.engine._renderManager = self # special case, because renderManager is created before engine's assignment
         self._renderTasks = AutoSortTask()
         self._deferRenderTasks = AutoSortTask()
         self._postProcessTasks = AutoSortTask()
         
-        if not target_device:
-            target_device = get_cuda_device()
-        self._target_device = target_device
-        self._init_cuda()
         self._init_opengl()
         
         self._init_framebuffers()  # framebuffers for post-processing
@@ -84,19 +78,6 @@ class RenderManager(Manager):
         self._init_quad()  # quad for post-processing
         self._init_light_buffers()
 
-    def release(self):
-        self._cuda_context.pop()
-    
-    # region cuda
-    def _init_cuda(self):
-        target_device = self.TargetDevice
-        if is_dev_mode():
-            cuda_driver.set_debugging()
-        cuda_driver.init()
-        self._cuda_device = cuda_driver.Device(target_device)
-        self._cuda_context = self._cuda_device.make_context()
-    # endregion
-    
     def _init_opengl(self):
         gl.glClearColor(0, 0, 0, 0)
         gl.glEnable(gl.GL_DEPTH_TEST)
@@ -255,6 +236,14 @@ class RenderManager(Manager):
         self.BindFrameBuffer(self._postProcessFBO)
         gl.glDrawBuffer(gl.GL_COLOR_ATTACHMENT0)
         self.BindFrameBuffer(0)
+        
+        from comfyUI.types import FrameData
+        self.frameData = FrameData(colorMap=self.colorFBOTex,
+                                   idMap=self.idFBOTex,
+                                   posMap=self.posFBOTex,
+                                   normalAndDepthMap=self.normal_and_depth_FBOTex,
+                                   noiseMap=self.noiseFBOTex)
+        '''frame data for comfyUI. Its an singleton instance.'''
 
     def _init_light_buffers(self):
         self._lightShadowFBO = gl.glGenFramebuffers(1)
@@ -355,7 +344,7 @@ class RenderManager(Manager):
     @property
     def TargetDevice(self)->int:
         '''return the target GPU for running the engine'''
-        return self._target_device
+        return self.engine.TargetDevice
     
     @property
     def CurrentFrameBuffer(self):
