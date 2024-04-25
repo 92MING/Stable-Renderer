@@ -113,8 +113,6 @@ class PromptServer:
         return PromptServer()   # will get the singleton instance if it's already created
     
     def __init__(self, loop: Optional[AbstractEventLoop]=None):
-        if not should_run_web_server():
-            return  # skip the initialization if the web server is not needed
         
         if loop is None:
             loop = GetOrCreateGlobalValue("__COMFYUI_EVENT_LOOP__", lambda: asyncio.new_event_loop())

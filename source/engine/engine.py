@@ -1,16 +1,13 @@
-import atexit
 import glfw
 import numpy as np
 import OpenGL.GL as gl
 import OpenGL.GLU as glu
-import pycuda.driver
 
 from enum import Enum
 from typing import Optional, Literal
 from inspect import signature
-from functools import partial
 
-import pycuda.gl.autoinit
+import pycuda.autoinit
 
 from common_utils.debug_utils import EngineLogger
 from common_utils.global_utils import GetOrAddGlobalValue, GetOrCreateGlobalValue, SetGlobalValue, GetGlobalValue, is_dev_mode
@@ -133,21 +130,6 @@ class Engine:
             target_device = get_cuda_device()
         self._target_device = target_device
         
-        pycuda.driver.init()
-        
-        if is_dev_mode():
-            pycuda.driver.set_debugging()
-        
-        self._cuda_device = pycuda.driver.Device(self._target_device)
-        self._cuda_context = self._cuda_device.make_context()
-        
-        def clear_context_when_exit(context):
-            context.pop()
-            context = None
-            from pycuda.tools import clear_context_caches
-            clear_context_caches()
-        atexit.register(partial(clear_context_when_exit, self._cuda_context))
-
         self._UBO_Binding_Points = {}
         self._debug = debug
         self._scene = scene
