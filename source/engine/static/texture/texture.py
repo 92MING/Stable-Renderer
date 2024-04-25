@@ -362,7 +362,8 @@ class Texture(ResourcesObj):
         assert not self._cleared, 'This texture has been cleared.'
         assert self._share_to_torch, 'This texture is not set to be sharing to torch.'
         assert self.textureID is not None, 'This texture is not yet sent to GPU.'
-        
+        # self._support_gl_share_to_torch = False
+        # return
         if self._tensor is None:
             self._tensor = torch.zeros((self.height, self.width, self.channel_count), 
                                         dtype=self.data_type.value.torch_dtype, 

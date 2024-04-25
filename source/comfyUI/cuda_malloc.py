@@ -1,5 +1,6 @@
 import os
 import importlib.util
+from common_utils.debug_utils import ComfyUILogger
 from comfy.cli_args import args
 import subprocess
 
@@ -64,6 +65,7 @@ def cuda_malloc_supported():
 
 
 if not args.cuda_malloc:
+    ComfyUILogger.info("CUDA malloc is disabled.")
     try:
         version = ""
         torch_spec = importlib.util.find_spec("torch")

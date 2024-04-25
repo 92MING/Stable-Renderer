@@ -1,13 +1,26 @@
+import os
+import sys
 import glfw
 import numpy as np
 import OpenGL.GL as gl
 import OpenGL.GLU as glu
 
+from common_utils.path_utils import SOURCE_DIR
+
+if str(SOURCE_DIR.absolute()) not in sys.path:
+    sys.path.insert(0, str(SOURCE_DIR.absolute()))
+
+_COMFYUI_PATH = str((SOURCE_DIR / 'comfyUI').absolute())
+if _COMFYUI_PATH not in sys.path:
+    sys.path.insert(0, _COMFYUI_PATH)
+
+#! DONT DELETE THE FOLLOWING 2 LINES ! IT IS FOR CUDA INITIALIZATION 
+import comfyUI.nodes
+import pycuda.autoprimaryctx
+
 from enum import Enum
 from typing import Optional, Literal
 from inspect import signature
-
-import pycuda.autoinit
 
 from common_utils.debug_utils import EngineLogger
 from common_utils.global_utils import GetOrAddGlobalValue, GetOrCreateGlobalValue, SetGlobalValue, GetGlobalValue, is_dev_mode
@@ -125,8 +138,8 @@ class Engine:
                 self._prompt_executor = run()   # this will add `PromptExecutor` to `cross_module_cls_dict` automatically
             else:
                 self._prompt_executor = cross_module_cls_dict['PromptExecutor']
-        
-        if not target_device:
+
+        if target_device is None:
             target_device = get_cuda_device()
         self._target_device = target_device
         
@@ -140,7 +153,7 @@ class Engine:
             title = self._scene.name
         else:
             title = 'Stable Renderer'
-    
+
         # region managers
         def find_kwargs_for_manager(manager):
             init_sig = signature(manager.__init__)
@@ -317,9 +330,6 @@ class Engine:
         
         Manager._RunRelease()
         self.afterRelease()
-        
-        if hasattr(self, '_cuda_context') and self._cuda_context is not None:
-            self._cuda_context.pop()
         
         EngineLogger.success('Engine is ended.')
         self.Stage = EngineStage.ENDED

@@ -1,8 +1,10 @@
 import os, sys
 _COMFYUI_PROJ_PATH = os.path.dirname(os.path.abspath(__file__))
 _STABLE_RENDERER_PROJ_PATH = os.path.dirname(_COMFYUI_PROJ_PATH)
-sys.path.insert(0, _COMFYUI_PROJ_PATH)
-sys.path.insert(0, _STABLE_RENDERER_PROJ_PATH)
+if _COMFYUI_PROJ_PATH not in sys.path:
+    sys.path.insert(0, _COMFYUI_PROJ_PATH)
+if _STABLE_RENDERER_PROJ_PATH not in sys.path:
+    sys.path.insert(0, _STABLE_RENDERER_PROJ_PATH)
 
 from common_utils.debug_utils import ComfyUILogger
 from common_utils.global_utils import GetOrCreateGlobalValue, is_game_mode

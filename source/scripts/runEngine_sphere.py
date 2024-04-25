@@ -38,4 +38,4 @@ if __name__ == '__main__':
                mapSavingInterval=1,
                winSize=(512, 512),
                needOutputMaps=False,
-               startComfyUI=True)
+               startComfyUI=False)
