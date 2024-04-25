@@ -77,7 +77,7 @@ class RenderManager(Manager):
                                 saturation=saturation, brightness=brightness, contrast=contrast)
         self._init_quad()  # quad for post-processing
         self._init_light_buffers()
-    
+        
     def _init_opengl(self):
         gl.glClearColor(0, 0, 0, 0)
         gl.glEnable(gl.GL_DEPTH_TEST)
@@ -236,6 +236,14 @@ class RenderManager(Manager):
         self.BindFrameBuffer(self._postProcessFBO)
         gl.glDrawBuffer(gl.GL_COLOR_ATTACHMENT0)
         self.BindFrameBuffer(0)
+        
+        from comfyUI.types import FrameData
+        self.frameData = FrameData(colorMap=self.colorFBOTex,
+                                   idMap=self.idFBOTex,
+                                   posMap=self.posFBOTex,
+                                   normalAndDepthMap=self.normal_and_depth_FBOTex,
+                                   noiseMap=self.noiseFBOTex)
+        '''frame data for comfyUI. Its an singleton instance.'''
 
     def _init_light_buffers(self):
         self._lightShadowFBO = gl.glGenFramebuffers(1)
@@ -336,7 +344,7 @@ class RenderManager(Manager):
     @property
     def TargetDevice(self)->int:
         '''return the target GPU for running the engine'''
-        return self._target_device
+        return self.engine.TargetDevice
     
     @property
     def CurrentFrameBuffer(self):

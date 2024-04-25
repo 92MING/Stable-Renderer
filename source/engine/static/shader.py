@@ -62,7 +62,7 @@ _ShaderConstants: Dict[str, Union[int, float]] = {}
 
 ST = TypeVar('ST', bound=SupportedShaderValueTypes)
 
-# region fields
+# region shader obj
 class ShaderField(Generic[ST]):
     '''A field in shader'''
     
@@ -245,7 +245,6 @@ def Array(type: Type[ST], size: int) -> Annotated:
 # TODO: 2d/3d array annotation
 # endregion
 
-# region struct
 class ShaderStruct:
     '''
     A mapping class for shader struct. It is used to define the structure of a shader struct.
@@ -386,7 +385,6 @@ class ShaderBufferStruct(ShaderStruct):
     def bind(self):
         gl.glBindBuffer(self._GL_BUFFER_TYPE, self.gl_id)
 # endregion
-
 
 
 class Shader(NamedObj, EngineObj):

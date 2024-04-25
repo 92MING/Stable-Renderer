@@ -1,7 +1,6 @@
 import atexit
 import glfw
 import numpy as np
-np.set_printoptions(suppress=True)
 import OpenGL.GL as gl
 import OpenGL.GLU as glu
 import pycuda.driver
@@ -21,7 +20,15 @@ from .static.scene import *
 from .static import Color
 
 
+if is_dev_mode():
+    np.set_printoptions(suppress=True)
+
 class EngineStage(Enum):
+    '''
+    The stage of engine. It will be changed during the engine running.
+    When u set the property `Stage` in engine, it will invoke the event `_OnEngineStageChanged`.
+    '''
+    
     INIT = 0
     
     BEFORE_PREPARE = 1
@@ -89,7 +96,7 @@ class Engine:
                  windowResizable=False,
                  bgColor=Color.CLEAR,
                  enableHDR=True,
-                 enableGammaCorrection=True,
+                 enableGammaCorrection=False,
                  gamma=2.2,
                  exposure=1.0,
                  saturation=1.0,
@@ -149,7 +156,7 @@ class Engine:
             title = self._scene.name
         else:
             title = 'Stable Renderer'
-
+    
         # region managers
         def find_kwargs_for_manager(manager):
             init_sig = signature(manager.__init__)
@@ -159,9 +166,13 @@ class Engine:
                     found_args[arg_name] = arg  # will not pop from kwargs, i.e. when managers have same arg name, it will be passed to all of them
             return found_args
         
-        self._windowManager = WindowManager(title, winSize, windowResizable, bgColor, **find_kwargs_for_manager(WindowManager))
-        
-        self._inputManager = InputManager(self._windowManager.Window, **find_kwargs_for_manager(InputManager))
+        self._windowManager = WindowManager(title=title, 
+                                            size=winSize, 
+                                            windowResizable=windowResizable, 
+                                            bgColor=bgColor, 
+                                            **find_kwargs_for_manager(WindowManager))
+                
+        self._inputManager = InputManager(window = self._windowManager.Window, **find_kwargs_for_manager(InputManager))
         
         self._runtimeManager = RuntimeManager(**find_kwargs_for_manager(RuntimeManager))
         
@@ -187,11 +198,20 @@ class Engine:
         
         self._stage = EngineStage.INIT
         _OnEngineStageChanged.invoke(self._stage)
-        
+    
+    @property
+    def OnStageChanged(self)->Event:
+        return _OnEngineStageChanged
+    
     @property
     def RunningMode(self)->Literal['game', 'editor']:
         '''Running mode of the engine. It can be 'game' or 'editor'. Default is 'game'.'''
         return self._running_mode
+    
+    @property
+    def TargetDevice(self)->int:
+        '''The target device for cuda. Default is 0.'''
+        return self._target_device
 
     @property
     def PromptExecutor(self):
@@ -313,6 +333,9 @@ class Engine:
         
         Manager._RunRelease()
         self.afterRelease()
+        
+        if hasattr(self, '_cuda_context') and self._cuda_context is not None:
+            self._cuda_context.pop()
         
         EngineLogger.success('Engine is ended.')
         self.Stage = EngineStage.ENDED

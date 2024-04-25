@@ -369,10 +369,13 @@ class Texture(ResourcesObj):
                                         device=f"cuda")
         try:
             self._cuda_buffer = pycuda.gl.RegisteredImage(int(self.textureID), 
-                                                         int(gl.GL_TEXTURE_2D), 
-                                                         pycuda.gl.graphics_map_flags.NONE)
+                                                          int(gl.GL_TEXTURE_2D), 
+                                                          pycuda.gl.graphics_map_flags.NONE)
+        except Exception as e:
+            EngineLogger.warning(f'Warning: Texture {self.name} failed to register image. Error: {e}')
+            self._support_gl_share_to_torch = False
         except:
-            EngineLogger.warn('Warning: failed to register image. Error: {}'.format(sys.exc_info()[0]))
+            EngineLogger.warning(f'Warning: Texture {self.name} failed to register image. Error: {sys.exc_info()[0]}')
             self._support_gl_share_to_torch = False
         
         if self.support_gl_share_to_torch:

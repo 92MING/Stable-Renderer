@@ -22,9 +22,9 @@ class ResourcesManager(Manager):
                 try:
                     instance.sendToGPU()
                     if instance.__class__._BaseName == 'Texture':
-                        EngineLogger.print('Sent to GPU:', instance.__class__._BaseName + ':' + instance.name, ', texID:', instance.textureID)
+                        EngineLogger.print('Initialzed on GPU:', instance.__class__._BaseName + ':' + instance.name, ', texID:', instance.textureID)
                     else:
-                        EngineLogger.print('Sent to GPU:', instance.__class__._BaseName + ':' + instance.name)
+                        EngineLogger.print('Initialzed on GPU:', instance.__class__._BaseName + ':' + instance.name)
                 except Exception:
                     raise Exception(f'Error when sending {instance.__class__.__qualname__}:{instance.name} to GPU, traceback: {traceback.format_exc()}')
                 finally:
