@@ -361,14 +361,14 @@ class Texture(ResourcesObj):
         '''The tensor of the texture. It could be None if the texture is not shared to torch.'''
         assert not self._cleared, 'This texture has been cleared.'
         assert self._share_to_torch, 'This texture is not set to be sharing to torch.'
-        assert self._texID is not None, 'This texture is not yet sent to GPU.'
+        assert self.textureID is not None, 'This texture is not yet sent to GPU.'
         
         if self._tensor is None:
             self._tensor = torch.zeros((self.height, self.width, self.channel_count), 
                                         dtype=self.data_type.value.torch_dtype, 
                                         device=f"cuda")
         try:
-            self._cuda_buffer = pycuda.gl.RegisteredImage(int(self.textureID), 
+            self._cuda_buffer = pycuda.gl.RegisteredImage(int(self.textureID),
                                                           int(gl.GL_TEXTURE_2D), 
                                                           pycuda.gl.graphics_map_flags.NONE)
         except Exception as e:

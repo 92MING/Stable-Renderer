@@ -27,7 +27,7 @@ from aiohttp import web
 
 from common_utils.type_utils import brute_dump_json
 from common_utils.decorators import singleton, class_or_ins_property
-from common_utils.global_utils import GetOrCreateGlobalValue, SetGlobalValue, is_verbose_mode, is_dev_mode
+from common_utils.global_utils import GetOrCreateGlobalValue, SetGlobalValue, is_verbose_mode, should_run_web_server
 from common_utils.debug_utils import ComfyUILogger
 from comfy.cli_args import args
 from app.user_manager import UserManager
@@ -113,6 +113,9 @@ class PromptServer:
         return PromptServer()   # will get the singleton instance if it's already created
     
     def __init__(self, loop: Optional[AbstractEventLoop]=None):
+        if not should_run_web_server():
+            return  # skip the initialization if the web server is not needed
+        
         if loop is None:
             loop = GetOrCreateGlobalValue("__COMFYUI_EVENT_LOOP__", lambda: asyncio.new_event_loop())
             

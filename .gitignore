@@ -26,6 +26,7 @@ venv/
 *.pth
 *.pt
 *.safetensors
+*historical_pos.json
 .python-version
 
 # comfyUI

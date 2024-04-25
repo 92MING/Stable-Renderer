@@ -4,6 +4,7 @@ import re
 import uuid
 from aiohttp import web
 from common_utils.debug_utils import ComfyUILogger
+from common_utils.global_utils import should_run_web_server
 from comfy.cli_args import args
 from folder_paths import user_directory
 from .app_settings import AppSettings
@@ -71,6 +72,9 @@ class UserManager():
         return path
 
     def add_user(self, name):
+        if not should_run_web_server():
+            return default_user
+        
         name = name.strip()
         if not name:
             raise ValueError("username not provided")
@@ -86,6 +90,9 @@ class UserManager():
         return user_id
 
     def add_routes(self, routes):
+        if not should_run_web_server():
+            return
+        
         self.settings.add_routes(routes)
 
         @routes.get("/users")

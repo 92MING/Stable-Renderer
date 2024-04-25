@@ -10,6 +10,8 @@ from typing import Optional, Literal
 from inspect import signature
 from functools import partial
 
+import pycuda.gl.autoinit
+
 from common_utils.debug_utils import EngineLogger
 from common_utils.global_utils import GetOrAddGlobalValue, GetOrCreateGlobalValue, SetGlobalValue, GetGlobalValue, is_dev_mode
 from common_utils.decorators import class_or_ins_property, prevent_re_init 
@@ -171,7 +173,7 @@ class Engine:
                                             windowResizable=windowResizable, 
                                             bgColor=bgColor, 
                                             **find_kwargs_for_manager(WindowManager))
-                
+        
         self._inputManager = InputManager(window = self._windowManager.Window, **find_kwargs_for_manager(InputManager))
         
         self._runtimeManager = RuntimeManager(**find_kwargs_for_manager(RuntimeManager))
