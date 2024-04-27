@@ -1,7 +1,15 @@
 import torch
 import math
 import struct
-import comfy.checkpoint_pickle
+try:
+    import comfy.checkpoint_pickle
+except ModuleNotFoundError:
+    import sys
+    from common_utils.path_utils import COMFYUI_DIR
+    if COMFYUI_DIR not in sys.path:
+        sys.path.insert(1, str(COMFYUI_DIR))
+    import comfy.checkpoint_pickle
+    
 import safetensors.torch
 import numpy as np
 from common_utils.debug_utils import ComfyUILogger

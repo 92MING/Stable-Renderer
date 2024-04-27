@@ -2084,7 +2084,8 @@ export class ComfyApp {
 						}
 					} catch (error) {
 						const formattedError = this.#formatPromptError(error)
-						this.ui.dialog.show(formattedError);
+						let err_html = '<div class="comfy-error"><p>There was an error queuing the prompt:</p><pre>' + formattedError + '</pre></div>';
+						this.ui.dialog.show(err_html);
 						if (error.response) {
 							this.lastNodeErrors = error.response.node_errors;
 							this.canvas.draw(true, true);

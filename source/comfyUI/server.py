@@ -549,7 +549,7 @@ class PromptServer:
 
         @routes.post("/prompt")
         async def post_prompt(request):
-            ComfyUILogger.debug("got prompt")
+            ComfyUILogger.debug("got prompt request. Starting to process...")
             resp_code = 200
             out_string = ""
             json_data =  await request.json()
@@ -569,8 +569,13 @@ class PromptServer:
                 prompt_id = str(uuid.uuid4())
                 prompt = json_data["prompt"]
                 import execution
-                valid = execution.validate_prompt(prompt, prompt_id)   
-                # valid = (is_valid:bool, error: dict, good_outputs: list, node_errors: dict)
+                try:
+                    valid = execution.validate_prompt(prompt, prompt_id)   
+                except Exception as e:
+                    ComfyUILogger.warning(f"An error occurred while validating the prompt: {prompt}")
+                    ComfyUILogger.warning(f"{e}")
+                    traceback.print_exc()
+                    return _validate_response({"error": "An error occurred while validating the prompt.", "node_errors": []}, status=400)
                 
                 extra_data = {}
                 if "extra_data" in json_data:

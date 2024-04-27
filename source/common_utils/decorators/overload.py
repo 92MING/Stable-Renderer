@@ -4,7 +4,7 @@ if __name__ == "__main__":
     import os, sys
     _proj_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
     sys.path.append(_proj_path)
-    __package__ = 'utils.decorators'
+    __package__ = 'common_utils.decorators'
 
 from inspect import signature, Parameter, getmro, _empty
 from enum import Enum
@@ -12,7 +12,7 @@ from collections import OrderedDict
 from typing import Callable, get_args, overload as tp_overload, Any, Literal, List, Tuple, Optional, Union, TypeAlias
 from types import MethodType
 
-from ..type_utils import get_origin, get_mro_distance, get_proper_module_name
+from ..type_utils import get_origin, get_mro_distance, get_proper_module_name, valueTypeCheck
 from ..global_utils import GetOrCreateGlobalValue
 
 
@@ -184,6 +184,8 @@ class _Overload:
                 if len(args_copy)>0:
                     packed_params[name] = args_copy[0]
                     args_copy = args_copy[1:]
+                elif name in kwargs:
+                    packed_params[name] = kwargs[name]
                 else:
                     if param.default == _empty:
                         return None # means the args are not enough for this function, not suitable for this function
@@ -253,12 +255,12 @@ class _Overload:
         for overload_func in possible_funcs:
             packed_params = overload_func._pack_param(args, kwargs) # packed_params can be None, means not suitable for this function
             if packed_params is not None:
-                mro_dis = overload_func._calculate_total_param_mro_distance(packed_params)
+                mro_dis = overload_func._calculate_total_param_mro_distance(packed_params) / len(overload_func.parameters)
                 suitable_funcs.append((overload_func, mro_dis))
         
         if suitable_funcs:
             suitable_funcs = sorted(suitable_funcs, key=lambda x: x[1])
-            overload_func = suitable_funcs[0][0]
+            overload_func: '_Overload' = suitable_funcs[0][0]
             return (True, overload_func.origin_func(*args, **kwargs))
         else:
             return (False, None)
@@ -300,16 +302,20 @@ __all__ = ['Overload', 'NoSuchFunctionError', 'WrongCallingError']
 
 
 if __name__ == '__main__':  # for debug
+    from typing import Optional
+    class B:
+        pass
     class A:
-        @Overload
-        def f(self, x:int): # type: ignore
-            '''int'''
-            print('int x:', x)
         @Overload
         def f(self, x:str):
             '''str'''
             print('str x:', x)
-
-    a=A()
-    a.f(1)
-    a.f('1')
+        
+        @Overload
+        def f(self, x: Optional["B"]=None): # type: ignore
+            '''int'''
+            print('B type x:', x)
+        
+    b = B()
+    a = A()
+    a.f(x=b)

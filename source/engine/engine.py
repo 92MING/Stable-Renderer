@@ -19,9 +19,9 @@ import comfyUI.nodes
 import pycuda.autoprimaryctx
 
 from enum import Enum
-from typing import Optional, Literal
+from typing import Optional, Union
 from inspect import signature
-
+from pathlib import Path
 from common_utils.debug_utils import EngineLogger
 from common_utils.global_utils import GetOrAddGlobalValue, GetOrCreateGlobalValue, SetGlobalValue, GetGlobalValue, is_dev_mode
 from common_utils.decorators import class_or_ins_property, prevent_re_init 
@@ -93,8 +93,8 @@ class Engine:
                  threadPoolSize=6,
                  target_device: Optional[int]=None,
                  mode: EngineMode=EngineMode.GAME,
-                 disableComfyUI: bool = True,
-                 workflow: Optional[Workflow] = None,
+                 disableComfyUI: bool = False,
+                 workflow: Union[Workflow, str, Path, None] = None,
                  **kwargs):
         
         if disableComfyUI:
@@ -158,7 +158,7 @@ class Engine:
                                                   workflow=workflow,
                                                   **find_kwargs_for_manager(DiffusionManager))
         
-        self._sceneManager = SceneManager(scene, **find_kwargs_for_manager(SceneManager))
+        self._sceneManager = SceneManager(mainScene=scene, **find_kwargs_for_manager(SceneManager))
         
         self._resourceManager = ResourcesManager(**find_kwargs_for_manager(ResourcesManager))
         # endregion
@@ -183,7 +183,7 @@ class Engine:
     @property
     def PromptExecutor(self):
         if not hasattr(self, '_prompt_executor'):
-            raise AttributeError('PromptExecutor is not available. Please set startComfyUI=True when initializing the engine.')
+            raise AttributeError('PromptExecutor is not available. Please set disableComfyUI=False when initializing the engine.')
         return self._prompt_executor
 
     @property

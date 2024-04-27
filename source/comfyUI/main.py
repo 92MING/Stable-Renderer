@@ -284,4 +284,14 @@ def run()->execution.PromptExecutor:
     return prompt_executor
 
 if __name__ == '__main__':
-    run()
+    try:
+        run()
+    except KeyboardInterrupt:
+        from common_utils.global_utils import GetGlobalValue
+        from folder_paths import get_temp_directory
+        temp_dir = get_temp_directory()
+        if temp_data_file_list := GetGlobalValue('__COMFY_TEMP_DATA_FILES__', None):
+            for temp_data_file in temp_data_file_list:
+                if os.path.exists(os.path.join(temp_dir, temp_data_file)):
+                    os.remove(os.path.join(temp_dir, temp_data_file))
+        ComfyUILogger.success("ComfyUI Stopped")

@@ -4,13 +4,15 @@ sys.path.append(source_dir)
 
 import glm
 import os.path
+
 from engine.runtime.components import Camera, MeshRenderer
 from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
 from engine.runtime.components import CameraController, HelicalOrbit
 from engine.static import (Material, DefaultTextureType, Mesh, Texture, GLFW_Key)
-from common_utils.path_utils import EXAMPLE_3D_MODEL_DIR
+
+from common_utils.path_utils import EXAMPLE_3D_MODEL_DIR, EXAMPLE_WORKFLOWS_DIR
 from common_utils.spherical_cache import ViewPoint
 
 
@@ -65,7 +67,7 @@ if __name__ == '__main__':
                 
             if self.inputManager.GetKey(GLFW_Key.A):
                 self.angular_velocity += self.angular_acceleration
-                
+             
             if self.inputManager.GetKey(GLFW_Key.D):
                 self.angular_velocity -= self.angular_acceleration
                 
@@ -84,30 +86,38 @@ if __name__ == '__main__':
             view_point = ViewPoint.from_cartesian(*self.transform.position)
             self.historical_pos.append(view_point)
     
+    class AutoRotation(Component):
+        def update(self):
+            self.transform.rotateLocalY(0.2)
+    
     class Sample(Engine):
         def beforePrepare(self):
 
-            self.boatMesh = Mesh.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'boat', 'boat.obj'))
-            self.boatMaterial = Material.Default_Opaque_Material()
+            boatMesh = Mesh.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'boat', 'boat.obj'))
+            boatMaterial = Material.Default_Opaque_Material()
 
             boat_diffuse_tex = Texture.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'boat', 'boatColor.png'))
-            self.boatMaterial.addDefaultTexture(boat_diffuse_tex, DefaultTextureType.DiffuseTex)
-            self.boatMaterial.addDefaultTexture(Texture.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'boat', 'boatNormal.png')), DefaultTextureType.NormalTex)
-            self.boatMaterial.addDefaultTexture(Texture.CreateNoiseTex(), DefaultTextureType.NoiseTex)
+            boatMaterial.addDefaultTexture(boat_diffuse_tex, DefaultTextureType.DiffuseTex)
+            boatMaterial.addDefaultTexture(Texture.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'boat', 'boatNormal.png')), DefaultTextureType.NormalTex)
+            boatMaterial.addDefaultTexture(Texture.CreateNoiseTex(), DefaultTextureType.NoiseTex)
             
-            self.boat = GameObject('Boat', position=[0, 0, 0])
-            self.boat.addComponent(MeshRenderer, mesh=self.boatMesh, materials=self.boatMaterial)
+            boat = GameObject('Boat', position=[0, 0, 0])
+            boat.addComponent(MeshRenderer, mesh=boatMesh, materials=boatMaterial)
+            boat.addComponent(AutoRotation)
             
-            initial_position = [0, 0, -6]
-            self.camera = GameObject('Camera', position=initial_position)
-            self.camera.addComponent(Camera)
-            self.camera.addComponent(CameraController, defaultPos=initial_position, defaultLookAt=[0, 0, 0])
-            self.camera.addComponent(HelicalOrbitWrapper, theta_speed=1, phi=180)
+            initial_position = [0, 3, -3]
+            camera = GameObject('Camera', position=initial_position)
+            camera.addComponent(Camera)
+            camera.transform.lookAt([0, 0, 0])
+            #self.camera.addComponent(CameraController, defaultPos=initial_position, defaultLookAt=[0, 0, 0])
+            #self.camera.addComponent(HelicalOrbitWrapper, theta_speed=1, phi=180)
 
+    img2img_boat_path = EXAMPLE_WORKFLOWS_DIR / 'boat-img2img-example.json'
     Sample.Run(enableGammaCorrection=True,
-            debug=False,
-            winSize=(512, 512),
-            mapSavingInternal=1,
-            needOutputMaps=False,
-            startComfyUI=False,
-            fixedUpdateMaxFPS=60,)
+               debug=False,
+               winSize=(512, 512),
+               mapSavingInternal=1,
+               needOutputMaps=False,
+               saveSDColorOutput=True,
+               disableComfyUI=False,
+               workflow=img2img_boat_path)

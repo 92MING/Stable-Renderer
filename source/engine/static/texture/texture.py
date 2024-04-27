@@ -559,6 +559,8 @@ class Texture(ResourcesObj):
                 if data.shape[2] < self.channel_count:
                     if data.shape[2] == 1:
                         data = np.repeat(data, repeats=self.channel_count, axis=2)
+                    elif data.shape[2] == 3 and data.shape[0] == self.height and data.shape[1] == self.width:   # RGB
+                        data = np.concatenate([data, np.ones_like(data[..., 0:1])], axis=-1)
                     else:
                         raise Exception('Invalid data shape: {}'.format(data.shape))
                 else:
@@ -580,6 +582,8 @@ class Texture(ResourcesObj):
                 if data.shape[2] < self.channel_count:
                     if data.shape[2] == 1:
                         data = data.expand(-1, -1, self.channel_count)
+                    elif data.shape[2] == 3 and data.shape[0] == self.height and data.shape[1] == self.width:   # RGB
+                        data = torch.cat([data, torch.ones_like(data[..., 0:1])], dim=-1)
                     else:
                         raise Exception('Invalid data shape: {}'.format(data.shape))
                 else:

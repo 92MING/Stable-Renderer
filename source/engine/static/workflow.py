@@ -1,7 +1,7 @@
 '''ComfyUI's Workflow class, for loading to engine.'''
-
+import os
 if __name__ == '__main__':  # for debugging
-    import sys, os
+    import sys
     _proj_path = os.path.abspath(os.path.join(__file__, '..', '..', '..'))
     sys.path.append(_proj_path)
     __package__ = 'engine.static'
@@ -394,9 +394,10 @@ class Workflow(Dict[str, Any]):
     @staticmethod
     def DefaultGameWorkflow():
         '''workflow for default rendering process.'''
-        if not Workflow._DefaultGameWorkflow:    
+        if not Workflow._DefaultGameWorkflow:
             default_game_workflow_path = BUILTIN_WORKFLOW_DIR / 'default_game_workflow.json'
             Workflow._DefaultGameWorkflow = Workflow.Load(default_game_workflow_path)
+            Workflow._DefaultGameWorkflow['name'] = 'Default Game Workflow'
         return Workflow._DefaultGameWorkflow
     
     _DefaultBakeWorkflow: ClassVar[Optional['Workflow']] = None
@@ -406,10 +407,16 @@ class Workflow(Dict[str, Any]):
         if not Workflow._DefaultBakeWorkflow:
             default_bake_workflow_path = BUILTIN_WORKFLOW_DIR / 'default_bake_workflow.json'
             Workflow._DefaultBakeWorkflow = Workflow.Load(default_bake_workflow_path)
+            Workflow._DefaultBakeWorkflow['name'] = 'Default Bake Workflow'
         return Workflow._DefaultBakeWorkflow
     
     original_data: dict
     '''the original dict data of the workflow.'''
+
+    @property
+    def name(self)->Optional[str]:
+        '''Get the name of the workflow. This is only for printing on log to debug'''
+        return self.get('name', None)
 
     @property
     def last_node_id(self)->int:
@@ -533,11 +540,22 @@ class Workflow(Dict[str, Any]):
             nodes = WorkflowNodeInfo._ParseNodeInfos(self['nodes'], self)
             self['nodes'] = nodes # replace the original nodes with the formatted nodes.
         
+    def __repr__(self):
+        return f'<Workflow name={self.name}>'
+    
     @classmethod
     def Load(cls, path: Union[str, Path])->'Workflow':
         '''Load a workflow from a file.'''
+        if not os.path.exists(path) and not str(path).endswith('.json'):
+            path = BUILTIN_WORKFLOW_DIR / f'{path}.json'
+        if not os.path.exists(path):
+            raise FileNotFoundError(f'Cannot find the workflow file {path}.')
+        elif not os.path.isfile(path):
+            raise ValueError(f'The path {path} is not a file.')
+        workflow_name = os.path.basename(path).split('.')[0]
         with open(path, 'r') as f:
             workflow = cls(json.load(f))
+            workflow['name'] = workflow_name
             return workflow
     
     
@@ -548,12 +566,12 @@ if __name__ == '__main__':
     import numpy as np
     from PIL import Image
     from common_utils.path_utils import EXAMPLE_WORKFLOWS_DIR, TEMP_DIR
+    from comfyUI.main import run
+    
     test_workflow_path = EXAMPLE_WORKFLOWS_DIR / 'boat-img2img-example.json'
     workflow = Workflow.Load(test_workflow_path)
     prompt, node_ids_to_be_ran, extra_data = workflow.build_prompt()
-    #print(prompt)
-    #exit()
-    from comfyUI.main import run
+    
     prompt_executor = run()
     context = prompt_executor.execute(prompt, node_ids_to_be_ran=node_ids_to_be_ran, extra_data=extra_data)
     color_img = context.final_output.frame_color

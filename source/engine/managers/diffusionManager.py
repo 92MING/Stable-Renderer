@@ -3,10 +3,10 @@ import os.path
 import numpy as np
 import multiprocessing
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
-
+from pathlib import Path
 from common_utils.debug_utils import EngineLogger
 from common_utils.path_utils import *
 from common_utils.global_utils import is_verbose_mode, is_dev_mode
@@ -25,10 +25,11 @@ class DiffusionManager(Manager):
     
     def __init__(self,
                  needOutputMaps=False,
+                 saveSDColorOutput=False,
                  maxFrameCacheCount=24,
                  mapSavingInterval=12,
                  threadPoolSize=None,
-                 workflow: Optional[Workflow] = None):
+                 workflow: Union[Workflow, str, Path, None] = None):
         '''
         :param needOutputMaps: if output maps (id, color, depth...) result to disk
         :param maxFrameCacheCount: how many frames data should be stored in each
@@ -39,7 +40,8 @@ class DiffusionManager(Manager):
         self._needOutputMaps = needOutputMaps
         self._maxFrameCacheCount = maxFrameCacheCount
         self._mapSavingInterval = mapSavingInterval
-
+        self._saveSDColorOutput = saveSDColorOutput
+        
         if not threadPoolSize:
             threadPoolSize = multiprocessing.cpu_count()
         self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize) # for saving maps asynchronously
@@ -50,10 +52,18 @@ class DiffusionManager(Manager):
                 workflow = Workflow.DefaultGameWorkflow()
             elif self.engine.Mode == EngineMode.BAKE:
                 workflow = Workflow.DefaultBakeWorkflow()
-                
+        else:
+            if isinstance(workflow, (str, Path)):
+                workflow = Workflow.Load(workflow)
+        if is_dev_mode() and is_verbose_mode():
+            EngineLogger.debug(f'Workflow is set to: {workflow}')
         self._workflow = workflow
         
     # region properties
+    @property
+    def SaveSDColorOutput(self)->bool:
+        return self._saveSDColorOutput
+    
     @property
     def DefaultWorkflow(self)->Optional[Workflow]:
         '''the current running workflow'''
@@ -225,9 +235,28 @@ class DiffusionManager(Manager):
             EngineLogger.error('Engine is not looping. FrameData is not available. Cannot submit prompt to prompt executor.')
             return
         
-        prompt, extra_data = workflow.build_prompt()
-        context = self.engine.PromptExecutor.execute(prompt=prompt, frame_data=frameData, extra_data=extra_data)
-
+        prompt, node_ids_to_be_ran, extra_data = workflow.build_prompt()
+        context = self.engine.PromptExecutor.execute(prompt = prompt, 
+                                                     extra_data = extra_data,
+                                                     node_ids_to_be_ran=node_ids_to_be_ran, 
+                                                     frame_data=frameData)
+        if self.SaveSDColorOutput:
+            final_output = context.final_output
+            if final_output is None:
+                EngineLogger.error('(DiffusionManager) No final output is found in context. Cannot save color output.')
+            else:
+                saving_dir = get_sd_color_result_dir()
+                os.makedirs(saving_dir, exist_ok=True)
+                saving_path = os.path.join(saving_dir, f'{self.engine.RuntimeManager.FrameCount}.png')
+                color_img = final_output.frame_color
+                def save(img):
+                    img = 255. * color_img[0].cpu().numpy()
+                    img_bytes = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
+                    img_bytes.save(saving_path)
+                    if is_dev_mode():
+                        EngineLogger.info(f'(DiffusionManager) Color output saved to {saving_path}')
+                self._threadPool.submit(save, color_img)
+                
         return context
     # endregion
     

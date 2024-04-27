@@ -39,50 +39,47 @@ def _check_output_param_only_output_to(from_node_id: str,
         return True
     return False
 
-@deprecated(reason='Use `PromptExecutor.get_input_data` instead.')
+@deprecated(reason='Use `PromptExecutor._get_input_data` instead.')
 def get_input_data(inputs: dict, 
-                   node_cls: Type[ComfyUINode], 
-                   node_id: str, 
+                   class_def: Type[ComfyUINode], 
+                   unique_id: str, 
                    outputs: Optional[dict]=None, 
-                   prompt: Union[dict, PROMPT, None]=None, 
+                   prompt: Optional[dict]=None,
                    extra_data: Optional[dict]=None):
     '''
-    !! Deprecated !! Use Executor._get_input_data now.
+    !! Deprecated !! Use Executor._get_input_data instead.
     Pack inputs form value/nodes into a dict for the node to use.
-    
-    Args:
-        - inputs: {param name, value}. Values can be:
-            * [from_node_id, from_node_output_slot_index] (means the value is from another node's output)
-            * a value
-        - node_cls: the class of the node
-        - node_id: the id of the target node
-        - outputs: {node_id: [output1, output2, ...], ...}
-        - prompt: the prompt dict
-    
-    Returns:
-        a dict of {param name: value}. !Values from node bindings are not resolved yet!
     '''
-    e = PromptExecutor()
-    context = e.current_context
-    if not context:
-        context = InferenceContext(prompt=prompt,   # type: ignore
-                                   extra_data=extra_data or {},
-                                   current_node_id=node_id,
-                                   old_prompt=None,
-                                   outputs=outputs or {},
-                                   outputs_ui={},
-                                   frame_data=None,
-                                   baking_data=None,
-                                   status_messages=[],
-                                   executed_node_ids=set(),
-                                   success=False)
-        return e._get_input_data(inputs, context)    
-    else:
-        context.prompt = prompt # type: ignore
-        context.extra_data = extra_data or {}
-        context.current_node_id = node_id
-        context.outputs = outputs or {}
-        return e._get_input_data(inputs, context)
+    outputs = outputs or {}
+    prompt = prompt or {}
+    extra_data = extra_data or {}
+    
+    valid_inputs = class_def.INPUT_TYPES()
+    input_data_all = {}
+    for x in inputs:
+        input_data = inputs[x]
+        if isinstance(input_data, list):
+            input_unique_id = input_data[0]
+            output_index = input_data[1]
+            if input_unique_id not in outputs:
+                input_data_all[x] = (None,)
+                continue
+            obj = outputs[input_unique_id][output_index]
+            input_data_all[x] = obj
+        else:
+            if ("required" in valid_inputs and x in valid_inputs["required"]) or ("optional" in valid_inputs and x in valid_inputs["optional"]):
+                input_data_all[x] = [input_data]
+
+    if "hidden" in valid_inputs:
+        h = valid_inputs["hidden"]
+        for x in h:
+            if h[x] == "PROMPT":
+                input_data_all[x] = [prompt]
+            if h[x] == "EXTRA_PNGINFO":
+                input_data_all[x] = [extra_data.get('extra_pnginfo', None)]
+            if h[x] == "UNIQUE_ID":
+                input_data_all[x] = [unique_id]
+    return input_data_all
 
         
 @deprecated # changed to use `get_node_func_ret` now
@@ -703,7 +700,9 @@ class PromptExecutor:
                         
             output_data_formatted = {}
             for node_id, node_outputs in context.outputs.items():
-                output_data_formatted[node_id] = [[self._format_value(x) for x in l] for l in node_outputs]
+                if not isinstance(node_outputs, (list, tuple)):
+                    node_outputs = [node_outputs]
+                output_data_formatted[node_id] = [[self._format_value(x) for x in l] if isinstance(l, (tuple, list)) else [l] for l in node_outputs]
 
             logging.error("!!! Exception during processing !!!")
             logging.error(traceback.format_exc())
@@ -889,15 +888,14 @@ class PromptExecutor:
     @Overload
     def execute(self, 
                 prompt: Union[PROMPT, dict], 
-                prompt_id: Optional[str]=None, # random string by uuid4 
-                extra_data: Optional[dict]=None, 
-                node_ids_to_be_ran: Union[List[str], List[int], None]=None,
-                frame_data: Optional['FrameData']= None,
-                baking_data: Optional[BakingData]=None)->InferenceContext:
+                prompt_id: Optional[str] = None, # random string by uuid4 
+                extra_data: Optional[dict] = None, 
+                node_ids_to_be_ran: Union[List[str], List[int], None] = None,
+                frame_data: Optional['FrameData'] = None,
+                baking_data: Optional[BakingData] = None)->InferenceContext:
         '''The entry for inference.'''
         extra_data = extra_data or {}
         node_ids_to_be_ran = [str(x) for x in node_ids_to_be_ran] if node_ids_to_be_ran else []
-        executed_outputs = copy.deepcopy(self.last_context.outputs) if self.last_context else {}
         
         if prompt_id is None:
             prompt_id = str(uuid.uuid4())
@@ -908,8 +906,8 @@ class PromptExecutor:
                                            extra_data=extra_data, 
                                            current_node_id=None,
                                            old_prompt=self.last_context.prompt if self.last_context else None,
-                                           outputs=executed_outputs,
-                                           outputs_ui=self.last_context.outputs_ui if self.last_context else {},
+                                           outputs={},
+                                           outputs_ui={},
                                            frame_data=frame_data,
                                            baking_data=baking_data,
                                            status_messages=[],

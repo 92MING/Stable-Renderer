@@ -416,6 +416,8 @@ class NodeInputs(Dict[str, Union[NodeBindingParam, Any]], metaclass=NameCheckMet
             advanced_node_input_type_def = self.node_type.__ADVANCED_NODE_CLASS__._InputFields
             
         for key, value in tuple(self.items()):
+            if key not in all_param_dict:
+                continue    # ignore unknown input
             param_type = all_param_dict[key][0] # (type, param info)
             converted_to_binding = False
             

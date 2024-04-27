@@ -70,7 +70,7 @@ class InferenceOutputNode(StableRendererNodeBase):
                         save: bool=False,               # optional type
                         ) -> UIImage:
         if is_dev_mode() and is_verbose_mode():
-            ComfyUILogger.debug('InferenceOutputNode.__server_call__')
+            ComfyUILogger.debug('Calling InferenceOutputNode.__server_call__...')
         context.final_output = InferenceOutput(colorImg)
         return UIImage(colorImg, type='temp' if not save else 'output', prompt=prompt, png_info=png_info)
         

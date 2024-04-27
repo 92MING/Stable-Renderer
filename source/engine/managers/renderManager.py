@@ -4,6 +4,7 @@ import ctypes
 import OpenGL.GL as gl
 import numpy as np
 
+from torch import Tensor
 from functools import partial
 from typing import Union, Optional, Callable
 from common_utils.cuda_utils import *
@@ -33,6 +34,7 @@ def _wrapPostProcessTask(render_manager:'RenderManager', shader, task):
     gl.glActiveTexture(gl.GL_TEXTURE0)
     gl.glBindTexture(gl.GL_TEXTURE_2D, render_manager.LastScreenTexture)
     shader.setUniform("screenTexture", 0)
+    shader.setUniform("usingSD", int(not render_manager.engine.disableComfyUI))
     task() if task is not None else render_manager._draw_quad()
     render_manager.SwapScreenTexture()
 
@@ -210,6 +212,7 @@ class RenderManager(Manager):
             self.BindFrameBuffer(0) # output to screen
             gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT) # type: ignore
             self.DrawScreen()
+        
         self._final_draw = self._wrapPostProcessTask(self._default_post_process_shader, final_draw)
         '''
         _final_draw is actually a post rendering process but it is not in the post process list.
@@ -561,18 +564,20 @@ class RenderManager(Manager):
         if not self.engine.disableComfyUI:
             from comfyUI.types import FrameData
             frameData = FrameData(frame_index= self.engine.RuntimeManager.FrameCount,
-                                  _color_map=self.colorFBOTex,
-                                  _id_map=self.idFBOTex,
-                                  _pos_map=self.posFBOTex,
-                                  _normal_and_depth_map=self.normal_and_depth_FBOTex,
-                                  _noise_map=self.noiseFBOTex)
+                                  color_map=self.colorFBOTex,
+                                  id_map=self.idFBOTex,
+                                  pos_map=self.posFBOTex,
+                                  normal_and_depth_map=self.normal_and_depth_FBOTex,
+                                  noise_map=self.noiseFBOTex)
             context = self.engine.DiffusionManager.SubmitPrompt(frameData)
             if not context:
                 raise ValueError("DiffusionManager.SubmitPrompt() returns None. Skip rendering process.")
             inference_result = context.final_output
-            new_color_data = inference_result.frame_color
+            new_color_data: Tensor = inference_result.frame_color
+            if len(new_color_data.shape) == 4:
+                new_color_data = new_color_data[0]
             self.colorFBOTex.set_data(new_color_data)
-            
+        
         # defer rendering
         gl.glDisable(gl.GL_DEPTH_TEST)
         self.BindFrameBuffer(self._postProcessFBO)  # output to post process FBO

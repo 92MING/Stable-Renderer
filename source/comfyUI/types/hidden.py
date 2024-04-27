@@ -231,19 +231,19 @@ class UNIQUE_ID(str, HIDDEN):
 class FrameData(HIDDEN):
     '''The prompt for submitting to ComfyUI during engine's runtime.'''
     
-    frame_index: int = attrib()
+    frame_index: int = attrib(default=0, kw_only=True, alias='frame_index')
     '''The index of the current frame.'''
 
-    _color_map: "Texture" = attrib(default=None)
+    _color_map: "Texture" = attrib(default=None, kw_only=True, alias='color_map')
     '''color of the current frame'''
     _updated_color_map: Optional[IMAGE] = None
     @property
     def color_map(self)->IMAGE:
-        if not self._updated_color_map:
+        if self._updated_color_map is None:
             self._updated_color_map = self._color_map.tensor(update=True, flip=True).to(dtype=torch.float32)
         return self._updated_color_map
     
-    _id_map: "Texture" = attrib(default=None)
+    _id_map: "Texture" = attrib(default=None, kw_only=True, alias='id_map')
     '''
     ID of each pixels in the current frame. If the pixel is not containing any object, the id is 0,0,0,0.
     ID data has two possible combinations:
@@ -253,21 +253,21 @@ class FrameData(HIDDEN):
     _updated_id_map: Optional["IDMap"] = None
     @property
     def id_map(self)->"IDMap":
-        if not self._updated_id_map:
+        if self._updated_id_map is None:
             from comfyUI.stable_renderer import IDMap
             self._updated_id_map = IDMap(self._id_map, self.frame_index)
         return self._updated_id_map
     
-    _pos_map: "Texture" = attrib(default=None)
+    _pos_map: "Texture" = attrib(default=None, kw_only=True, alias='pos_map')
     '''position of the origin 3d vertex in each pixels in the current frame'''
     _updated_pos_map: Optional[IMAGE] = None
     @property
     def pos_map(self)->IMAGE:
-        if not self._updated_pos_map:
+        if self._updated_pos_map is None:
             self._updated_pos_map = self._pos_map.tensor(update=True, flip=True)    # already RGB32F
         return self._updated_pos_map
     
-    _normal_and_depth_map: "Texture" = attrib(default=None)
+    _normal_and_depth_map: "Texture" = attrib(default=None, kw_only=True, alias='normal_and_depth_map')
     '''
     normal and depth of the origin 3d vertex in each pixels in the current frame.
     Format: (nx, ny, nz, depth)
@@ -275,19 +275,19 @@ class FrameData(HIDDEN):
     _updated_normal_and_depth_map: Optional[IMAGE] = None
     @property
     def normal_and_depth_map(self)->IMAGE:
-        if not self._updated_normal_and_depth_map:
+        if self._updated_normal_and_depth_map is None:
             self._updated_normal_and_depth_map = self._normal_and_depth_map.tensor(update=True, flip=True)
             self._normalMap = self._updated_normal_and_depth_map[..., :3]
             self._depthMap = self._updated_normal_and_depth_map[..., 3:]
             self._depthMap = torch.cat([self._depthMap, self._depthMap, self._depthMap], dim=-1)
         return self._updated_normal_and_depth_map
     
-    _noise_map: "Texture" = attrib(default=None)
+    _noise_map: "Texture" = attrib(default=None, kw_only=True, alias='noise_map')
     '''noise of each vertex in each pixels in the current frame'''
     _updated_noise_map: Optional[LATENT] = None
     @property
     def noise_map(self)->LATENT:
-        if not self._updated_noise_map:
+        if self._updated_noise_map is None:
             noise = self._noise_map.tensor(update=True, flip=True).to(dtype=torch.float32)
             self._updated_noise_map = LATENT(sample=noise, )
         return self._updated_noise_map
@@ -295,14 +295,14 @@ class FrameData(HIDDEN):
     _normalMap: Optional[IMAGE] = None
     @property
     def normal_map(self)->IMAGE:
-        if not self._normalMap:
+        if self._normalMap is None:
             self.normal_and_depth_map   # this will update normal and depth map
         return self._normalMap  # type: ignore
     
     _depthMap: Optional[IMAGE] = None
     @property
     def depth_map(self)->IMAGE:
-        if not self._depthMap:
+        if self._depthMap is None:
             self.normal_and_depth_map   # this will update normal and depth map
         return self._depthMap   # type: ignore
     
@@ -310,7 +310,7 @@ class FrameData(HIDDEN):
     @property
     def mask(self)->MASK:
         '''The mask of the current frame.'''
-        if not self._mask:
+        if self._mask is None:
             self._mask = self.color_map[..., 3:]
             self._mask = 1.0 - self._mask
         return self._mask

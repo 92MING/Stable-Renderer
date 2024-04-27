@@ -1,7 +1,7 @@
 import traceback
 from enum import Enum
 from typing import TYPE_CHECKING, ClassVar, List, Type
-from common_utils.global_utils import GetOrCreateGlobalValue, GetGlobalValue
+from common_utils.global_utils import GetOrCreateGlobalValue, GetGlobalValue, is_dev_mode
 from common_utils.debug_utils import EngineLogger
 from common_utils.type_utils import is_empty_method
 if TYPE_CHECKING:
@@ -136,8 +136,14 @@ class Manager(metaclass=_ManagerMeta):
             try:
                 manager.prepare() if not (manager.engine.IsDebugMode and manager._HasDebugPrepareMethod) else manager.debug_mode_prepare()
             except Exception as e:
-                EngineLogger.warn(f'Warning: Error when running "prepare" of {manager.__class__.__qualname__}. Err msg: {e}, traceback:{traceback.format_exc()}')
+                if is_dev_mode():
+                    raise e
+                EngineLogger.warn(f'(PREPARE) Error when running {manager.__class__.__qualname__} with msg: {e}, traceback:{traceback.format_exc()}')
 
+
+    _last_run_frame_begin_msg = None
+    _last_run_frame_run_msg = None
+    _last_run_frame_end_msg = None
     @staticmethod
     def _RunFrameBegin():
         if 'begin' not in _MANAGER_FUNCS:
@@ -146,7 +152,15 @@ class Manager(metaclass=_ManagerMeta):
             try:
                 manager.on_frame_begin() if not (manager.engine.IsDebugMode and manager._HasDebugOnFrameBeginMethod) else manager.debug_mode_on_frame_begin()
             except Exception as e:
-                EngineLogger.warn(f'Warning: Error when running "on_frame_begin" of {manager.__class__.__qualname__}. Err msg: {e}, traceback:{traceback.format_exc()}')
+                if is_dev_mode():
+                    raise e
+                trace = traceback.format_exc()
+                msg = f'(FRAME BEGIN) Error when running {manager.__class__.__qualname__} with msg: {e}'
+                if msg == manager._last_run_frame_begin_msg:
+                    continue    # prevent duplicate message
+                else:
+                    manager._last_run_frame_begin_msg = msg
+                    EngineLogger.warn(f'{msg}. Traceback:{trace}')
 
     @staticmethod
     def _RunFrameRun():
@@ -156,7 +170,15 @@ class Manager(metaclass=_ManagerMeta):
             try:
                 manager.on_frame_run() if not (manager.engine.IsDebugMode and manager._HasDebugOnFrameRunMethod) else manager.debug_mode_on_frame_run()
             except Exception as e:
-                EngineLogger.warn(f'Warning: Error when running "on_frame_run" of {manager.__class__.__qualname__}. Err msg: {e}, traceback:{traceback.format_exc()}')
+                if is_dev_mode():
+                    raise e
+                trace = traceback.format_exc()
+                msg = f'(FRAME RUN) Error when running {manager.__class__.__qualname__} with msg: {e}'
+                if msg == manager._last_run_frame_run_msg:
+                    continue
+                else:
+                    manager._last_run_frame_run_msg = msg
+                    EngineLogger.warn(f'{msg}. Traceback:{trace}')
 
     @staticmethod
     def _RunFrameEnd():
@@ -166,7 +188,15 @@ class Manager(metaclass=_ManagerMeta):
             try:
                 manager.on_frame_end() if not (manager.engine.IsDebugMode and manager._HasDebugOnFrameEndMethod) else manager.debug_mode_on_frame_end()
             except Exception as e:
-                EngineLogger.warn(f'Warning: Error when running "on_frame_end" of {manager.__class__.__qualname__}.Err msg: {e}, traceback:{traceback.format_exc()}')
+                if is_dev_mode():
+                    raise e
+                trace = traceback.format_exc()
+                msg = f'(FRAME END) Error when running {manager.__class__.__qualname__} with msg: {e}'
+                if msg == manager._last_run_frame_end_msg:
+                    continue
+                else:
+                    manager._last_run_frame_end_msg = msg
+                    EngineLogger.warn(f'{msg}. Traceback:{trace}')
 
     @staticmethod
     def _RunRelease():
@@ -176,7 +206,9 @@ class Manager(metaclass=_ManagerMeta):
             try:
                 manager.release() if not (manager.engine.IsDebugMode and manager._HasDebugReleaseMethod) else manager.debug_mode_release()
             except Exception as e:
-                EngineLogger.warn(f'Warning: Error when running "release" of {manager.__class__.__qualname__}. Err msg: {e}, traceback:{traceback.format_exc()}')
+                if is_dev_mode():
+                    raise e
+                EngineLogger.warn(f'(RELEASE) Error when running {manager.__class__.__qualname__} with msg: {e}, traceback:{traceback.format_exc()}')
     # endregion
 
 

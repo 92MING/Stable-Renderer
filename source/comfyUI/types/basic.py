@@ -22,7 +22,7 @@ from comfy.cli_args import args
 from common_utils.path_utils import get_comfyUI_output_dir
 from common_utils.decorators import cache_property
 from common_utils.type_utils import valueTypeCheck, NameCheckMetaCls, GetableFunc, DynamicLiteral, subClassCheck
-from common_utils.global_utils import is_dev_mode, is_verbose_mode, GetOrAddGlobalValue, SetGlobalValue, GetOrCreateGlobalValue
+from common_utils.global_utils import is_dev_mode, is_verbose_mode, GetOrAddGlobalValue, SetGlobalValue, GetOrCreateGlobalValue, is_engine_looping
 from common_utils.debug_utils import ComfyUILogger
 try:
     from comfy.samplers import KSampler
@@ -656,7 +656,7 @@ class UI(Generic[_T], metaclass=_UIMeta):
             names.update(subcls._AllUISubclsNames())
         return names
 
-_TempDatas = GetOrCreateGlobalValue('__COMFY_TEMP_DATAS__', list)
+_TempDatas = GetOrCreateGlobalValue('__COMFY_TEMP_DATA_FILES__', list)
 '''record all created temp datas for cleaning up at the end of the system'''
 
 class UIImage(UI, valueT=IMAGE):
@@ -694,6 +694,11 @@ class UIImage(UI, valueT=IMAGE):
             - frame_rate: the frame rate for the gif (only available for animated=True)
             - loop_count: the loop count for the gif (only available for animated=True)
         '''
+        if is_engine_looping(): 
+            # means the engine is looping, we should not save the image
+            super().__init__('images', value=value, ui_value={}, **extra_params)
+            return
+        
         if prefix is None:
             if type =='temp':
                 prefix = time.strftime("%y-%m-%d", time.localtime()) + "_"
@@ -708,7 +713,7 @@ class UIImage(UI, valueT=IMAGE):
             filename = f"{prefix}{output_count:05}"
             while os.path.exists(os.path.join(file_dir, subfolder, f'{filename}.png')):
                 output_count += 1
-                SetGlobalValue('__COMFY_OUTPUT_DEFAULT_NAME_COUNT__', output_count)
+                SetGlobalValue('__COMFY_OUTPUT_DEFAULT_NAME_COUNT__', output_count) # type: ignore
                 filename = f"{prefix}{output_count:05}"
         
         if compress_level is None:
@@ -820,6 +825,11 @@ class UILatent(UI, valueT=LATENT):
             - extra_pnginfo: extra png info for the latent. This is for building the metadata of the latent.
             - extra_params: extra params for putting in UI return dict.
         '''
+        if is_engine_looping():
+            # means the engine is looping, we should not save the latent
+            super().__init__('latents', value=value, ui_value={}, **extra_params)
+            return
+        
         if prefix is None:
             if type =='temp':
                 prefix = time.strftime("%y-%m-%d", time.localtime()) + "_"

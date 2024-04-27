@@ -319,6 +319,8 @@ class VAEEncode:
     CATEGORY = "latent"
 
     def encode(self, vae: 'VAE', pixels):
+        if len(pixels.shape) == 3:
+            pixels = pixels.unsqueeze(0)
         t = vae.encode(pixels[:,:,:,:3])
         return ({"samples":t}, )
 
