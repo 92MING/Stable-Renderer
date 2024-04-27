@@ -5,13 +5,27 @@ if __name__ == '__main__':  # for debugging
     _proj_path = os.path.abspath(os.path.join(__file__, '..', '..', '..'))
     sys.path.append(_proj_path)
     __package__ = 'engine.static'
+    
+    from common_utils.path_utils import SOURCE_DIR
+
+    if str(SOURCE_DIR.absolute()) not in sys.path:
+        sys.path.insert(0, str(SOURCE_DIR.absolute()))
+
+    _COMFYUI_PATH = str((SOURCE_DIR / 'comfyUI').absolute())
+    if _COMFYUI_PATH not in sys.path:
+        sys.path.insert(0, _COMFYUI_PATH)
 
 import json
-from typing import Tuple, Type, Union, Dict, List, Any, TYPE_CHECKING, Optional, Tuple
+from typing import Tuple, Type, Union, Dict, List, Any, TYPE_CHECKING, Optional, Tuple, ClassVar, overload
 from pathlib import Path
 from dataclasses import dataclass, field
 from uuid import uuid4
+
 from common_utils.debug_utils import EngineLogger
+from common_utils.global_utils import is_dev_mode, is_verbose_mode
+from common_utils.path_utils import BUILTIN_WORKFLOW_DIR
+from comfyUI.types._utils import get_comfy_name
+
 if TYPE_CHECKING:
     from comfyUI.types import ComfyUINode, NodeBindingParam, PROMPT
 
@@ -94,9 +108,18 @@ class WorkflowNodeInfo(Dict[str, Any]):
     '''the output parameters of the node.'''
     origin_data: dict
     '''the original data of the node.'''
+    workflow: "Workflow"
+    '''the parent workflow that the node belongs to.'''
     
-    def __init__(self, origin_data: dict, links: Dict[int, WorkflowNodeLink]):
+    def __init__(self, origin_data: dict, workflow: "Workflow"):
+        '''
+        Args:
+            - origin_data: the original data of the node.
+            - workflow: the parent workflow that the node belongs to.
+        '''
         super().__init__(origin_data)
+        links = workflow.node_links
+        self.workflow = workflow
         self.origin_data = origin_data
         self['id'] = str(self['id'])
         self._cls_type = _get_comfy_node_type(self['type'])
@@ -104,6 +127,9 @@ class WorkflowNodeInfo(Dict[str, Any]):
         # init inputs
         widget_values:Union[list, Dict[str, Any]] = self.get('widgets_values', [])
         '''The values of the widgets. It can be a list of values or a dict of values.'''
+        widget_kw_values: Dict[str, Any] = self.get('widget_kw_values', {})
+        '''The values of the widget keyword arguments.'''
+        
         workflow_inputs = self.get('inputs', [])    # original `inputs` is a list of dict for linked inputs.
         workflow_inputs = {i['name']: i for i in workflow_inputs}
         formatted_inputs:Dict[str, WorkflowNodeInputParam] = {}   # name, param
@@ -125,6 +151,13 @@ class WorkflowNodeInfo(Dict[str, Any]):
                 if len(input_info)>=2:
                     return input_info[1].get('default', None)
                 return None
+            return None
+            
+        def get_input_value_type(input_name:str):
+            if input_name in required_input_names:
+                return node_cls_input_types['required'][input_name][0]
+            elif input_name in optional_input_names:
+                return node_cls_input_types['optional'][input_name][0]
             return None
         
         for input_name in (required_input_names + optional_input_names):
@@ -149,7 +182,8 @@ class WorkflowNodeInfo(Dict[str, Any]):
                                                                           node_cls_input_types[param_type][input_name][0])
             
             else:   # input is a constant value
-                if len(widget_values) == 0:
+                widget_value_len = len(widget_kw_values) if self.workflow.is_stable_renderer_workflow else len(widget_values)
+                if widget_value_len == 0:
                     if (default_value := get_input_default_value(input_name)) is not None:
                         formatted_inputs[input_name] = WorkflowNodeInputParam(input_name, 
                                                                               default_value, 
@@ -160,21 +194,77 @@ class WorkflowNodeInfo(Dict[str, Any]):
                                                                               node_cls_input_types['optional'][input_name][0])
                     else:
                         raise ValueError(f'Cannot find the widget value for input {input_name}.')
+                    
                 else:
-                    if isinstance(widget_values, dict): # dict widget values, {input_name: value}
-                        if not (widget_value := widget_values.get(input_name)):
-                            if input_name in optional_input_names:
+                    if self.workflow.is_stable_renderer_workflow:
+                        if not (widget_value := widget_kw_values.get(input_name)):
+                            if input_name in required_input_names:
+                                if (default_value := get_input_default_value(input_name)) is not None:
+                                    formatted_inputs[input_name] = WorkflowNodeInputParam(input_name, 
+                                                                                          default_value, 
+                                                                                          node_cls_input_types['required'][input_name][0])
+                                else:
+                                    if is_dev_mode() and is_verbose_mode():
+                                        EngineLogger.debug(f'Cannot find the widget value for input {input_name}. Skipped.')    
+                                        # probably function has different params in `__call__` and `__server_call__`
+                                                                                        
+                            elif input_name in optional_input_names:
                                 formatted_inputs[input_name] = WorkflowNodeInputParam(input_name, 
-                                                                                     None, 
-                                                                                     node_cls_input_types['optional'][input_name][0])
+                                                                                      None, 
+                                                                                      node_cls_input_types['optional'][input_name][0])
                             else:
-                                raise ValueError(f'Cannot find the widget value for input {input_name}.')
-                    else:   # list widget values
-                        widget_value = widget_values.pop(0)
-                        param_type = 'required' if input_name in required_input_names else 'optional'
-                        formatted_inputs[input_name] = WorkflowNodeInputParam(input_name, 
-                                                                              widget_value, 
-                                                                              node_cls_input_types[param_type][input_name][0])
+                                if is_dev_mode() and is_verbose_mode():
+                                    EngineLogger.debug(f'Cannot find the widget value for input {input_name}. Skipped.')  # will not raise error in this case, cuz it's a stable renderer workflow.
+                        else:
+                            param_type = 'required' if input_name in required_input_names else 'optional'
+                            formatted_inputs[input_name] = WorkflowNodeInputParam(input_name, 
+                                                                                  widget_value, 
+                                                                                  node_cls_input_types[param_type][input_name][0])
+                        del widget_kw_values[input_name]
+                    
+                    else:
+                        if isinstance(widget_values, dict): # dict widget values, {input_name: value}
+                            if not (widget_value := widget_values.get(input_name)):
+                                if input_name in optional_input_names:
+                                    formatted_inputs[input_name] = WorkflowNodeInputParam(input_name, 
+                                                                                          None, 
+                                                                                          node_cls_input_types['optional'][input_name][0])
+                                else:
+                                    raise ValueError(f'Cannot find the widget value for input {input_name}.')
+                                
+                        else:   # list widget values (comfyUI's origin json data, which will probably results in error.)
+                            value_type_name = None
+                            input_type_name = get_input_value_type(input_name)
+                            while value_type_name != input_type_name:
+                                if len(widget_values) == 0:
+                                    if (default_value := get_input_default_value(input_name)) is not None:
+                                        formatted_inputs[input_name] = WorkflowNodeInputParam(input_name, 
+                                                                                              default_value, 
+                                                                                              node_cls_input_types['required'][input_name][0])
+                                        break
+                                    elif input_name in optional_input_names:
+                                        formatted_inputs[input_name] = WorkflowNodeInputParam(input_name, 
+                                                                                              None, 
+                                                                                              node_cls_input_types['optional'][input_name][0])
+                                        break
+                                    else:
+                                        raise ValueError(f'Cannot find the widget value for input {input_name}.')
+                                
+                                widget_value = widget_values.pop(0)
+                                value_type_name = get_comfy_name(type(widget_value))
+                                if value_type_name == 'FLOAT' and input_type_name == 'INT':
+                                    value_type_name = 'INT'
+                                    widget_value = int(widget_value)
+                                    break
+                                elif value_type_name == 'INT' and input_type_name == 'FLOAT':
+                                    value_type_name = 'FLOAT'
+                                    widget_value = float(widget_value)
+                                    break
+                                
+                            param_type = 'required' if input_name in required_input_names else 'optional'
+                            formatted_inputs[input_name] = WorkflowNodeInputParam(input_name, 
+                                                                                  widget_value, 
+                                                                                  node_cls_input_types[param_type][input_name][0])
         self._inputs = formatted_inputs
         
         # init outputs
@@ -246,13 +336,13 @@ class WorkflowNodeInfo(Dict[str, Any]):
         return self.get('title')
     
     @staticmethod
-    def _ParseNodeInfos(infos: List[Dict], links: Dict[int, WorkflowNodeLink])->'Dict[str, WorkflowNodeInfo]':
+    def _ParseNodeInfos(infos: List[Dict], workflow: "Workflow")->'Dict[str, WorkflowNodeInfo]':
         datas: Dict[str, WorkflowNodeInfo] = {}
         invalid_node_ids = set()
         for info in infos:
             info['id'] = str(info['id'])
             try:
-                datas[info['id']] = WorkflowNodeInfo(info, links)
+                datas[info['id']] = WorkflowNodeInfo(info, workflow)
             except InvalidNodeError:  
                 # the node's input is not complete, means this node is not a valid node
                 # e.g a useless node but forgot to delete it. So we just skip it.
@@ -299,6 +389,25 @@ class Workflow(Dict[str, Any]):
     The workflow for ComfyUI.
     Each workflow represents a rendering process/pipeline.
     '''
+    
+    _DefaultGameWorkflow: ClassVar[Optional['Workflow']] = None
+    @staticmethod
+    def DefaultGameWorkflow():
+        '''workflow for default rendering process.'''
+        if not Workflow._DefaultGameWorkflow:    
+            default_game_workflow_path = BUILTIN_WORKFLOW_DIR / 'default_game_workflow.json'
+            Workflow._DefaultGameWorkflow = Workflow.Load(default_game_workflow_path)
+        return Workflow._DefaultGameWorkflow
+    
+    _DefaultBakeWorkflow: ClassVar[Optional['Workflow']] = None
+    @staticmethod
+    def DefaultBakeWorkflow():
+        '''workflow for baking process.'''
+        if not Workflow._DefaultBakeWorkflow:
+            default_bake_workflow_path = BUILTIN_WORKFLOW_DIR / 'default_bake_workflow.json'
+            Workflow._DefaultBakeWorkflow = Workflow.Load(default_bake_workflow_path)
+        return Workflow._DefaultBakeWorkflow
+    
     original_data: dict
     '''the original dict data of the workflow.'''
 
@@ -319,6 +428,16 @@ class Workflow(Dict[str, Any]):
         if ver is None:
             return ver
         return str(ver)
+    
+    @property
+    def stable_renderer_version(self)->Optional[str]:
+        '''Get the stable renderer version of the workflow.'''
+        return self.get('stable_renderer_version')
+    
+    @property
+    def is_stable_renderer_workflow(self)->bool:
+        '''Check if the workflow is a stable renderer workflow.'''
+        return self.stable_renderer_version is not None
     
     @property
     def extra(self)->Optional[dict]:
@@ -345,7 +464,7 @@ class Workflow(Dict[str, Any]):
         '''Get the links between nodes.'''
         return self['links']
     
-    def build_prompt(self)->Tuple['PROMPT', dict]:
+    def build_prompt(self)->Tuple['PROMPT', List[str], dict]:
         '''
         Build the required input parameters for PromptExecutor.execute().
         
@@ -353,18 +472,33 @@ class Workflow(Dict[str, Any]):
             - prompt: the prompt for the execution.
             - extra_data: extra data for the execution.
         '''
-        from comfyUI.types import PROMPT
-        prompt = PROMPT(id=str(uuid4()).replace('-', ''))
-        for node_id, node in self.nodes.items():
+        prompt_dict = {}
+        node_ids = [int(key) for key in self.nodes.keys()]
+        node_ids.sort()
+        node_ids = [str(node_id) for node_id in node_ids]
+        node_ids_to_be_ran = []
+        
+        for node_id in node_ids:
+            node = self.nodes[node_id]
             node_data = {}
             node_data['inputs'] = {param_name: param.value for param_name, param in node.inputs.items()}
             node_data['class_type'] = node.cls_type_name
-            prompt[node_id] = node_data 
+            if hasattr(node.cls_type, 'OUTPUT_NODE') and node.cls_type.OUTPUT_NODE:
+                node_ids_to_be_ran.append(node_id)
+            prompt_dict[node_id] = node_data
         
         extra_data = {}
         extra_data['extra_pnginfo'] = {'workflow': self.original_data}   
 
-        return prompt, extra_data
+        from comfyUI.types import PROMPT
+        prompt = PROMPT(prompt_dict, id=str(uuid4()).replace('-', ''))
+        
+        return prompt, node_ids_to_be_ran, extra_data
+    
+    @overload
+    def __init__(self, json_str: str): ...
+    @overload
+    def __init__(self, *args, **kwargs): ...
 
     def __init__(self, *args, **kwargs):
         if len(args) == 1 and len(kwargs) == 0 and type(args[0]) == str:
@@ -381,6 +515,9 @@ class Workflow(Dict[str, Any]):
             elif versions[1] >= 5:
                 EngineLogger.warning(f'Workflow version {version} may not be supported. Latest supported version is 0.4')
         
+        if not self.is_stable_renderer_workflow:
+            EngineLogger.warning('This workflow is not a stable renderer workflow. Some data may be loaded in wrong way, probably causing errors during execution.')
+        
         if 'links' in self:
             links = {}
             for link in self['links']:
@@ -393,22 +530,34 @@ class Workflow(Dict[str, Any]):
         if 'nodes' not in self:
             raise ValueError('Invalid workflow file, cannot find `nodes`.')
         else:
-            nodes = WorkflowNodeInfo._ParseNodeInfos(self['nodes'], self['links'])
+            nodes = WorkflowNodeInfo._ParseNodeInfos(self['nodes'], self)
             self['nodes'] = nodes # replace the original nodes with the formatted nodes.
         
-
     @classmethod
     def Load(cls, path: Union[str, Path])->'Workflow':
         '''Load a workflow from a file.'''
-        workflow = cls(json.load(open(path, 'r')))
-        return workflow
+        with open(path, 'r') as f:
+            workflow = cls(json.load(f))
+            return workflow
     
     
 __all__ = ['Workflow']
 
 
 if __name__ == '__main__':
-    from common_utils.path_utils import TEMP_DIR, COMFYUI_DIR
-    __file__ = COMFYUI_DIR / 'main.py'  # some comfyUI packages need this to do init.
-    test_workflow_path = TEMP_DIR / 'test_workflow.json'
+    import numpy as np
+    from PIL import Image
+    from common_utils.path_utils import EXAMPLE_WORKFLOWS_DIR, TEMP_DIR
+    test_workflow_path = EXAMPLE_WORKFLOWS_DIR / 'boat-img2img-example.json'
     workflow = Workflow.Load(test_workflow_path)
+    prompt, node_ids_to_be_ran, extra_data = workflow.build_prompt()
+    #print(prompt)
+    #exit()
+    from comfyUI.main import run
+    prompt_executor = run()
+    context = prompt_executor.execute(prompt, node_ids_to_be_ran=node_ids_to_be_ran, extra_data=extra_data)
+    color_img = context.final_output.frame_color
+    img = 255. * color_img[0].cpu().numpy()
+    img_bytes = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
+    saving_path = TEMP_DIR / 'boat_img2img_example.png'
+    img_bytes.save(saving_path)

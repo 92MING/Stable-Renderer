@@ -28,42 +28,14 @@ from common_utils.decorators import class_or_ins_property, prevent_re_init
 from common_utils.data_struct import Event
 from common_utils.cuda_utils import get_cuda_device
 from .managers import *
-from .static.scene import *
-from .static import Color
-
+from .static.enums import EngineMode, EngineStage
+from .static.scene import Scene
+from .static import Color, Workflow
 
 if is_dev_mode():
     np.set_printoptions(suppress=True)
 
-class EngineStage(Enum):
-    '''
-    The stage of engine. It will be changed during the engine running.
-    When u set the property `Stage` in engine, it will invoke the event `_OnEngineStageChanged`.
-    '''
-    
-    INIT = 0
-    
-    BEFORE_PREPARE = 1
-    AFTER_PREPARE = 2
-    
-    BEFORE_FRAME_BEGIN = 3
-    BEFORE_FRAME_RUN = 4
-    BEFORE_FRAME_END = 5
-    
-    BEFORE_RELEASE = 6
-    
-    BEFORE_PAUSE = 7
-    PAUSE = 8
-    
-    ENDED = 9
-    
-    @staticmethod
-    def PreparingStages():
-        return (EngineStage.BEFORE_PREPARE, EngineStage.AFTER_PREPARE)
-    
-    @staticmethod
-    def RunningStages():
-        return (EngineStage.BEFORE_FRAME_BEGIN, EngineStage.BEFORE_FRAME_RUN, EngineStage.BEFORE_FRAME_END )
+
 
 _EngineInstance: Optional['Engine'] = GetOrAddGlobalValue("_ENGINE_SINGLETON", None)    # type: ignore
 _OnEngineStageChanged: Event = GetOrCreateGlobalValue("_ON_ENGINE_STAGE_CHANGED", Event, EngineStage)
@@ -120,24 +92,22 @@ class Engine:
                  mapSavingInterval=12,
                  threadPoolSize=6,
                  target_device: Optional[int]=None,
-                 running_mode: Literal['game', 'editor']='game',
-                 startComfyUI=True,
+                 mode: EngineMode=EngineMode.GAME,
+                 disableComfyUI: bool = True,
+                 workflow: Optional[Workflow] = None,
                  **kwargs):
-
-        EngineLogger.info('Engine is initializing...')
         
-        if startComfyUI:
-            cross_module_cls_dict: dict = GetGlobalValue('__CROSS_MODULE_CLASS_DICT__', None)   # type: ignore
-            has_prompt_executor = True
-            if not cross_module_cls_dict:
-                has_prompt_executor = False
-            elif 'PromptExecutor' not in cross_module_cls_dict:
-                has_prompt_executor = False
-            if not has_prompt_executor:
-                from comfyUI.main import run
-                self._prompt_executor = run()   # this will add `PromptExecutor` to `cross_module_cls_dict` automatically
-            else:
-                self._prompt_executor = cross_module_cls_dict['PromptExecutor']
+        if disableComfyUI:
+            EngineLogger.warn('ComfyUI is disable. This setting is just for debugging. Please make sure you are not in production mode.')
+            self.disableComfyUI = True
+        else:
+            self.disableComfyUI = False
+        self._mode = mode
+        EngineLogger.info(f'Engine start with {mode.name} mode. Initializing...')
+        
+        if not self.disableComfyUI:
+            from comfyUI.main import run
+            self._prompt_executor = run()
 
         if target_device is None:
             target_device = get_cuda_device()
@@ -145,12 +115,11 @@ class Engine:
         
         self._UBO_Binding_Points = {}
         self._debug = debug
-        self._scene = scene
-        self._running_mode: Literal['game', 'editor'] = running_mode.lower()    # type: ignore
+        
         if winTitle is not None:
             title = winTitle
-        elif self._scene is not None:
-            title = self._scene.name
+        elif scene is not None:
+            title = scene.name
         else:
             title = 'Stable Renderer'
 
@@ -186,9 +155,10 @@ class Engine:
                                                   maxFrameCacheCount=maxFrameCacheCount,
                                                   mapSavingInterval=mapSavingInterval,
                                                   threadPoolSize=threadPoolSize,
+                                                  workflow=workflow,
                                                   **find_kwargs_for_manager(DiffusionManager))
         
-        self._sceneManager = SceneManager(self._scene, **find_kwargs_for_manager(SceneManager))
+        self._sceneManager = SceneManager(scene, **find_kwargs_for_manager(SceneManager))
         
         self._resourceManager = ResourcesManager(**find_kwargs_for_manager(ResourcesManager))
         # endregion
@@ -201,9 +171,9 @@ class Engine:
         return _OnEngineStageChanged
     
     @property
-    def RunningMode(self)->Literal['game', 'editor']:
+    def Mode(self):
         '''Running mode of the engine. It can be 'game' or 'editor'. Default is 'game'.'''
-        return self._running_mode
+        return self._mode
     
     @property
     def TargetDevice(self)->int:
@@ -241,7 +211,6 @@ class Engine:
             gl.glGetError() # nothing to do with error, just clear error flag
         except Exception as e:
             EngineLogger.error('GL ERROR: ', glu.gluErrorString(e))
-            
     # endregion
 
     # region managers

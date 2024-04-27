@@ -160,6 +160,18 @@ def get_node_cls_by_name(name: str, namespace: Optional[str]=None, init_nodes_if
                     return None 
         return None
 
+def get_unique_node_types(init_nodes_if_not_yet=False)->Set[str]:
+    from comfyUI.nodes import NODE_CLASS_MAPPINGS
+    if not GetGlobalValue("__COMFYUI_CUSTOM_NODES_INITED__", False):
+        if init_nodes_if_not_yet:
+            from comfyUI.nodes import init_custom_nodes
+            init_custom_nodes()
+            
+    unique_node_types = set()
+    for (node_cls_name, _), node_cls in NODE_CLASS_MAPPINGS.items():
+        if hasattr(node_cls, 'UNIQUE') and node_cls.UNIQUE:
+            unique_node_types.add(node_cls_name)
+    return unique_node_types
 
 __all__ = ['get_comfy_name', 'get_comfy_type_definition', 'get_input_param_type', 'get_node_cls_by_name']
 

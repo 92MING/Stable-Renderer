@@ -52,7 +52,7 @@ export class ComfyApp {
 	constructor() {
 		this.ui = new ComfyUI(this);
 		this.logging = new ComfyLogging(this);
-
+		
 		/**
 		 * List of extensions that are registered with the app
 		 * @type {ComfyExtension[]}
@@ -1553,6 +1553,16 @@ export class ComfyApp {
 		const defs = await api.getNodeDefs();
 		await this.registerNodesFromDefs(defs);
 		await this.#invokeExtensionsAsync("registerCustomNodes");
+		const unique_node_types = await api.getUniqueNodeTypes();
+		LiteGraph.UniqueNodeTypes = [...new Set([...unique_node_types.map((n) => n.toLowerCase())])];
+		LiteGraph.onUniqueNodeDuplicated = (node_type) => {
+			this.ui.dialog.show(`Node type ${node_type} is a unique type, and already exists in the graph`);
+		}
+	}
+
+	async getUniqueNodeTypes() {
+		const unique_node_types = await api.getUniqueNodeTypes();
+		return unique_node_types;
 	}
 
 	/**

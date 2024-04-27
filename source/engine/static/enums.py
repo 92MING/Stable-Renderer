@@ -11,6 +11,47 @@ from OpenGL.constant import Constant as GL_Constant
 from dataclasses import dataclass
 
 
+# region engine
+class EngineMode(Enum):
+    GAME = 0
+    '''only the rendering window (glfw) will be created.'''
+    EDITOR = 1
+    '''the UI editor(PYQT) will be opened. ComfyUI will also be started.'''
+    BAKE = 2
+    '''Baking mode is for baking the StableDiffusion's rendering result into a pack of textures. ComfyUI will also be forced to start in this mode.'''
+
+class EngineStage(Enum):
+    '''
+    The stage of engine. It will be changed during the engine running.
+    When u set the property `Stage` in engine, it will invoke the event `_OnEngineStageChanged`.
+    '''
+    
+    INIT = 0
+    
+    BEFORE_PREPARE = 1
+    AFTER_PREPARE = 2
+    
+    BEFORE_FRAME_BEGIN = 3
+    BEFORE_FRAME_RUN = 4
+    BEFORE_FRAME_END = 5
+    
+    BEFORE_RELEASE = 6
+    
+    BEFORE_PAUSE = 7
+    PAUSE = 8
+    
+    ENDED = 9
+    
+    @staticmethod
+    def PreparingStages():
+        return (EngineStage.BEFORE_PREPARE, EngineStage.AFTER_PREPARE)
+    
+    @staticmethod
+    def RunningStages():
+        return (EngineStage.BEFORE_FRAME_BEGIN, EngineStage.BEFORE_FRAME_RUN, EngineStage.BEFORE_FRAME_END )
+
+__all__ = ['EngineMode', 'EngineStage']
+# endregion
 
 # region render
 class DepthFunc(Enum):
@@ -33,7 +74,7 @@ class RenderOrder(Enum):
     OVERLAY = 3000
     
     
-__all__ = ['RenderOrder', 'DepthFunc']
+__all__.extend(['RenderOrder', 'DepthFunc'])
 # endregion
 
 

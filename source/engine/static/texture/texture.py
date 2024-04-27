@@ -10,7 +10,6 @@ import pycuda
 import pycuda.gl
 import pycuda.driver
 import glm
-import cuda.cudart as cudart
 
 from torch import Tensor
 from pathlib import Path
@@ -23,11 +22,14 @@ from ..enums import *
 from ..color import Color
 from common_utils.decorators import Overload
 from common_utils.debug_utils import EngineLogger
-from common_utils.cuda_utils import *
+from common_utils.math_utils import same_storage_tensor
 
 from typing import TYPE_CHECKING, Union, Optional, Final, Literal
+
 if TYPE_CHECKING:
     from ..shader import Shader
+
+
 
 _SUPPORT_ANISOTROPIC_FILTER = glInitTextureFilterAnisotropicEXT()
 if _SUPPORT_ANISOTROPIC_FILTER:
@@ -96,16 +98,28 @@ class Texture(ResourcesObj):
         
         if share_to_torch and not self.data_type.value.tensor_supported:
             raise Exception(f'The data type {self.data_type} does not support tensor. Cannot share to torch.')
+        
         self._share_to_torch = share_to_torch
-        self._cuda_resource_ptr: Optional[cudart.cudaGraphicsResource_t] = None
         self._tensor: Optional[Tensor] = None
         self._support_gl_share_to_torch = True
-        
+    
     @property
     def textureID(self)->Optional[int]:
         '''The texture id for this texture in OpenGL. It could be None if the texture is not loaded.'''
         assert not self._cleared, 'This texture has been cleared.'
         return self._texID
+    
+    @property
+    def initedTensor(self)->bool:
+        '''If true, the tensor sharing has been inited.'''
+        assert not self._cleared, 'This texture has been cleared.'
+        return self._tensor is not None
+    
+    @property
+    def sentToGPU(self)->bool:
+        '''If true, the texture has been sent to GPU.'''
+        assert not self._cleared, 'This texture has been cleared.'
+        return self._texID is not None
     
     @property
     def share_to_torch(self)->bool:
@@ -362,8 +376,7 @@ class Texture(ResourcesObj):
         assert not self._cleared, 'This texture has been cleared.'
         assert self._share_to_torch, 'This texture is not set to be sharing to torch.'
         assert self.textureID is not None, 'This texture is not yet sent to GPU.'
-        # self._support_gl_share_to_torch = False
-        # return
+        
         if self._tensor is None:
             self._tensor = torch.zeros((self.height, self.width, self.channel_count), 
                                         dtype=self.data_type.value.torch_dtype, 
@@ -380,19 +393,30 @@ class Texture(ResourcesObj):
             self._support_gl_share_to_torch = False
         
         if self.support_gl_share_to_torch:
-            mapping = self._cuda_buffer.map()
-            array = mapping.array(0, 0)
-            self._tensor_copier = pycuda.driver.Memcpy2D()  # type: ignore
-            self._tensor_copier.set_src_array(array)
-            self._tensor_copier.set_dst_device(self._tensor.data_ptr())
-            self._tensor_copier.width_in_bytes = self._tensor_copier.src_pitch = self._tensor_copier.dst_pitch = self.nbytes // self.height
-            self._tensor_copier.height = self.height
-            mapping.unmap()
-    
-    def numpy_data(self, flipY: bool=False)->np.ndarray:
-        '''copy the data of this texture from OpenGL, and return as a numpy array'''
+            # prepare copiers. These copiers are used for copying data between GPU and GPU
+            
+            # for copying data from OpenGL to pytorch
+            self._to_tensor_copier = pycuda.driver.Memcpy2D()  # type: ignore
+            self._to_tensor_copier.width_in_bytes = self._to_tensor_copier.src_pitch = self._to_tensor_copier.dst_pitch = self.nbytes // self.height
+            self._to_tensor_copier.height = self.height
+            self._to_tensor_copier.set_dst_device(self._tensor.data_ptr())
+            
+            # for copying data back from pytorch to OpenGL
+            self._from_tensor_copier = pycuda.driver.Memcpy2D()  # type: ignore
+            self._from_tensor_copier.width_in_bytes = self._from_tensor_copier.src_pitch = self._from_tensor_copier.dst_pitch = self.nbytes // self.height
+            self._from_tensor_copier.height = self.height
+            self._from_tensor_copier.set_src_device(self._tensor.data_ptr())    # src device may change in `set_data` method
+            
+    def numpy_data(self, flipY: bool = True, level: int = 0)->np.ndarray:
+        '''
+        Copy the data of this texture from OpenGL, and return as a numpy array
+        
+        Args:
+            - flipY: If true, the array will be flipped upside down. This is becuz the origin of OpenGL is at the bottom-left corner.
+            - level: The mipmap level of the texture. Default is 0. This is only valid when the texture has mipmap.
+        '''
         self.bind()
-        data = gl.glGetTexImage(gl.GL_TEXTURE_2D, 0, self.format.value.gl_format, self.data_type.value.gl_data_type)
+        data = gl.glGetTexImage(gl.GL_TEXTURE_2D, level, self.format.value.gl_format, self.data_type.value.gl_data_type)
         data = np.frombuffer(data, dtype=self.data_type.value.numpy_dtype)
         data = data.reshape((self.height, self.width, self.channel_count))
         if flipY:
@@ -400,7 +424,7 @@ class Texture(ResourcesObj):
         return data
     
     # from https://github.com/pytorch/pytorch/issues/107112
-    def tensor(self, update:bool=True)->Tensor:
+    def tensor(self, update:bool=True, flip: bool = True)->Tensor:
         '''
         Return the data of this texture in tensor.
         
@@ -409,21 +433,31 @@ class Texture(ResourcesObj):
               
         Args:
             - update: If true, the tensor will be updated from GPU. If false, the tensor will be returned directly if it has been updated.
+            - flip: If true, the tensor will be flipped upside down. This is becuz the origin of OpenGL is at the bottom-left corner.
         '''
         assert not self._cleared, 'This texture has been cleared.'
         assert self._texID, 'This texture is not yet sent to GPU.'
         
         if not update and self._tensor is not None:
+            if flip:
+                return self._tensor.flip(0)
             return self._tensor
         
-        if self._share_to_torch and self.support_gl_share_to_torch:
+        if self.share_to_torch and self.support_gl_share_to_torch:
             mapping = self._cuda_buffer.map()
-            self._tensor_copier(aligned=False)  # this will update self._tensor
+            
+            array = mapping.array(0, 0)
+            self._to_tensor_copier.set_src_array(array)
+            self._to_tensor_copier(aligned=False)  # this will update self._tensor by copying data from GPU to GPU
             torch.cuda.synchronize()
+            
             mapping.unmap()
         else:
             numpy_data = self.numpy_data()
             self._tensor = torch.from_numpy(numpy_data).to(f"cuda:{self.engine.RenderManager.TargetDevice}")
+        
+        if flip:
+            return self._tensor.flip(0)
         return self._tensor # type: ignore
     
     def sendToGPU(self):
@@ -499,7 +533,90 @@ class Texture(ResourcesObj):
         self._cleared = True
         del self
 
-    
+    def set_data(self, 
+                 data: Union[bytes, Tensor, np.ndarray], 
+                 xOffset: int = 0,
+                 yOffset: int = 0,
+                 width: Optional[int] = None,
+                 height: Optional[int] = None):
+        '''Write data to the texture. The data could be bytes, numpy array or torch tensor.'''
+        
+        width = width or (self.width - xOffset)
+        height = height or (self.height - yOffset)
+        self.bind()
+        
+        if isinstance(data, bytes):
+            gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, xOffset, yOffset, width, height, self.format.value.gl_format, self.data_type.value.gl_data_type, data)
+            
+        elif isinstance(data, np.ndarray):
+            if (data.shape[0] != height or data.shape[1] != width):
+                if (data.shape[1] == height and data.shape[0] == width):
+                    data = data.T
+                else:
+                    raise Exception('The data shape should be [height, width, channel_count]. Got: {}'.format(data.shape))
+            
+            if self.channel_count != data.shape[2]:
+                if data.shape[2] < self.channel_count:
+                    if data.shape[2] == 1:
+                        data = np.repeat(data, repeats=self.channel_count, axis=2)
+                    else:
+                        raise Exception('Invalid data shape: {}'.format(data.shape))
+                else:
+                    data = data[:, :, :self.channel_count]
+            
+            if data.dtype != self.data_type.value.numpy_dtype:
+                data = data.astype(self.data_type.value.numpy_dtype)
+            data = data.tobytes()
+            gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, xOffset, yOffset, width, height, self.format.value.gl_format, self.data_type.value.gl_data_type, data)
+            
+        elif isinstance(data, Tensor):
+            if (data.shape[0] != height or data.shape[1] != width):
+                if (data.shape[1] == height and data.shape[0] == width):
+                    data = data.T
+                else:
+                    raise Exception('The data shape should be [height, width, channel_count]. Got: {}'.format(data.shape))
+            
+            if self.channel_count != data.shape[2]:
+                if data.shape[2] < self.channel_count:
+                    if data.shape[2] == 1:
+                        data = data.expand(-1, -1, self.channel_count)
+                    else:
+                        raise Exception('Invalid data shape: {}'.format(data.shape))
+                else:
+                    data = data[:, :, :self.channel_count]
+            
+            if data.dtype != self.data_type.value.torch_dtype:
+                data = data.to(self.data_type.value.torch_dtype)
+            
+            if self.share_to_torch and data.device.type == 'cuda' and self._tensor:    # `self._tensor` is just for disabling Pylance's warning
+                if data.device.index != self.engine.RenderManager.TargetDevice:
+                    data = data.to(f"cuda:{self.engine.RenderManager.TargetDevice}")
+                    
+                self._from_tensor_copier.height = height
+                self._from_tensor_copier.width_in_bytes = self._from_tensor_copier.src_pitch = self._from_tensor_copier.dst_pitch = width * self.channel_count * self.data_type.value.nbytes
+                self._from_tensor_copier.src_x = xOffset
+                self._from_tensor_copier.src_y = yOffset
+                
+                if same_storage_tensor(self._tensor, data): 
+                    self._from_tensor_copier.set_src_device(self._tensor.data_ptr())
+                else:
+                    self._from_tensor_copier.set_src_host(data.flatten().data_ptr())
+                    
+                mapping = self._cuda_buffer.map()
+                
+                array = mapping.array(0, 0)
+                self._from_tensor_copier.set_dst_array(array)
+                self._from_tensor_copier(aligned=False) # copy data from GPU to GPU
+                torch.cuda.synchronize()
+                
+                mapping.unmap()
+                
+            else:   # must copy data from CPU to GPU           
+                data = data.cpu().numpy().tobytes()
+                gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, xOffset, yOffset, width, height, self.format.value.gl_format, self.data_type.value.gl_data_type, data)
+        else:
+            raise Exception('Invalid data type: {}'.format(data))
+        
     @classmethod
     def Load(cls,
              path: Union[str, Path], 
@@ -677,7 +794,6 @@ class Texture(ResourcesObj):
                       data_type=TextureDataType.FLOAT if data_size == 32 else TextureDataType.HALF,
                       share_to_torch=share_to_torch)
         return tex
-
 
 
 

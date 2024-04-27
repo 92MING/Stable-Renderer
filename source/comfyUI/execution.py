@@ -21,8 +21,7 @@ from common_utils.global_utils import is_dev_mode, is_verbose_mode
 from common_utils.type_utils import format_data_for_console_log
 from comfyUI.types import *
 from comfyUI.types._utils import (get_comfy_node_input_type as _get_comfy_node_input_type_name,
-                                  check_input_param_is_list_type as _check_input_param_is_list_origin,
-                                    check_input_param_is_lazy as _check_input_param_is_lazy)
+                                  check_input_param_is_list_type as _check_input_param_is_list_origin)
 from comfyUI.adapters import find_adapter
 
 if TYPE_CHECKING:
@@ -440,14 +439,14 @@ class PromptExecutor:
                                     output_slot_index, 
                                     node_id,
                                     input_param_name,
-                                    PromptExecutor().current_context) # type: ignore
+                                    context) # type: ignore
                             ]
                         if _check_output_param_only_output_to(from_node_id, 
                                                             output_slot_index, 
                                                             node_id, 
                                                             input_param_name, 
                                                             context.prompt):
-                            context.remove_to_be_excuted_node(from_node_id) # will ignore if not in the list
+                            context.remove_from_execute_waitlist(from_node_id) # will ignore if not in the list
                     else:
                         if is_dev_mode() and is_verbose_mode():
                             ComfyUILogger.warn(f'Cannot find output from node `{from_node_type_name}`({from_node_id}) for input `{input_param_name}` of node `{node_cls.__qualname__}`({node_id}). The value will be set to `None`.')
@@ -459,8 +458,16 @@ class PromptExecutor:
                     if not input_param_is_list and isinstance(val, list) and len(val) == 1:
                             val = val[0]
                     if val is not None:
-                        if isinstance(val, Lazy) and not _check_input_param_is_lazy(input_param_name, node_cls):
+                        if isinstance(val, Lazy) and not input_param_name in lazy_inputs:
                             val = val.value
+                        elif not isinstance(val, Lazy) and input_param_name in lazy_inputs:
+                            val = Lazy(from_node_id, 
+                                       output_slot_index, 
+                                       node_id,
+                                       input_param_name,
+                                       context,
+                                       _gotten=True,
+                                       _value=val)
                         
                         from_node_type_name = context.prompt[from_node_id]['class_type']
                         from_node_type = get_node_cls_by_name(from_node_type_name)
@@ -632,7 +639,7 @@ class PromptExecutor:
                                                               current_node_id, 
                                                               input_param_name, 
                                                               prompt):
-                            context.remove_to_be_excuted_node(from_node_id) # will ignore if not in the list
+                            context.remove_from_execute_waitlist(from_node_id) # will ignore if not in the list
                     else:
                         if is_dev_mode() and is_verbose_mode():
                             ComfyUILogger.debug(f"start recursive execute for node `{current_node_type.__qualname__}`({current_node_id})'s input `{input_param_name}` from `{from_node_type_name}`({from_node_id})'s output {input_data[1]}")

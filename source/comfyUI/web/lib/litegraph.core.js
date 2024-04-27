@@ -15,6 +15,7 @@
 
     var LiteGraph = (global.LiteGraph = {
         VERSION: 0.4,
+        STABLE_RENDERER_VERSION: 0.1,
 
         CANVAS_GRID_SIZE: 10,
         
@@ -91,7 +92,7 @@
         TRANSPARENT_TITLE: 2,
         AUTOHIDE_TITLE: 3,
         VERTICAL_LAYOUT: "vertical", // arrange nodes vertically
-
+        
         proxy: null, //used to redirect calls
         node_images_path: "",
 
@@ -103,7 +104,9 @@
         node_types_by_file_extension: {}, //used for dropping files in the canvas
         Nodes: {}, //node types by classname
 		Globals: {}, //used to store vars between graphs
-        TypeMatchings: {}, // contains all acceptable type matchings, e.g. {"TEXTURE":["IMGAE", "LATENT"]} 
+        TypeMatchings: {}, // contains all acceptable type matchings, e.g. {"TEXTURE":["IMAGE", "LATENT"]} 
+        UniqueNodeTypes: [], // used to store the unique node types
+        LGraphInstance: null, // used to store the current graph instance
 
         searchbox_extras: {}, //used to add extra features to the search box
         auto_sort_node_types: false, // [true!] If set to true, will automatically sort node types / categories in the context menus
@@ -135,9 +138,9 @@
 
 		do_add_triggers_slots: false, // [true!] will create and connect event slots when using action/events connections, !WILL CHANGE node mode when using onTrigger (enable mode colors), onExecuted does not need this
 		
-		allow_multi_output_for_events: true, // [false!] being events, it is strongly reccomended to use them sequentially, one by one
+		allow_multi_output_for_events: true, // [false!] being events, it is strongly recommended to use them sequentially, one by one
 
-		middle_click_slot_add_default_node: false, //[true!] allows to create and connect a ndoe clicking with the third button (wheel)
+		middle_click_slot_add_default_node: false, //[true!] allows to create and connect a node clicking with the third button (wheel)
 		
 		release_link_on_empty_shows_menu: false, //[true!] dragging a link to empty space will open a menu, add from list, search or defaults
 		
@@ -406,6 +409,23 @@
                 type.prototype[name] = func;
             }
         },
+        
+        hasNodeType: function(node_type) {
+            if (this.LGraphInstance){
+                if (this.LGraphInstance._nodes) {
+                    let node_type_lower = node_type.toLowerCase();
+                    if (this.registered_node_types[node_type]) {
+                        for (var i = 0; i < this.LGraphInstance._nodes.length; i++) {
+                            var node = this.LGraphInstance._nodes[i];
+                            if (node.type.toLowerCase() == node_type_lower) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            return false;
+        },
 
         /**
          * Create a node of a given type with a name. The node is not attached to any graph yet.
@@ -416,6 +436,20 @@
          */
 
         createNode: function(type, title, options) {
+            let type_lower = type.toLowerCase();
+            if (this.LGraphInstance){
+                if (this.LGraphInstance._nodes) {
+                    if (this.UniqueNodeTypes.includes(type_lower)) {
+                        if (this.hasNodeType(type)) {
+                            if (this.onUniqueNodeDuplicated) {
+                                this.onUniqueNodeDuplicated(type_lower);
+                            }
+                            return null;
+                        }
+                    }
+                }
+            }
+            
             var base_class = this.registered_node_types[type];
             if (!base_class) {
                 if (LiteGraph.debug) {
@@ -796,9 +830,12 @@
         this.list_of_graphcanvas = null;
         this.clear();
 
+        LiteGraph.LGraphInstance = this;
+
         if (o) {
             this.configure(o);
         }
+        
     }
 
     global.LGraph = LiteGraph.LGraph = LGraph;
@@ -2172,7 +2209,8 @@
             groups: groups_info,
             config: this.config,
 			extra: this.extra,
-            version: LiteGraph.VERSION
+            version: LiteGraph.VERSION,
+            stable_renderer_version: LiteGraph.STABLE_RENDERER_VERSION,
         };
 
 		if(this.onSerialize)
@@ -2616,6 +2654,18 @@
 	                o.widgets_values[i] = this.widgets[i].value;
 				else
 					o.widgets_values[i] = null;
+            }
+
+            // special dict for StableRenderer's workflow loading.
+            // since the origin serialization has no key information(just a list of widget values), we need to store the key information in a separate dict.
+            o.widget_kw_values = {};
+            for (var i = 0; i < this.widgets.length; ++i) {
+                if(this.widgets[i]){
+                    o.widget_kw_values[this.widgets[i].name] = this.widgets[i].value;
+                }
+                else{
+                    o.widget_kw_values[this.widgets[i].name] = null;
+                }
             }
         }
 

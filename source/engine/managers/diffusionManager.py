@@ -2,15 +2,20 @@ import cv2
 import os.path
 import numpy as np
 import multiprocessing
+
 from typing import TYPE_CHECKING, Optional
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
+from common_utils.debug_utils import EngineLogger
 from common_utils.path_utils import *
-from common_utils.global_utils import is_game_mode
+from common_utils.global_utils import is_verbose_mode, is_dev_mode
 from .manager import Manager
-from engine.static import Workflow
+from engine.static.workflow import Workflow
+from engine.static.enums import EngineMode
+
 if TYPE_CHECKING:
+    from comfyUI.types import FrameData
     from comfyUI.execution import PromptExecutor
 
 
@@ -22,7 +27,8 @@ class DiffusionManager(Manager):
                  needOutputMaps=False,
                  maxFrameCacheCount=24,
                  mapSavingInterval=12,
-                 threadPoolSize=None,):
+                 threadPoolSize=None,
+                 workflow: Optional[Workflow] = None):
         '''
         :param needOutputMaps: if output maps (id, color, depth...) result to disk
         :param maxFrameCacheCount: how many frames data should be stored in each
@@ -38,8 +44,21 @@ class DiffusionManager(Manager):
             threadPoolSize = multiprocessing.cpu_count()
         self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize) # for saving maps asynchronously
         self._outputPath = get_new_map_output_dir(create_if_not_exists=False)
-    
+        
+        if not workflow:
+            if self.engine.Mode == EngineMode.GAME:
+                workflow = Workflow.DefaultGameWorkflow()
+            elif self.engine.Mode == EngineMode.BAKE:
+                workflow = Workflow.DefaultBakeWorkflow()
+                
+        self._workflow = workflow
+        
     # region properties
+    @property
+    def DefaultWorkflow(self)->Optional[Workflow]:
+        '''the current running workflow'''
+        return self._workflow
+    
     @property
     def PromptExecutor(self)->"PromptExecutor":
         '''
@@ -185,11 +204,31 @@ class DiffusionManager(Manager):
     # endregion
 
     # region diffusion
-    def SubmitPrompt(self):
+    def SubmitPrompt(self, frameData: "FrameData", workflow: Optional[Workflow]=None):
         '''submit prompt to comfyUI's prompt executor'''
-        frameData = self.engine.RenderManager.frameData
+        if not self.engine.PromptExecutor:
+            if is_dev_mode():
+                raise ValueError('No prompt executor is create(It maybe due to engine running with `startComfyUI=False`).')
+            else:
+                EngineLogger.error('No prompt executor is create(It maybe due to engine running with `startComfyUI=False`). Please ensure to run engine with comfyUI in production mode.')
+                return None
+        
+        workflow = workflow or self.DefaultWorkflow
+        if not workflow:
+            if is_dev_mode():
+                raise ValueError('No workflow is set. Please set a workflow before submitting prompt.')
+            else:
+                EngineLogger.error('No workflow is set. Please set a workflow before submitting prompt.')
+                return None
+        
+        if not self.engine.IsLooping:
+            EngineLogger.error('Engine is not looping. FrameData is not available. Cannot submit prompt to prompt executor.')
+            return
+        
+        prompt, extra_data = workflow.build_prompt()
+        context = self.engine.PromptExecutor.execute(prompt=prompt, frame_data=frameData, extra_data=extra_data)
 
-    
+        return context
     # endregion
     
 

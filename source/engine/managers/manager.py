@@ -1,10 +1,11 @@
 import traceback
 from enum import Enum
-from typing import TYPE_CHECKING, ClassVar, List
+from typing import TYPE_CHECKING, ClassVar, List, Type
 from common_utils.global_utils import GetOrCreateGlobalValue, GetGlobalValue
 from common_utils.debug_utils import EngineLogger
+from common_utils.type_utils import is_empty_method
 if TYPE_CHECKING:
-    from ..engine import Engine
+    from engine.engine import Engine
 
 class ManagerFuncType(Enum):
     Prepare = 'prepare'
@@ -16,6 +17,15 @@ class ManagerFuncType(Enum):
 _MANAGERS = GetOrCreateGlobalValue('_ENGINE_MANAGERS', dict)
 _MANAGER_FUNCS: dict[ManagerFuncType, List['Manager']] = GetOrCreateGlobalValue('_ENGINE_MANAGER_FUNCS', dict)
 _MANAGER_CLSES = GetOrCreateGlobalValue('_ENGINE_MANAGER_CLSES', dict)
+
+def _check_manager_has_debug_method(manager_cls: Type["Manager"], method_name:str):
+    origin_method = getattr(Manager, method_name)
+    sub_manager_method = getattr(manager_cls, method_name)
+    if origin_method is sub_manager_method:
+        return False
+    if is_empty_method(sub_manager_method):
+        return False
+    return True
 
 class _ManagerMeta(type):
     def __new__(cls, *args, **kwargs):
@@ -33,14 +43,27 @@ class Manager(metaclass=_ManagerMeta):
     Public methods should be started with capital letter.
     '''
 
-    _engine: ClassVar['Engine'] = None
-    _singleton: ClassVar['Manager'] = None
+    _Engine: ClassVar['Engine'] = None  # type: ignore
+    _Singleton: ClassVar['Manager'] = None  # type: ignore
 
     PrepareFuncOrder: ClassVar[int] = 0
     ReleaseFuncOrder: ClassVar[int] = 0
     FrameBeginFuncOrder: ClassVar[int] = 0
     FrameRunFuncOrder: ClassVar[int] = 0
     FrameEndFuncOrder: ClassVar[int] = 0
+    
+    _HasDebugOnFrameBeginMethod: ClassVar[bool] = False    
+    _HasDebugOnFrameRunMethod: ClassVar[bool] = False
+    _HasDebugOnFrameEndMethod: ClassVar[bool] = False
+    _HasDebugPrepareMethod: ClassVar[bool] = False
+    _HasDebugReleaseMethod: ClassVar[bool] = False
+
+    def __init_subclass__(cls):
+        cls._HasDebugOnFrameBeginMethod = _check_manager_has_debug_method(cls, 'debug_mode_on_frame_begin')
+        cls._HasDebugOnFrameRunMethod = _check_manager_has_debug_method(cls, 'debug_mode_on_frame_run')
+        cls._HasDebugOnFrameEndMethod = _check_manager_has_debug_method(cls, 'debug_mode_on_frame_end')
+        cls._HasDebugPrepareMethod = _check_manager_has_debug_method(cls, 'debug_mode_prepare')
+        cls._HasDebugReleaseMethod = _check_manager_has_debug_method(cls, 'debug_mode_release')
 
     def __new__(cls, *args, **kwargs):
         cls_name = cls.__qualname__
@@ -50,7 +73,7 @@ class Manager(metaclass=_ManagerMeta):
             manager_ins.__class__.__init__ = lambda *a, **kw: None  # prevent re-initialization
         else:
             manager_ins = super().__new__(cls)
-            cls._singleton = manager_ins
+            cls._Singleton = manager_ins
             _MANAGERS[cls_name] = manager_ins
 
         return manager_ins
@@ -66,7 +89,6 @@ class Manager(metaclass=_ManagerMeta):
         '''In debug mode, this function will be called instead of "on_frame_begin".'''
         self.on_frame_begin() # override this function to debug
 
-
     def on_frame_run(self):
         '''Will be called after "on_frame_begin"'''
         pass
@@ -75,7 +97,6 @@ class Manager(metaclass=_ManagerMeta):
         '''In debug mode, this function will be called instead of "on_frame_run".'''
         self.on_frame_run()
 
-
     def on_frame_end(self):
         '''Will be called after "on_frame_run"'''
         pass
@@ -83,7 +104,6 @@ class Manager(metaclass=_ManagerMeta):
     def debug_mode_on_frame_end(self):
         '''In debug mode, this function will be called instead of "on_frame_end".'''
         self.on_frame_end()
-
 
     def prepare(self):
         '''prepare will be call before the loop begins.'''
@@ -101,12 +121,11 @@ class Manager(metaclass=_ManagerMeta):
         '''In debug mode, this function will be called instead of "release".'''
         self.release()
 
-
     @property
     def engine(self)->'Engine':
-        if not hasattr(self, '_engine') or self._engine is None:
-            self.__class__._engine = GetGlobalValue('_ENGINE_SINGLETON')
-        return self._engine
+        if not hasattr(self, '_engine') or self._Engine is None:
+            self.__class__._Engine = GetGlobalValue('_ENGINE_SINGLETON')    # type: ignore
+        return self._Engine
 
     # region internal functions
     @staticmethod
@@ -115,7 +134,7 @@ class Manager(metaclass=_ManagerMeta):
             _MANAGER_FUNCS[ManagerFuncType.Prepare] = list(sorted(_MANAGERS.values(), key=lambda m: m.PrepareFuncOrder))
         for manager in _MANAGER_FUNCS[ManagerFuncType.Prepare]:
             try:
-                manager.prepare() if not manager.engine.IsDebugMode else manager.debug_mode_prepare()
+                manager.prepare() if not (manager.engine.IsDebugMode and manager._HasDebugPrepareMethod) else manager.debug_mode_prepare()
             except Exception as e:
                 EngineLogger.warn(f'Warning: Error when running "prepare" of {manager.__class__.__qualname__}. Err msg: {e}, traceback:{traceback.format_exc()}')
 
@@ -125,7 +144,7 @@ class Manager(metaclass=_ManagerMeta):
             _MANAGER_FUNCS[ManagerFuncType.FrameBegin] = list(sorted(_MANAGERS.values(), key=lambda m: m.FrameBeginFuncOrder))
         for manager in _MANAGER_FUNCS[ManagerFuncType.FrameBegin]:
             try:
-                manager.on_frame_begin() if not manager.engine.IsDebugMode else manager.debug_mode_on_frame_begin()
+                manager.on_frame_begin() if not (manager.engine.IsDebugMode and manager._HasDebugOnFrameBeginMethod) else manager.debug_mode_on_frame_begin()
             except Exception as e:
                 EngineLogger.warn(f'Warning: Error when running "on_frame_begin" of {manager.__class__.__qualname__}. Err msg: {e}, traceback:{traceback.format_exc()}')
 
@@ -135,7 +154,7 @@ class Manager(metaclass=_ManagerMeta):
             _MANAGER_FUNCS[ManagerFuncType.FrameRun] =list(sorted(_MANAGERS.values(), key=lambda m: m.FrameRunFuncOrder))
         for manager in _MANAGER_FUNCS[ManagerFuncType.FrameRun]:
             try:
-                manager.on_frame_run() if not manager.engine.IsDebugMode else manager.debug_mode_on_frame_run()
+                manager.on_frame_run() if not (manager.engine.IsDebugMode and manager._HasDebugOnFrameRunMethod) else manager.debug_mode_on_frame_run()
             except Exception as e:
                 EngineLogger.warn(f'Warning: Error when running "on_frame_run" of {manager.__class__.__qualname__}. Err msg: {e}, traceback:{traceback.format_exc()}')
 
@@ -145,7 +164,7 @@ class Manager(metaclass=_ManagerMeta):
             _MANAGER_FUNCS[ManagerFuncType.FrameEnd] = list(sorted(_MANAGERS.values(), key=lambda m: m.FrameEndFuncOrder))
         for manager in _MANAGER_FUNCS[ManagerFuncType.FrameEnd]:
             try:
-                manager.on_frame_end() if not manager.engine.IsDebugMode else manager.debug_mode_on_frame_end()
+                manager.on_frame_end() if not (manager.engine.IsDebugMode and manager._HasDebugOnFrameEndMethod) else manager.debug_mode_on_frame_end()
             except Exception as e:
                 EngineLogger.warn(f'Warning: Error when running "on_frame_end" of {manager.__class__.__qualname__}.Err msg: {e}, traceback:{traceback.format_exc()}')
 
@@ -155,7 +174,7 @@ class Manager(metaclass=_ManagerMeta):
             _MANAGER_FUNCS[ManagerFuncType.Release] = list(sorted(_MANAGERS.values(), key=lambda m: m.ReleaseFuncOrder))
         for manager in _MANAGER_FUNCS[ManagerFuncType.Release]:
             try:
-                manager.release() if not manager.engine.IsDebugMode else manager.debug_mode_release()
+                manager.release() if not (manager.engine.IsDebugMode and manager._HasDebugReleaseMethod) else manager.debug_mode_release()
             except Exception as e:
                 EngineLogger.warn(f'Warning: Error when running "release" of {manager.__class__.__qualname__}. Err msg: {e}, traceback:{traceback.format_exc()}')
     # endregion

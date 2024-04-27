@@ -1333,12 +1333,15 @@ class SetLatentNoiseMask:
         return (s,)
 
 def common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent, denoise=1.0, disable_noise=False, start_step=None, last_step=None, force_full_denoise=False):
-    latent_image = latent["samples"]
-    if disable_noise:
-        noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
+    latent_image: torch.Tensor = latent["samples"]
+    if latent.get('noise'):
+        noise = latent['noise']
     else:
-        batch_inds = latent["batch_index"] if "batch_index" in latent else None
-        noise = comfy.sample.prepare_noise(latent_image, seed, batch_inds)
+        if disable_noise:
+            noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
+        else:
+            batch_inds: Optional[List[int]] = latent["batch_index"] if "batch_index" in latent else None
+            noise = comfy.sample.prepare_noise(latent_image, seed, batch_inds)
 
     noise_mask = None
     if "noise_mask" in latent:
@@ -1380,12 +1383,7 @@ def custom_ksampler(model: "ModelPatcher",
             noise = latent["noise"]
         case _:
             raise ValueError(f"Invalid noise option: {noise_option}")
-    # if disable_noise:
-    #     noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
-    # else:
-    #     batch_inds = latent["batch_index"] if "batch_index" in latent else None
-    #     noise = comfy.sample.prepare_noise(latent_image, seed, batch_inds)
-
+   
     noise_mask = None
     if "noise_mask" in latent:
         noise_mask = latent["noise_mask"]
@@ -2073,7 +2071,7 @@ def load_custom_nodes(raise_err=False):
     _init_node_clses()
 
 def init_custom_nodes(raise_err=is_dev_mode()):
-    ComfyUILogger.debug(f'(raise={raise_err})initializing custom nodes................')
+    ComfyUILogger.debug(f'(raise={raise_err})initializing custom nodes...')
     if GetOrAddGlobalValue("__COMFYUI_CUSTOM_NODES_INITED__", False):
         return
     extras_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy_extras")

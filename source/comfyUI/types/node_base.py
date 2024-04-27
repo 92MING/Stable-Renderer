@@ -5,14 +5,13 @@ All sub classes will be registered automatically.
 import re
 
 from inspect import isabstract, signature, Parameter, Signature
-from abc import abstractmethod
-from typing import (Type, _ProtocolMeta, ClassVar, Optional, Any, Tuple, Union, Dict, get_args, List, runtime_checkable, Protocol,
-                    TypeAlias, Literal)
+from typing import (Type, _ProtocolMeta, ClassVar, Optional, Any, Tuple, Union, Dict, get_args, List, runtime_checkable, Protocol)
 from collections import OrderedDict
 
+from common_utils.global_utils import should_run_web_server, is_verbose_mode, is_dev_mode
 from common_utils.base_clses import CrossModuleABC
 from common_utils.debug_utils import ComfyUILogger
-from common_utils.type_utils import get_origin, is_empty_method
+from common_utils.type_utils import get_origin, is_empty_method, format_data_for_console_log
 
 from .basic import *
 
@@ -72,9 +71,12 @@ class ComfyUINode(Protocol, metaclass=_ComfyUINodeMeta):
     
     OUTPUT_NODE: bool
     '''
-    Means the node have values that shown on UI.
-    Too strange, the name and the meaning are not matched...
+    This defines that the node is an `output`, when prompt is built, it will be the first `to be executed` node.
+    Each prompt should have at least one output node. 
     '''
+    
+    UNIQUE: bool = False
+    '''whether the node is unique or not. If True, only one instance of this node can be created.'''
 
     @classmethod
     def INPUT_TYPES(cls) -> Dict[NodeInputParamType, Dict[str, Tuple[Union[str, type], dict]]]: # type: ignore
@@ -184,6 +186,10 @@ class AdvancedNodeBase(CrossModuleABC):
     The description of this node. 
     This is for registration. If not defined, it will try using __doc__ of the class.
     '''
+    Unique: ClassVar[bool] = False
+    '''Whether this node is unique or not. If True, only one instance of this node can be created.'''
+    IsOutputNode: ClassVar[bool] = False
+    '''Refers to `OUTPUT_NODE` in `ComfyUINode`'''
     
     _CallSig: ClassVar[Signature]
     '''The signature of `__call__` method. This is for registration.'''
@@ -219,6 +225,8 @@ class AdvancedNodeBase(CrossModuleABC):
     
     _HasIsChangedMethod: ClassVar[bool]
     '''Whether this node has override `IsChanged` method or not. This is for registration.'''
+    _HasServerModeCall: ClassVar[bool]
+    '''Whether this node has override `__server_call__` method or not. This is for registration.'''
     _HasValidateInputMethod: ClassVar[bool]
     '''Whether this node has override `ValidateInput` method or not. This is for registration.'''
     _HasUIReturn: ClassVar[bool]
@@ -233,53 +241,77 @@ class AdvancedNodeBase(CrossModuleABC):
     _RealComfyUINodeCls: ClassVar[Type[ComfyUINode]]
     '''The real registration node class for ComfyUI'''
     
+    def __new__(cls, *args, **kwargs):
+        if cls.Unique:
+            if not hasattr(cls, '_UniqueInstance'):
+                cls_origin_init = cls.__init__
+                def new_init(self, *args, **kwargs):
+                    if hasattr(self.__class__, '_UniqueInstance'):
+                        return  # prevent re-initialization
+                    cls_origin_init(self, *args, **kwargs)
+                    self.__class__._UniqueInstance = self
+                setattr(cls, '__init__', new_init)
+                
+                return super().__new__(cls)
+            else:
+                return cls._UniqueInstance  # type: ignore
+        
+        return super().__new__(cls)
+    
     @classmethod
     def _InitFields(cls):
         # init input fields
         cls._InputFields = {param_name: AnnotatedParam(param) for param_name, param in cls._CallSig.parameters.items()}
         
         # init return fields
-        return_anno = cls._CallSig.return_annotation
-        if return_anno == Parameter.empty:
-            return_anno = Any
-        origin = get_origin(return_anno)
-        
         return_field_names: List[Optional[str]] = []
         return_fields: List[AnnotatedParam] = []
         
-        if origin:  # special types, e.g. Annotated, Literal
+        return_anno = cls._CallSig.return_annotation
+        if return_anno != Parameter.empty:  # means no return
+            origin = get_origin(return_anno)
+            if origin:  # special types, e.g. Annotated, Literal
 
-            if origin == tuple:   # possible: multiple return values/ 1 named return value / tuple[type, ...](means array)
-                return_types = get_args(return_anno)
-                if len(return_types) == 1:
-                    raise TypeError(f'Unexpected return annotation: {return_anno}')
-                
-                if len(return_types) == 2 and return_types[1] == Ellipsis:  # treat as array return values
-                    real_type = return_types[0]
-                    if isinstance(real_type, AnnotatedParam):
-                        real_type.tags.add('list')
-                        return_fields.append(real_type)
-                        return_field_names.append(real_type.param_name or "")
-                    else:
-                        return_fields.append(AnnotatedParam(real_type, tags=['list']))
-                        return_field_names.append("")
-                
-                else:   # several return values
-                    for ret_type in return_types:
-                        return_fields.append(AnnotatedParam(ret_type))
-                        return_field_names.append(return_fields[-1].param_name or "")
+                if origin == tuple:   # possible: multiple return values/ 1 named return value / tuple[type, ...](means array)
+                    return_types = get_args(return_anno)
+                    if len(return_types) == 1:
+                        raise TypeError(f'Unexpected return annotation: {return_anno}')
+                    
+                    if len(return_types) == 2 and return_types[1] == Ellipsis:  # treat as array return values
+                        real_type = return_types[0]
+                        if isinstance(real_type, AnnotatedParam):
+                            real_type.tags.add('list')
+                            return_fields.append(real_type)
+                            return_field_names.append(real_type.param_name or "")
+                        else:
+                            return_fields.append(AnnotatedParam(real_type, tags=['list']))
+                            return_field_names.append("")
+                    
+                    else:   # several return values
+                        for ret_type in return_types:
+                            return_fields.append(AnnotatedParam(ret_type))
+                            return_field_names.append(return_fields[-1].param_name or "")
+                else:
+                    return_fields.append(AnnotatedParam(return_anno))    # type: ignore
+                    return_field_names.append(return_fields[-1].param_name or "")
             else:
-                return_fields.append(AnnotatedParam(return_anno))    # type: ignore
-                return_field_names.append(return_fields[-1].param_name or "")
-        else:
-            return_fields.append(AnnotatedParam(return_anno))    # type: ignore
-            return_field_names.append(return_fields[-1].param_name or "")
-        
+                if issubclass(return_anno, UI):  # UI return value
+                    # when ValueT is None, means no return value(only UI return value)
+                    if return_anno.ValueT is not None:  # type: ignore
+                        return_fields.append(AnnotatedParam(return_anno.ValueT, tags=['ui']))    # type: ignore    
+                        return_field_names.append(return_fields[-1].param_name or "")
+                else:
+                    return_fields.append(AnnotatedParam(return_anno))    # type: ignore
+                    return_field_names.append(return_fields[-1].param_name or "")
+            
         cls._HasUIReturn = any(('ui' in field.tags) for field in return_fields)
         cls._ListInputs = tuple([name for name, field in cls._InputFields.items() if 'list' in field.tags])
         cls._HasListInput = bool(cls._ListInputs)
         cls._ReturnFields = tuple(zip(return_field_names, return_fields))   # named return values
         cls._ListTypeReturns = tuple([('list' in t.tags) for _, t in cls._ReturnFields])
+        if cls._HasUIReturn:
+            if is_dev_mode() and is_verbose_mode():
+                ComfyUILogger.debug(f'Node class:{cls.__qualname__} has UI return.')
 
     @classmethod
     def _InitBasicInfo(cls):
@@ -325,8 +357,10 @@ class AdvancedNodeBase(CrossModuleABC):
         if not desc:
             if hasattr(cls, '__doc__'):
                 desc = cls.__doc__ or ''
-            elif hasattr(cls.__call__, '__doc__'):
+            if not desc and hasattr(cls.__call__, '__doc__'):
                 desc = cls.__call__.__doc__ or ''
+            if not desc and cls._HasServerModeCall and hasattr(cls.__server_call__, '__doc__'):
+                desc = cls.__server_call__.__doc__ or ''
         cls._Description = desc  # type: ignore
     
     @classmethod
@@ -380,19 +414,21 @@ class AdvancedNodeBase(CrossModuleABC):
         setattr(newcls, '__IS_ADVANCED_NODE__', True)
         setattr(newcls, '__ADVANCED_NODE_CLASS__', cls)
         
-        def newcls_init(newcls_self):
-            newcls_self.__real_node_instance__ = cls()  # create the real instance of this node cls when the newcls instance is created
-        setattr(newcls, '__init__', newcls_init)
-        
         if cls._Category:
             setattr(newcls, 'CATEGORY', cls._Category)
         if cls._Description:
             setattr(newcls, 'DESCRIPTION', cls._Description)
-        if cls._HasUIReturn:
-            setattr(newcls, 'OUTPUT_NODE', cls._HasUIReturn)    # `OUTPUT_NODE` is a flag for ComfyUI to shown on UI
+        if cls.IsOutputNode or cls._HasUIReturn:
+            setattr(newcls, 'OUTPUT_NODE', True)    # UI node must be output node
         setattr(newcls, 'NAMESPACE', cls.NameSpace if hasattr(cls, 'NameSpace') else "")
-        
+        setattr(newcls, 'UNIQUE', cls.Unique)
         setattr(newcls, 'RETURN_TYPES', tuple(cls._ComfyOutputTypes))
+        
+        def newcls_init(newcls_self):
+            # create the real instance of this node cls when the newcls instance is created
+            # unique cls will be created only once(but this is only available for the advanced node type)
+            newcls_self.__real_node_instance__ = cls()
+        setattr(newcls, '__init__', newcls_init)
         
         if any(cls._ComfyOutputNames):    # just check the first name is not None is enough(should be all or none)
             setattr(newcls, 'RETURN_NAMES', cls._ComfyOutputNames)
@@ -423,12 +459,15 @@ class AdvancedNodeBase(CrossModuleABC):
         
         def real_calling(ins, *args, **kwargs):
             proper_kwargs = proper_input(ins, *args, **kwargs)
-            result = cls.__call__(**proper_kwargs)  # 'self' is included in the `proper_kwargs`
+            if cls._HasServerModeCall:
+                result = cls.__server_call__(**proper_kwargs)
+            else:
+                result = cls.__call__(**proper_kwargs)  # 'self' is included in the `proper_kwargs`
 
             if len(cls._ComfyOutputTypes) == 1 and not isinstance(result, tuple):
                 result = (result,)
             if cls._HasUIReturn:
-                return cls._MakeUIRetDict(result)    # type: ignore
+                return cls._MakeUIReturnDict(result)    # type: ignore
             else:
                 return result
             
@@ -467,10 +506,19 @@ class AdvancedNodeBase(CrossModuleABC):
         else:
             cls._IsAbstract = isabstract(cls)
         
+        if should_run_web_server:
+            cls._HasServerModeCall = cls.__server_call__ != AdvancedNodeBase.__server_call__
+            if cls._HasServerModeCall:
+                cls._HasServerModeCall = not is_empty_method(cls.__server_call__)
+        else:
+            cls._HasServerModeCall = False
+        if is_dev_mode() and is_verbose_mode():
+            ComfyUILogger.debug(f'Node {cls.__qualname__} _IsAbstract={cls._IsAbstract}, _HasServerModeCall={cls._HasServerModeCall}')
+        
         cls._InitBasicInfo()
         
         if not cls._IsAbstract:
-            cls._CallSig = signature(cls.__call__)
+            cls._CallSig = signature(cls.__call__) if not cls._HasServerModeCall else signature(cls.__server_call__)
             
             cls._InitFields()
             
@@ -493,9 +541,9 @@ class AdvancedNodeBase(CrossModuleABC):
     
     # region internal use
     @classmethod
-    def _MakeUIRetDict(cls, values: Tuple[Any]):
+    def _MakeUIReturnDict(cls, values: Tuple[Any]):
         '''return a dictionary for comfyUI to show the return values labeled with "UI"'''
-        ret = {"ui":{}, "result": values}
+        ret = {"ui":{}, "result": []}
         ui_dict = {}
         ui_ret_count = 0
         for i, (_, field) in enumerate(cls._ReturnFields):
@@ -504,22 +552,31 @@ class AdvancedNodeBase(CrossModuleABC):
                 if isinstance(ui_val, UI):
                     if not ui_val.ui_name in ui_dict:
                         ui_dict[ui_val.ui_name] = []
-                    while len(ui_dict[ui_val.ui_name]) < ui_ret_count:
-                        ui_dict[ui_val.ui_name].append(None)
-                    ui_dict[ui_val.ui_name].append(ui_val._params)  # e.g. {'ui': {images: [{...}]}}    
                     
-                    for extra_param_key, extra_param_val in ui_val._extra_params.items():
+                    if isinstance(ui_val.ui_value, (list, tuple)):  # please don't use list/tuple type for single value
+                        ui_dict[ui_val.ui_name].extend(ui_val.ui_value)
+                    else:
+                        ui_dict[ui_val.ui_name].append(ui_val.ui_value)  # e.g. {'ui': {images: [{...}]}}    
+                    
+                    for extra_param_key, extra_param_val in ui_val.extra_params.items():
                         if not extra_param_key in ui_dict:
                             ui_dict[extra_param_key] = []
-                        while len(ui_dict[extra_param_key]) < ui_ret_count:
-                            ui_dict[extra_param_key].append(None)
-                        ui_dict[extra_param_key].append(extra_param_val)
+                        if isinstance(extra_param_val, (list, tuple)):
+                            ui_dict[extra_param_key].extend(extra_param_val)
+                        else:
+                            ui_dict[extra_param_key].append(extra_param_val)
+                    ret['result'].append(ui_val.value)
                 else:
-                    ComfyUILogger.warning(f'UI return value should be instance of `UI`, got {values[i]}')
+                    ComfyUILogger.warning(f'UI return value should be instance of `UI`, got {format_data_for_console_log(values[i])}')
+                    ret['result'].append(values[i])
                     
                 ui_ret_count += 1
+            else:
+                ret['result'].append(values[i])
         
         ret['ui'].update(ui_dict)
+        if is_dev_mode() and is_verbose_mode():
+            ComfyUILogger.debug(f'({cls.__qualname__}) UI return values: {ui_dict}')
         return ret
         
     @staticmethod
@@ -535,7 +592,6 @@ class AdvancedNodeBase(CrossModuleABC):
         return tuple(subclses)
     # endregion
     
-    @abstractmethod
     def __call__(self, *args, **kwargs):
         '''
         Each node should implement `__call__` method to define its behavior.
@@ -562,6 +618,9 @@ class AdvancedNodeBase(CrossModuleABC):
                         )... 
         ```
         '''
+
+    def __server_call__(self, *args, **kwargs):
+        '''the `should_run_web_server`=True, this method will be called instead of `__call__`(in case you have defined it).'''
 
     def IsChanged(self, *args, **kwargs)->Any:
         '''
@@ -593,7 +652,7 @@ class StableRendererNodeBase(AdvancedNodeBase):
     Category = 'stable-renderer'
     
     NameSpace = "StableRenderer"
-
+    
 
 
 __all__.extend(['AdvancedNodeBase', 'StableRendererNodeBase'])

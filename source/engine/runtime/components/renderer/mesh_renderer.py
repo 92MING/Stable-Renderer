@@ -1,16 +1,21 @@
 from functools import partial
-from typing import Iterable, Union, Dict, Sequence
+from typing import Iterable, Union, Sequence, Optional, TYPE_CHECKING
 from .renderer import Renderer
-from engine.static.material import Material, Material_MTL
-from engine.static.mesh import Mesh, Mesh_OBJ
+
+if TYPE_CHECKING:
+    from engine.static.material import Material, Material_MTL
+    from engine.static.mesh import Mesh
 
 
 class MeshRenderer(Renderer):
     '''Renderer for mesh object. It will draw the mesh with the materials.'''
 
-    def __init__(self, gameObj, enable=True,
-                 materials: Union[Material, Iterable[Material]] = None,
-                 mesh: Mesh = None, ):
+    def __init__(self, 
+                 gameObj, 
+                 enable=True,
+                 materials: Union["Material", Iterable["Material"], None] = None,
+                 mesh: Optional["Mesh"] = None
+                 ):
         super().__init__(gameObj=gameObj, enable=enable, materials=materials)
         self._mesh = mesh
 
@@ -22,14 +27,16 @@ class MeshRenderer(Renderer):
     def mesh(self, value):
         self._mesh = value
 
-    def load_MTL_Materials(self, mats: Union[Material_MTL, Sequence[Material_MTL]]):
+    def load_MTL_Materials(self, mats: Union["Material_MTL", Sequence["Material_MTL"]]):
         '''
         Load MTL materials and add as materials.
         This method is for loading the case that .obj file contains MTL materials.
 
         Args:
-            mats: a sequnce of materials. The key is the MTL name, and the value is the Material_MTL object.
+            mats: a sequence of materials. The key is the MTL name, and the value is the Material_MTL object.
         '''
+        from engine.static.material import Material, Material_MTL
+        from engine.static.mesh import Mesh_OBJ
         if self._mesh is None:
             raise ValueError('No mesh loaded. Cannot load MTL materials.')
 

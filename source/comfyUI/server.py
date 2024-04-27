@@ -32,7 +32,7 @@ from common_utils.debug_utils import ComfyUILogger
 from comfy.cli_args import args
 from app.user_manager import UserManager
 
-from comfyUI.types._utils import get_comfy_type_definition
+from comfyUI.types._utils import get_comfy_type_definition, get_unique_node_types
 if TYPE_CHECKING:
     from execution import PromptQueue
     from comfyUI.types import ComfyUINode
@@ -113,7 +113,6 @@ class PromptServer:
         return PromptServer()   # will get the singleton instance if it's already created
     
     def __init__(self, loop: Optional[AbstractEventLoop]=None):
-        
         if loop is None:
             loop = GetOrCreateGlobalValue("__COMFYUI_EVENT_LOOP__", lambda: asyncio.new_event_loop())
             
@@ -262,6 +261,10 @@ class PromptServer:
             else:
                 return web.Response(status=400)
 
+        @routes.get('/unique_node_types')
+        async def _get_unique_node_types(request):
+            return _validate_response(list(get_unique_node_types()))
+        
         @routes.post("/upload/image")
         async def upload_image(request):
             '''

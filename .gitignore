@@ -1,6 +1,7 @@
 # folders
 .DS_Store/
 __pycache__/
+/.vs
 /sd/models/
 .cache/
 /sample/
@@ -23,6 +24,7 @@ venv/
 *.log
 *.bin
 *.ckpt
+*.py[cod]
 *.pth
 *.pt
 *.safetensors
@@ -34,9 +36,12 @@ venv/
 /source/comfyUI/web/extensions/*
 !/source/comfyUI/web/extensions/logging.js.example
 !/source/comfyUI/web/extensions/core/
+!/source/comfyUI/input/example.png
 /source/comfyUI/tests-ui/data/object_info.json
 /source/comfyUI/user/
 /source/comfyUI/temp/
+/source/comfyUI/tmp/
+/source/comfyUI/.conda/
 /source/comfyUI/output/
 /source/comfyUI/input/
 /source/comfyUI/custom_nodes/

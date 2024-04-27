@@ -1,22 +1,24 @@
 '''The base class of all renderers. A renderer is a component that can draw to screen. It contains a list of materials.'''
 
-from typing import Iterable, Union, List, Tuple
+from typing import Iterable, Union, List, Tuple, TYPE_CHECKING, Optional
 from functools import reduce
 
 from ...component import Component
-from engine.static.material import Material
+
+if TYPE_CHECKING:
+    from engine.static.material import Material
 
 
 class Renderer(Component):
     def __init__(self, gameObj, enable=True,
-                 materials:Union[Material, Iterable[Material]] = None):
+                 materials:Union["Material", Iterable["Material"], None] = None):
         super().__init__(gameObj, enable)
-        self._materials:List[Material] = []
+        self._materials:List["Material"] = []
         if materials is not None:
             self.addMaterial(materials)
 
     @property
-    def material(self)->Material:
+    def material(self)->Optional["Material"]:
         '''Return the first material in the list. If the list is empty, return None.'''
         return self._materials[0] if len(self._materials) > 0 else None
     
@@ -29,11 +31,11 @@ class Renderer(Component):
             self._materials[0] = value
 
     @property
-    def materials(self)->Tuple[Material, ...]:
+    def materials(self)->Tuple["Material", ...]:
         '''Return the materials list.'''
         return tuple(self._materials)
 
-    def addMaterial(self, material:Union[Material, Iterable[Material]], duplicateCheck=False):
+    def addMaterial(self, material:Union["Material", Iterable["Material"]], duplicateCheck=False):
         '''
         Add a material to the list.
         :param material: The material to add (Can be a Material object or a list of Material objects).
@@ -48,7 +50,7 @@ class Renderer(Component):
             else:
                 self._materials.append(material)
 
-    def removeMaterial(self, material:Material):
+    def removeMaterial(self, material:"Material"):
         '''
         Remove a material from the list. If the material is not in the list, do nothing.
         If there are more than one same materials in the list, only remove the last one.

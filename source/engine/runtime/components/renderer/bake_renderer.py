@@ -3,10 +3,10 @@
 from functools import partial
 from typing import Iterable, Union, TYPE_CHECKING, Optional
 from .mesh_renderer import MeshRenderer
-from engine.static.material import Material
-from engine.static.mesh import Mesh
+
 if TYPE_CHECKING:
     from engine.static.mesh import Mesh
+    from engine.static.material import Material
 
 class BakeRenderer(MeshRenderer):
     '''Renderer for AI-Baking.'''
@@ -20,14 +20,14 @@ class BakeRenderer(MeshRenderer):
     def __init__(self, 
                  gameObj, 
                  enable=True,
-                 materials: Union[Material, Iterable[Material]] = None,
-                 mesh: Mesh = None, 
+                 materials: Union["Material", Iterable["Material"], None] = None,
+                 mesh: Optional["Mesh"] = None, 
                  baking_k: int = 3,
                  ):
         super().__init__(gameObj=gameObj, enable=enable, materials=materials, mesh=mesh)
         self.baking_k = baking_k
         
-    def _renderTask(self, modelM, material: Material, mesh: "Mesh", slot: Optional[int]=None):
+    def _renderTask(self, modelM, material: "Material", mesh: "Mesh", slot: Optional[int]=None):
         '''For submitting to RenderManager'''
         self.engine.RuntimeManager.UpdateUBO_ModelMatrix(modelM)
         material.use()

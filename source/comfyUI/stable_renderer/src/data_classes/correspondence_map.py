@@ -4,19 +4,45 @@ import re
 import pickle
 import random
 import numpy as np
+import torch
 
+from attr import attrs, attrib
 from pathlib import Path
 from tqdm import tqdm
-from typing import Callable, Tuple, Union, List, TypeVar, Type, Optional
+from typing import Callable, Tuple, Union, List, TypeVar, Type, Optional, TYPE_CHECKING
 
 from .common import Rectangle
 from common_utils.debug_utils import DefaultLogger as logu
-from common_utils.os_utils import is_windows, is_mac
+from common_utils.system_utils import is_windows, is_mac
 from common_utils.data_struct import SortableElement
 from common_utils.path_utils import MAP_OUTPUT_DIR
 
-T = TypeVar('T', bound='CorrespondenceMap')
+if TYPE_CHECKING:
+    from engine.static.texture import Texture
 
+
+
+@attrs
+class IDMap:
+    '''IDMap represents the ID information of each frame, which is used to build the correspondence map(a packed version of IDMap)'''
+    
+    origin_tex: "Texture" = attrib()
+    '''the original texture containing the ID information'''
+    frame_index: int = attrib()
+    '''the frame index of this map'''
+
+    @property
+    def tensor(self)->torch.Tensor:
+        '''get the info data in tensor format'''
+        return self.origin_tex.tensor(update=True, flip=True)
+
+    @property
+    def ndarray(self)->numpy.ndarray:
+        '''get the info data in numpy array format'''
+        return self.origin_tex.numpy_data(flipY=True)
+        
+
+T = TypeVar('T', bound='CorrespondenceMap')
 
 # TODO: Same number of dropout over the time steps
 # TODO: Use the same noise map?
@@ -286,4 +312,4 @@ class CorrespondenceMap:
         self._correspondence_map = merged_corr_map
 
 
-__all__ = ['CorrespondenceMap']
+__all__ = ['IDMap', 'CorrespondenceMap']

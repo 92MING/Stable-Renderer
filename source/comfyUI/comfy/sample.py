@@ -13,23 +13,23 @@ import comfy.utils
 
 SelfDefinedModelPatcher = Any
 
-def prepare_noise(latent_image, seed, noise_inds=None):
+def prepare_noise(latent_image: torch.Tensor, seed: int, noise_indexes=None):
     """
     creates random noise given a latent image and a seed.
     optional arg skip can be used to skip and discard x number of noise generations for a given seed
     """
     generator = torch.manual_seed(seed)
-    if noise_inds is None:
+    if noise_indexes is None:
         return torch.randn(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, generator=generator, device="cpu")
     
-    unique_inds, inverse = np.unique(noise_inds, return_inverse=True)
+    unique_inds, inverse = np.unique(noise_indexes, return_inverse=True)
     noises = []
     for i in range(unique_inds[-1]+1):
         noise = torch.randn([1] + list(latent_image.size())[1:], dtype=latent_image.dtype, layout=latent_image.layout, generator=generator, device="cpu")
         if i in unique_inds:
             noises.append(noise)
     noises = [noises[i] for i in inverse]
-    noises = torch.cat(noises, axis=0)
+    noises = torch.cat(noises, axis=0)  # type: ignore
     return noises
 
 def prepare_mask(noise_mask, shape, device):
@@ -166,21 +166,27 @@ def sample(model: comfy.model_patcher.ModelPatcher,
     noise = noise.to(model.load_device)
     latent_image = latent_image.to(model.load_device)
 
-    sampler = comfy.samplers.KSampler(real_model, steps=steps, device=model.load_device, sampler=sampler_name, scheduler=scheduler, denoise=denoise, model_options=model.model_options)
+    ksampler = comfy.samplers.KSampler(real_model, 
+                                       steps=steps, 
+                                       device=model.load_device, 
+                                       sampler=sampler_name,    # sampler method, e.g. "euler" 
+                                       scheduler=scheduler, 
+                                       denoise=denoise, 
+                                       model_options=model.model_options)
 
-    samples = sampler.sample(noise, 
-                             positive_copy, 
-                             negative_copy, 
-                             cfg=cfg, 
-                             latent_image=latent_image, 
-                             start_step=start_step, 
-                             last_step=last_step, 
-                             force_full_denoise=force_full_denoise, 
-                             denoise_mask=noise_mask, 
-                             sigmas=sigmas, 
-                             callbacks=callbacks, 
-                             disable_pbar=disable_pbar, 
-                             seed=seed)
+    samples = ksampler.sample(noise, 
+                              positive_copy, 
+                              negative_copy, 
+                              cfg=cfg, 
+                              latent_image=latent_image, 
+                              start_step=start_step, 
+                              last_step=last_step, 
+                              force_full_denoise=force_full_denoise, 
+                              denoise_mask=noise_mask, 
+                              sigmas=sigmas, 
+                              callbacks=callbacks, 
+                              disable_pbar=disable_pbar, 
+                              seed=seed)
     samples = samples.to(comfy.model_management.intermediate_device())
 
     cleanup_additional_models(models)

@@ -7,7 +7,7 @@ if _STABLE_RENDERER_PROJ_PATH not in sys.path:
     sys.path.insert(0, _STABLE_RENDERER_PROJ_PATH)
 
 from common_utils.debug_utils import ComfyUILogger
-from common_utils.global_utils import GetOrCreateGlobalValue, is_game_mode
+from common_utils.global_utils import GetOrCreateGlobalValue, is_game_mode, is_dev_mode, is_verbose_mode
 from common_utils.system_utils import get_available_port, check_port_is_using
 
 import comfy.options
@@ -125,6 +125,8 @@ def run()->execution.PromptExecutor:
 
                 context = e.execute(item[2], prompt_id, item[3], item[4])
                 context.outputs_ui = {k: v for k, v in context.outputs_ui.items() if v}
+                if is_dev_mode() and is_verbose_mode():
+                    ComfyUILogger.print("Execution UI outputs:", context.outputs_ui)
                 need_gc = True
                 q.task_done(item_id=item_id,
                             outputs_ui=context.outputs_ui,
@@ -203,7 +205,7 @@ def run()->execution.PromptExecutor:
                     ComfyUILogger.debug("Adding extra search path", x, full_path)
                     folder_paths.add_model_folder_path(x, full_path)
 
-    if args.temp_directory: # TODO: changed to put tmp dir to the project tmp dir instead of comfyUI's tmp dir
+    if args.temp_directory: 
         temp_dir = os.path.join(os.path.abspath(args.temp_directory), "temp")
         ComfyUILogger.debug(f"Setting temp directory to: {temp_dir}")
         folder_paths.set_temp_directory(temp_dir)

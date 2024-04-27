@@ -34,6 +34,8 @@ class SimpleVideoCombine(StableRendererNodeBase):
     def __call__(
         self,
         images: IMAGE,
+        alpha_threshold: FLOAT(min=0, max=1, step=0.01) = 0.5,
+        enable_alpha_threshold: bool = True,
         frame_rate: INT(min=1, step=1) = 8,  # type: ignore
         loop_count: INT(min=0, max=100, step=1) = 0,  # type: ignore
         filename_prefix: str = "",
@@ -54,78 +56,22 @@ class SimpleVideoCombine(StableRendererNodeBase):
             pingpong: Whether to add a pingpong effect to the output gif(play the gif in reverse after playing it forward)
             save_output: Whether to save the output gif.
         '''
-        
-        # get output information
-        output_dir = (folder_paths.get_output_directory() if save_output else folder_paths.get_temp_directory())
-        
-        full_output_folder, filename, _, subfolder, _ = folder_paths.get_save_image_path(filename_prefix, output_dir)
-        output_files = []
-
-        metadata = PngInfo()
-        video_metadata = {}
-        if prompt is not None:
-            metadata.add_text("prompt", json.dumps(prompt))
-            video_metadata["prompt"] = prompt
-        if extra_pnginfo is not None:
-            for x in extra_pnginfo:
-                metadata.add_text(x, json.dumps(extra_pnginfo[x]))
-                video_metadata[x] = extra_pnginfo[x]
-        metadata.add_text("CreationTime", datetime.datetime.now().isoformat(" ")[:19])
-        
-        # comfy counter workaround
-        max_counter = 0
-
-        # Loop through the existing files
-        matcher = re.compile(fr"{re.escape(filename)}_(\d+)\D*\..+")
-        for existing_file in os.listdir(full_output_folder):
-            # Check if the file matches the expected format
-            match = matcher.fullmatch(existing_file)
-            if match:
-                # Extract the numeric portion of the filename
-                file_counter = int(match.group(1))
-                # Update the maximum counter value if necessary
-                if file_counter > max_counter:
-                    max_counter = file_counter
-
-        # Increment the counter by 1 to get the next available value
-        counter = max_counter + 1
-        
-        # save first frame as png to keep metadata
-        file = f"{filename}_{counter:05}.png"
-        file_path = os.path.join(full_output_folder, file)
-        Image.fromarray(_tensor_to_bytes(images[0])).save(
-            file_path,
-            pnginfo=metadata,
-            compress_level=4,
-        )
-        output_files.append(file_path)
-
-        image_kwargs = {}
-        image_kwargs['disposal'] = 2
-
-        file = f"{filename}_{counter:05}.gif"
-        file_path = os.path.join(full_output_folder, file)
-        images_bytes = _tensor_to_bytes(images)
-        if pingpong:
-            images_bytes = np.concatenate((images_bytes, images_bytes[-2:0:-1]))  # type: ignore
-        frames = [Image.fromarray(f) for f in images_bytes]
-        # Use pillow directly to save an animated image
-        frames[0].save(
-            file_path,
-            format='GIF',
-            save_all=True,
-            append_images=frames[1:],
-            duration=round(1000 / frame_rate),
-            loop=loop_count,
-            compress_level=4,
-            **image_kwargs
-        )
-        output_files.append(file_path)
-
-        return UIImage(images, 
-                       filename=file, 
-                       subfolder=subfolder, 
-                       type="output" if save_output else "temp",
-                       animated=True)
+        if enable_alpha_threshold:
+            # check if has alpha channel, if yes, if alpha is less than threshold, set it to 0
+            for i in range(len(images)):
+                if images[i].mode == 'RGBA':
+                    images[i] = images[i][..., :3] * (images[i][..., 3:] > alpha_threshold)
+                else:   # add alpha channel to tensor
+                    images[i] = torch.cat([images[i], torch.ones_like(images[i][:, :, :1])], dim=-1)
+                    
+        return UIImage(images,
+                       type='temp' if not save_output else 'output',
+                       frame_rate=frame_rate,
+                       loop_count=loop_count,
+                       prefix=filename_prefix,
+                       pingpong=pingpong,
+                       animated=True,
+                       prompt=prompt,
+                       png_info=extra_pnginfo)
         
 __all__ = ['SimpleVideoCombine']

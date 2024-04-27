@@ -7,5 +7,3 @@ from .control import *
 from .renderer import *
 
 from .light import *
-
-from .orbit import *

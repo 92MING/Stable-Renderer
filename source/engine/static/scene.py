@@ -32,6 +32,7 @@ class Scene(NamedObj):
         else:
             # TODO: implement this
             raise NotImplementedError
+        
     def deserialize(self, source:str):
         '''Deserialize this scene from source str.'''
         lines = source.split('\n')

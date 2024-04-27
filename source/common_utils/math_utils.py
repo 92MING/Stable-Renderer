@@ -1,5 +1,6 @@
 import numba
 import numpy as np
+from torch import Tensor
 from typing import Callable
 
 def pre_compile_njit(*args):
@@ -44,5 +45,14 @@ def calculate_tangent(center_point_xyz: np.ndarray,
                      f * (deltaUV2[1] * edge1[2] - deltaUV1[1] * edge2[2])])
 
 
+def same_storage_tensor(x: Tensor, y: Tensor):
+    '''
+    check if two tensors are having the same saving address
+    From: https://discuss.pytorch.org/t/any-way-to-check-if-two-tensors-have-the-same-base/44310/2
+    '''
+    x_ptrs = set(e.data_ptr() for e in x.view(-1))
+    y_ptrs = set(e.data_ptr() for e in y.view(-1))
+    return (x_ptrs <= y_ptrs) or (y_ptrs <= x_ptrs)
 
-__all__ = ['calculate_tangent']
+
+__all__ = ['pre_compile_njit', 'calculate_tangent', 'same_storage_tensor']

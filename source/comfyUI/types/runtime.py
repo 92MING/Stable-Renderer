@@ -6,19 +6,38 @@ from attr import attrs, attrib
 from dataclasses import dataclass
 from common_utils.debug_utils import ComfyUILogger
 from common_utils.global_utils import is_dev_mode, is_verbose_mode
-from common_utils.type_utils import get_cls_name, NameCheckMetaCls, valueTypeCheck
-from common_utils.decorators import singleton, class_property, class_or_ins_property, Overload
+from common_utils.type_utils import get_cls_name, NameCheckMetaCls
+from common_utils.decorators import singleton, class_property, class_or_ins_property
 
 from ._utils import get_node_cls_by_name
-
+from .hidden import PROMPT, FrameData, BakingData, HIDDEN
+    
 if TYPE_CHECKING:
+    from .basic import IMAGE
     from .node_base import ComfyUINode
-    from .hidden import PROMPT, FrameData, BakingData
     from comfyUI.execution import PromptExecutor
-    from comfyUI.adapters import Adapter
 
 @attrs
-class InferenceContext:
+class InferenceOutput:
+    '''The output of an inference process(when running through engine).'''
+    
+    frame_color: "IMAGE" = attrib(default=None)
+    '''The final color output of this frame.'''
+
+
+@attrs
+class InferenceContext(HIDDEN): # InferenceContext is also a hidden value
+    '''
+    Inference context is the context across the whole single inference process.
+    For each `PromptExecutor.execute` call, a new InferenceContext will be created,
+    and each function during the execution will receive this context as the first argument.
+    
+    This is also the context for hidden types to find out their hidden values during execution,
+    by passing context to the `GetHiddenValue` function.
+    
+    In engine's rendering loop, this is also the final output in DiffusionManager.SubmitPrompt.
+    Useful values can be gotten directly from this context.
+    '''
     
     @class_or_ins_property  # type: ignore
     def _executor(cls_or_ins)-> 'PromptExecutor':
@@ -62,6 +81,9 @@ class InferenceContext:
     success:bool = attrib(default=False)
     '''Whether the execution is successful.'''
     
+    final_output: InferenceOutput = attrib(default=None)
+    '''the final output for `DiffusionManager.SubmitPrompt`.'''
+    
     def node_is_waiting_to_execute(self, node_id: Union[str, int])->bool:
         node_id = str(node_id)
         for (_, id) in self.to_be_executed:
@@ -69,7 +91,7 @@ class InferenceContext:
                 return True
         return False
     
-    def remove_to_be_excuted_node(self, node_id: Union[str, int]):
+    def remove_from_execute_waitlist(self, node_id: Union[str, int]):
         node_id = str(node_id)
         for (_, id) in tuple(self.to_be_executed):
             if id == node_id:
@@ -126,6 +148,11 @@ class InferenceContext:
     def destroy(self):
         if self.old_prompt:
             self.old_prompt.destroy()   # current prompt no need to be destroyed, it will be destroyed by the context
+
+    @classmethod
+    def GetHiddenValue(cls, context: "InferenceContext"):
+        return context  # just return the context itself
+
 
 @singleton(cross_module_singleton=True)
 class NodePool(Dict[Tuple[str, str], "ComfyUINode"]):
@@ -391,13 +418,20 @@ class NodeInputs(Dict[str, Union[NodeBindingParam, Any]], metaclass=NameCheckMet
         for key, value in tuple(self.items()):
             param_type = all_param_dict[key][0] # (type, param info)
             converted_to_binding = False
-            if isinstance(value, list):
+            
+            if isinstance(value, NodeBindingParam):
+                if key not in self._links:
+                    self._links[key] = []
+                self._links[key].append(value)
+        
+            elif isinstance(value, list):
                 if self._should_convert_to_bind_type(value):
                     self[key] = NodeBindingParam(value)
                     if key not in self._links:
                         self._links[key] = []
                     self._links[key].append(self[key])
                     converted_to_binding = True
+            
             if not converted_to_binding:
                 if isinstance(param_type, type):
                     if hasattr(param_type, "__ComfyLoad__"):
@@ -719,7 +753,7 @@ SamplerCallback: TypeAlias = Union[
 '''callback when a inference step is finished''' 
 
 
-__all__ = ['InferenceContext', 'SamplingCallbackContext', 'SamplerCallback',
+__all__ = ['InferenceOutput', 'InferenceContext', 'SamplingCallbackContext', 'SamplerCallback',
                 
             'NodePool', 'NodeBindingParam', 'NodeInputs', 'NodeOutputs', 'NodeOutputs_UI',
             

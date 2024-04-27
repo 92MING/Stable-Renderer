@@ -22,16 +22,20 @@ PROJECT_DIR = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 SOURCE_DIR = PROJECT_DIR / 'source'
 '''source directory, for all source code.'''
+
 ENGINE_DIR = SOURCE_DIR / 'engine'
 '''engine directory, for all engine code.'''
 SHADER_DIR = ENGINE_DIR / 'shaders'
 '''shader directory, for all .glsl code.'''
+BUILTIN_WORKFLOW_DIR = ENGINE_DIR / 'workflows' 
+'''builtin workflow directory, for all builtin workflow code.'''
+
 COMFYUI_DIR = SOURCE_DIR / 'comfyUI'
 '''comfyui directory, for all comfyui code.'''
 UI_DIR = SOURCE_DIR / 'ui'
 '''ui directory, for ui interface source code.'''
 
-__all__.extend(['PROJECT_DIR', 'SOURCE_DIR', 'ENGINE_DIR', 'SHADER_DIR', 'COMFYUI_DIR', 'UI_DIR',])
+__all__.extend(['PROJECT_DIR', 'SOURCE_DIR', 'ENGINE_DIR', 'SHADER_DIR', 'BUILTIN_WORKFLOW_DIR', 'COMFYUI_DIR', 'UI_DIR',])
 
 RESOURCES_DIR = PROJECT_DIR / 'resources'
 '''resources directory, for obj, shader, texture, etc.'''
@@ -39,8 +43,9 @@ EXAMPLE_3D_MODEL_DIR = RESOURCES_DIR / 'example-3d-models'
 '''3d model directory, contains all example 3d model files for quick test.'''
 EXAMPLE_MAP_OUTPUT_DIR = RESOURCES_DIR / 'example-map-outputs'
 '''example map output directory, contains all example map output files for quick test.'''
+EXAMPLE_WORKFLOWS_DIR = RESOURCES_DIR / 'example-workflows'
 
-__all__.extend(['RESOURCES_DIR', 'EXAMPLE_3D_MODEL_DIR', 'EXAMPLE_MAP_OUTPUT_DIR',])
+__all__.extend(['RESOURCES_DIR', 'EXAMPLE_3D_MODEL_DIR', 'EXAMPLE_MAP_OUTPUT_DIR', 'EXAMPLE_WORKFLOWS_DIR'])
 
 TEMP_DIR = PROJECT_DIR / 'tmp'
 '''temp directory, for temporary files/ test codes. This folder will not be pushed to git.'''
@@ -92,20 +97,40 @@ def get_map_output_dir(day:int, index:int, month:Optional[int]=None, year:Option
 
 
 
-_comfy_output_dir = None
-
-def get_comfyUI_output_dir(time: Optional[datetime] = None)->Path:
+def get_comfyUI_output_dir(time: Optional[datetime] = None, create: Optional[bool]=None)->Path:
     '''
     Get output dir for comfyUI. 
     Folder is named with the time. If not specified, use current time.
+    
+    Args:
+        - time: Optional[datetime], default None. The time to use as the folder name.
+        - create: Optional[bool], default None. The default value will depends on whether `time` is specified. If specified, default to False. If not specified, default to True.
     '''
-    global _comfy_output_dir
+    from common_utils.global_utils import GetGlobalValue, SetGlobalValue
+    
     if not time:
-        time = datetime.now()
-    if not _comfy_output_dir:
+        if create is None:
+            create = False
+        if out_dir:= GetGlobalValue('__COMFY_OUTPUT_DIR__'):
+            if create:
+                os.makedirs(out_dir, exist_ok=True)
+            return out_dir
+        else:
+            time = datetime.now()
+            _comfy_output_dir = Path(os.path.join(COMFYUI_OUTPUT_DIR, time.strftime('%Y-%m-%d_%H-%M-%S')))
+            if create:
+                os.makedirs(_comfy_output_dir, exist_ok=True)
+            SetGlobalValue('__COMFY_OUTPUT_DIR__', _comfy_output_dir)
+            return _comfy_output_dir
+    else:
+        if create is None:
+            create = False
+            
         _comfy_output_dir = Path(os.path.join(COMFYUI_OUTPUT_DIR, time.strftime('%Y-%m-%d_%H-%M-%S')))
-        os.makedirs(_comfy_output_dir, exist_ok=True)
-    return _comfy_output_dir
+        if create:
+            os.makedirs(_comfy_output_dir, exist_ok=True)
+        
+        return _comfy_output_dir
 
 
 

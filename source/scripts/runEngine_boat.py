@@ -1,7 +1,3 @@
-import torch
-import math
-torch.cuda.current_device()
-
 import os, sys
 source_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(source_dir)
@@ -13,12 +9,9 @@ from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
 from engine.runtime.components import CameraController, HelicalOrbit
-from engine.static import Material, Mesh, Texture, DefaultTextureType, GLFW_Key
+from engine.static import (Material, DefaultTextureType, Mesh, Texture, GLFW_Key)
 from common_utils.path_utils import EXAMPLE_3D_MODEL_DIR
 from common_utils.spherical_cache import ViewPoint
-
-import json
-from pydantic_core import to_jsonable_python
 
 
 if __name__ == '__main__':
@@ -118,8 +111,3 @@ if __name__ == '__main__':
             needOutputMaps=False,
             startComfyUI=False,
             fixedUpdateMaxFPS=60,)
-    with open('historical_pos.json', 'w') as f:
-        print(Sample.DiffusionManager._output_path)
-        json.dump(HelicalOrbitWrapper.historical_pos, f, default=to_jsonable_python)
-        print(len(HelicalOrbitWrapper.historical_pos))
-        

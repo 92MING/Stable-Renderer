@@ -199,6 +199,11 @@ class ComfyApi extends EventTarget {
 		return await resp.json();
 	}
 
+	async getUniqueNodeTypes(){
+		const resp = await this.fetchApi("/unique_node_types", { cache: "no-store" });
+		return await resp.json();
+	}
+
 	/**
 	 *
 	 * @param {number} number The index at which to queue the prompt, passing -1 will insert the prompt at the front of the queue

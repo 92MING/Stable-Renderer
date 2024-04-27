@@ -237,14 +237,6 @@ class RenderManager(Manager):
         gl.glDrawBuffer(gl.GL_COLOR_ATTACHMENT0)
         self.BindFrameBuffer(0)
         
-        from comfyUI.types import FrameData
-        self.frameData = FrameData(colorMap=self.colorFBOTex,
-                                   idMap=self.idFBOTex,
-                                   posMap=self.posFBOTex,
-                                   normalAndDepthMap=self.normal_and_depth_FBOTex,
-                                   noiseMap=self.noiseFBOTex)
-        '''frame data for comfyUI. Its an singleton instance.'''
-
     def _init_light_buffers(self):
         self._lightShadowFBO = gl.glGenFramebuffers(1)
         self.BindFrameBuffer(self._lightShadowFBO)
@@ -535,7 +527,7 @@ class RenderManager(Manager):
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT) # type: ignore
         self._execute_render_task()
-
+    
     def on_frame_run(self):
         # normal render
         self.BindFrameBuffer(self._gBuffer)
@@ -543,13 +535,9 @@ class RenderManager(Manager):
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT) # type: ignore
         self._execute_render_task()  # depth test will be enabled in this function
         
-        colorData = self.colorFBOTex.numpy_data(flipY=True)
-        #colorData = self.colorFBOTex.update_tensor().cpu().numpy()
-        
-        # output data to SD
-        
         # output map data for debug
         if self.engine.DiffusionManager.ShouldOutputFrame:    
+            colorData = self.colorFBOTex.numpy_data(flipY=True)
             idData = self.idFBOTex.numpy_data(flipY=True)
             posData = self.posFBOTex.numpy_data(flipY=True)
             
@@ -570,18 +558,22 @@ class RenderManager(Manager):
             diffuseManager.OutputCannyMap(colorData)
         
         # get data back from SD
-        # TODO: load the color data back to self._gBuffer_color_and_depth_texture texture, i.e. colorData = ...
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self.colorFBOTex.textureID)
-        gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, 
-                           self.engine.WindowManager.WindowWidth, 
-                           self.engine.WindowManager.WindowHeight, 
-                           self.colorFBOTex.format.value.gl_format,
-                           self.colorFBOTex.data_type.value.gl_data_type,
-                           colorData.tobytes())
-        # TODO: update color pixel datas, i.e. pixelDict[id] = (oldColor *a + newColor *b), newColor = inverse light intensity of the pixel color
-        # TODO: replace corresponding color pixel datas with color data from color dict
-
-        # defer render: normal light effect apply
+        if not self.engine.disableComfyUI:
+            from comfyUI.types import FrameData
+            frameData = FrameData(frame_index= self.engine.RuntimeManager.FrameCount,
+                                  _color_map=self.colorFBOTex,
+                                  _id_map=self.idFBOTex,
+                                  _pos_map=self.posFBOTex,
+                                  _normal_and_depth_map=self.normal_and_depth_FBOTex,
+                                  _noise_map=self.noiseFBOTex)
+            context = self.engine.DiffusionManager.SubmitPrompt(frameData)
+            if not context:
+                raise ValueError("DiffusionManager.SubmitPrompt() returns None. Skip rendering process.")
+            inference_result = context.final_output
+            new_color_data = inference_result.frame_color
+            self.colorFBOTex.set_data(new_color_data)
+            
+        # defer rendering
         gl.glDisable(gl.GL_DEPTH_TEST)
         self.BindFrameBuffer(self._postProcessFBO)  # output to post process FBO
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self.CurrentScreenTexture, 0)
