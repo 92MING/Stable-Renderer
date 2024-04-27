@@ -1,7 +1,7 @@
 :root {
 	--fg-color: #000;
 	--bg-color: #fff;
-	--comfy-menu-bg: #353535;
+	--comfy-menu-bg: #1d1d1f;
 	--comfy-input-bg: #222;
 	--input-text: #ddd;
 	--descrip-text: #999;
@@ -94,7 +94,7 @@ body {
 	cursor: pointer;
 }
 .comfy-menu-hamburger div {
-	height: 3px;
+	height: 4px;
 	width: 100%;
 	border-radius: 20px;
 	background-color: white;
@@ -103,20 +103,21 @@ body {
 .comfy-menu {
 	font-size: 15px;
 	position: absolute;
-	top: 50%;
-	right: 0;
+	top: 0%;
+	right: 0%;
 	text-align: center;
 	z-index: 999;
 	width: 170px;
 	display: flex;
 	flex-direction: column;
+	justify-content: center;
 	align-items: center;
 	color: var(--descrip-text);
 	background-color: var(--comfy-menu-bg);
-	font-family: sans-serif;
+	font-family: 'Open Sans', sans-serif;
 	padding: 10px;
-	border-radius: 0 8px 8px 8px;
-	box-shadow: 3px 3px 8px rgba(0, 0, 0, 0.4);
+	border-radius: 8px 0px 8px 8px;
+	box-shadow: 3px 3px 8px rgb(34 33 33 / 82%);
 }
 
 .comfy-menu-header {

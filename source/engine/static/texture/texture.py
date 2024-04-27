@@ -397,13 +397,13 @@ class Texture(ResourcesObj):
             
             # for copying data from OpenGL to pytorch
             self._to_tensor_copier = pycuda.driver.Memcpy2D()  # type: ignore
-            self._to_tensor_copier.width_in_bytes = self._to_tensor_copier.src_pitch = self._to_tensor_copier.dst_pitch = self.nbytes // self.height
+            self._to_tensor_copier.width_in_bytes = self._to_tensor_copier.src_pitch = self._to_tensor_copier.dst_pitch = self.width * self.channel_count * self.data_type.value.nbytes
             self._to_tensor_copier.height = self.height
             self._to_tensor_copier.set_dst_device(self._tensor.data_ptr())
             
             # for copying data back from pytorch to OpenGL
             self._from_tensor_copier = pycuda.driver.Memcpy2D()  # type: ignore
-            self._from_tensor_copier.width_in_bytes = self._from_tensor_copier.src_pitch = self._from_tensor_copier.dst_pitch = self.nbytes // self.height
+            self._from_tensor_copier.width_in_bytes = self._from_tensor_copier.src_pitch = self._from_tensor_copier.dst_pitch = self.width * self.channel_count * self.data_type.value.nbytes
             self._from_tensor_copier.height = self.height
             self._from_tensor_copier.set_src_device(self._tensor.data_ptr())    # src device may change in `set_data` method
             
@@ -445,19 +445,17 @@ class Texture(ResourcesObj):
         
         if self.share_to_torch and self.support_gl_share_to_torch:
             mapping = self._cuda_buffer.map()
-            
             array = mapping.array(0, 0)
             self._to_tensor_copier.set_src_array(array)
             self._to_tensor_copier(aligned=False)  # this will update self._tensor by copying data from GPU to GPU
             torch.cuda.synchronize()
-            
             mapping.unmap()
         else:
             numpy_data = self.numpy_data()
             self._tensor = torch.from_numpy(numpy_data).to(f"cuda:{self.engine.RenderManager.TargetDevice}")
         
         if flip:
-            return self._tensor.flip(0)
+            return self._tensor.flip(0) # type: ignore
         return self._tensor # type: ignore
     
     def sendToGPU(self):
@@ -592,27 +590,22 @@ class Texture(ResourcesObj):
             if data.dtype != self.data_type.value.torch_dtype:
                 data = data.to(self.data_type.value.torch_dtype)
             
-            if self.share_to_torch and data.device.type == 'cuda' and self._tensor:    # `self._tensor` is just for disabling Pylance's warning
+            if self.share_to_torch and data.device.type == 'cuda':
+                
                 if data.device.index != self.engine.RenderManager.TargetDevice:
                     data = data.to(f"cuda:{self.engine.RenderManager.TargetDevice}")
-                    
+                
                 self._from_tensor_copier.height = height
-                self._from_tensor_copier.width_in_bytes = self._from_tensor_copier.src_pitch = self._from_tensor_copier.dst_pitch = width * self.channel_count * self.data_type.value.nbytes
+                self._from_tensor_copier.width_in_bytes = self._from_tensor_copier.src_pitch = width * self.channel_count * self.data_type.value.nbytes
                 self._from_tensor_copier.src_x = xOffset
                 self._from_tensor_copier.src_y = yOffset
+                self._from_tensor_copier.set_src_device(data.flatten().data_ptr())
                 
-                if same_storage_tensor(self._tensor, data): 
-                    self._from_tensor_copier.set_src_device(self._tensor.data_ptr())
-                else:
-                    self._from_tensor_copier.set_src_host(data.flatten().data_ptr())
-                    
                 mapping = self._cuda_buffer.map()
-                
                 array = mapping.array(0, 0)
                 self._from_tensor_copier.set_dst_array(array)
                 self._from_tensor_copier(aligned=False) # copy data from GPU to GPU
                 torch.cuda.synchronize()
-                
                 mapping.unmap()
                 
             else:   # must copy data from CPU to GPU           

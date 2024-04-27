@@ -240,7 +240,10 @@ class FrameData(HIDDEN):
     @property
     def color_map(self)->IMAGE:
         if self._updated_color_map is None:
-            self._updated_color_map = self._color_map.tensor(update=True, flip=True).to(dtype=torch.float32)
+             # no need /255, because the color map from opengl is already in 0-1 range
+            rgba_color_map = self._color_map.tensor(update=True, flip=True).to(dtype=torch.float32)
+            self._updated_color_map = rgba_color_map[..., :3] # remove alpha channel
+            self._mask = 1.0 - rgba_color_map[..., 3:]  # mask is the inverse of alpha channel
         return self._updated_color_map
     
     _id_map: "Texture" = attrib(default=None, kw_only=True, alias='id_map')
@@ -311,9 +314,8 @@ class FrameData(HIDDEN):
     def mask(self)->MASK:
         '''The mask of the current frame.'''
         if self._mask is None:
-            self._mask = self.color_map[..., 3:]
-            self._mask = 1.0 - self._mask
-        return self._mask
+            self.color_map   # this will update mask
+        return self._mask   # type: ignore
     
     def clear_cache(self):
         '''clear cache for switching to next frame'''

@@ -46,7 +46,12 @@ class FrameDataNode(StableRendererNodeBase):
 
 
 class InferenceOutputNode(StableRendererNodeBase):
-    '''the node type for defining output data which will be passed to `RenderManager` later.'''
+    '''
+    This is the node type defining the output data passing to `RenderManager` as rendering result.
+    
+    When u are running on the web UI, the `__server_call__` will be called instead of `__call__`,
+    `InferenceOutput` will then act as `PreviewImage` to be displayed on the web UI.
+    '''
     
     IsOutputNode = True
     '''this node is an output node(though it has no UI output).'''

@@ -88,7 +88,7 @@ if __name__ == '__main__':
     
     class AutoRotation(Component):
         def update(self):
-            self.transform.rotateLocalY(0.2)
+            self.transform.rotateLocalY(0.5 * self.engine.RuntimeManager.DeltaTime)
     
     class Sample(Engine):
         def beforePrepare(self):
@@ -117,7 +117,8 @@ if __name__ == '__main__':
                debug=False,
                winSize=(512, 512),
                mapSavingInternal=1,
-               needOutputMaps=False,
+               needOutputMaps=True,
+               outputCannyMap=False,
                saveSDColorOutput=True,
                disableComfyUI=False,
                workflow=img2img_boat_path)

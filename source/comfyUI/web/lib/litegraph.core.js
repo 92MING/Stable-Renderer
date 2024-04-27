@@ -55,13 +55,14 @@
         VALID_SHAPES: ["default", "box", "round", "card"], //,"circle"
 
         //shapes are used for nodes but also for slots
-        BOX_SHAPE: 1,
+        BOX_SHAPE: 1,   // for img-liked data, e.g. textures, images, latent, ...
         ROUND_SHAPE: 2,
         CIRCLE_SHAPE: 3,
         CARD_SHAPE: 4,
         ARROW_SHAPE: 5,
         GRID_SHAPE: 6, // intended for slot arrays
-
+        NETWORK_SHAPE: 7, // intended for models, e.g. checkpoints, loras...
+		
         //enums
         INPUT: 1,
         OUTPUT: 2,
@@ -8699,14 +8700,24 @@ LGraphNode.prototype.executeAction = function(action)
                     }
 
                     ctx.beginPath();
-
-					if (slot_type.toLowerCase() == "array"){
+                    
+                    let slot_type_lower = slot_type.toLowerCase();
+					if (slot_type_lower == "array"){
                         slot_shape = LiteGraph.GRID_SHAPE;
                         slot.shape = LiteGraph.GRID_SHAPE;   // some methods are calling `slot.shape` instead of `slot_type` so we need to set it here
                     }
-                    else if (slot_type.toLowerCase() == "image" || slot_type.toLowerCase() == "latent"){
+                    else if (slot_type_lower == "image" || 
+                            slot_type_lower == "latent" ||
+                            slot_type_lower == "tensor" ||
+                            slot_type_lower == "idmap"  ||
+                            slot_type_lower == "mask"   ||
+                            slot_type_lower == "texture"){
                         slot_shape = LiteGraph.BOX_SHAPE;
                         slot.shape = LiteGraph.BOX_SHAPE;   // some methods are calling `slot.shape` instead of `slot_type` so we need to set it here
+                    }
+                    else if (slot_type_lower == "model"){
+                        slot_shape = LiteGraph.NETWORK_SHAPE;
+                        slot.shape = LiteGraph.NETWORK_SHAPE;   // some methods are calling `slot.shape` instead of `slot_type` so we need to set it here
                     }
                     
                     var doStroke = true;
@@ -8715,6 +8726,7 @@ LGraphNode.prototype.executeAction = function(action)
                         slot.type === LiteGraph.EVENT ||
                         slot.shape === LiteGraph.BOX_SHAPE
                     ) {
+						ctx.strokeStyle = 'transparent';
                         if (horizontal) {
                             ctx.rect(
                                 pos[0] - 5 + 0.5,
@@ -8731,11 +8743,13 @@ LGraphNode.prototype.executeAction = function(action)
                             );
                         }
                     } else if (slot_shape === LiteGraph.ARROW_SHAPE) {
-                        ctx.moveTo(pos[0] + 8, pos[1] + 0.5);
+                        ctx.strokeStyle = 'transparent';
+						ctx.moveTo(pos[0] + 8, pos[1] + 0.5);
                         ctx.lineTo(pos[0] - 4, pos[1] + 6 + 0.5);
                         ctx.lineTo(pos[0] - 4, pos[1] - 6 + 0.5);
                         ctx.closePath();
                     } else if (slot_shape === LiteGraph.GRID_SHAPE) {
+						ctx.strokeStyle = 'transparent';
                         ctx.rect(pos[0] - 4, pos[1] - 4, 2, 2);
                         ctx.rect(pos[0] - 1, pos[1] - 4, 2, 2);
                         ctx.rect(pos[0] + 2, pos[1] - 4, 2, 2);
@@ -8746,13 +8760,47 @@ LGraphNode.prototype.executeAction = function(action)
                         ctx.rect(pos[0] - 1, pos[1] + 2, 2, 2);
                         ctx.rect(pos[0] + 2, pos[1] + 2, 2, 2);
                         doStroke = false;
+                    } else if (slot_shape === LiteGraph.CARD_SHAPE){
+                        // dimond shape
+						ctx.strokeStyle = 'transparent';
+                        ctx.moveTo(pos[0] - 8, pos[1]);
+                        ctx.lineTo(pos[0], pos[1] - 8);
+                        ctx.lineTo(pos[0] + 8, pos[1]);
+                        ctx.lineTo(pos[0], pos[1] + 8);
+                        ctx.closePath();
+                    } else if (slot_shape === LiteGraph.NETWORK_SHAPE){
+                        // disable color fill
+						ctx.strokeStyle = 'white';
+                        ctx.fillStyle = "transparent";
+                        // draw 4 horizontal lines
+                        ctx.moveTo(pos[0] - 7, pos[1] - 7);
+                        ctx.lineTo(pos[0] + 7, pos[1] - 7);
+                        ctx.moveTo(pos[0] - 7, pos[1] - 4);
+                        ctx.lineTo(pos[0] + 7, pos[1] - 4);
+                        ctx.moveTo(pos[0] - 7, pos[1] + 4);
+                        ctx.lineTo(pos[0] + 7, pos[1] + 4);
+                        ctx.moveTo(pos[0] - 7, pos[1] + 7);
+                        ctx.lineTo(pos[0] + 7, pos[1] + 7);
+                        // draw 4 vertical lines
+                        ctx.moveTo(pos[0] - 7, pos[1] - 7);
+                        ctx.lineTo(pos[0] - 7, pos[1] + 7);
+                        ctx.moveTo(pos[0] - 4, pos[1] - 7);
+                        ctx.lineTo(pos[0] - 4, pos[1] + 7);
+                        ctx.moveTo(pos[0] + 4, pos[1] - 7);
+                        ctx.lineTo(pos[0] + 4, pos[1] + 7);
+                        ctx.moveTo(pos[0] + 7, pos[1] - 7);
+                        ctx.lineTo(pos[0] + 7, pos[1] + 7);
+                        ctx.closePath();
                     } else {
+						ctx.strokeStyle = 'transparent';
 						if(low_quality)
 	                        ctx.rect(pos[0] - 4, pos[1] - 4, 8, 8 ); //faster
 						else
 	                        ctx.arc(pos[0], pos[1], 4, 0, Math.PI * 2);
                     }
                     ctx.fill();
+					if(!low_quality && doStroke)
+	                    ctx.stroke();
 
                     //render name
                     if (render_text) {
@@ -8781,7 +8829,6 @@ LGraphNode.prototype.executeAction = function(action)
             //output connection slots
 
             ctx.textAlign = horizontal ? "center" : "right";
-            ctx.strokeStyle = "black";
             if (node.outputs) {
                 for (var i = 0; i < node.outputs.length; i++) {
                     var slot = node.outputs[i];
@@ -8812,17 +8859,24 @@ LGraphNode.prototype.executeAction = function(action)
                               this.default_connection_color.output_off;
                     ctx.beginPath();
                     //ctx.rect( node.size[0] - 14,i*14,10,10);
+                    let slot_type_lower = slot_type.toLowerCase();
 
-					if (slot_type.toLowerCase() == "array"){
+					if (slot_type_lower == "array"){
                         slot_shape = LiteGraph.GRID_SHAPE;
                         slot.shape = LiteGraph.GRID_SHAPE;   // some methods are calling `slot.shape` instead of `slot_type` so we need to set it here
                     }
-                    else if (slot_type.toLowerCase() == "image" || 
-                             slot_type.toLowerCase() == "latent" ||
-                             slot_type.toLowerCase() == "tensor" ||
-                             slot_type.toLowerCase() == "texture"){
+                    else if (slot_type_lower == "image" || 
+                            slot_type_lower == "latent" ||
+                            slot_type_lower == "tensor" ||
+                            slot_type_lower == "idmap"  ||
+                            slot_type_lower == "mask"   ||
+                            slot_type_lower == "texture"){
                         slot_shape = LiteGraph.BOX_SHAPE;
                         slot.shape = LiteGraph.BOX_SHAPE;   // some methods are calling `slot.shape` instead of `slot_type` so we need to set it here
+                    }
+                    else if (slot_type_lower == "model"){
+                        slot_shape = LiteGraph.NETWORK_SHAPE;
+                        slot.shape = LiteGraph.NETWORK_SHAPE;   // some methods are calling `slot.shape` instead of `slot_type` so we need to set it here
                     }
                     
                     var doStroke = true;
@@ -8831,6 +8885,7 @@ LGraphNode.prototype.executeAction = function(action)
                         slot_type === LiteGraph.EVENT ||
                         slot_shape === LiteGraph.BOX_SHAPE
                     ) {
+						ctx.strokeStyle = 'transparent';
                         if (horizontal) {
                             ctx.rect(
                                 pos[0] - 5 + 0.5,
@@ -8847,11 +8902,45 @@ LGraphNode.prototype.executeAction = function(action)
                             );
                         }
                     } else if (slot_shape === LiteGraph.ARROW_SHAPE) {
+						ctx.strokeStyle = 'transparent';
                         ctx.moveTo(pos[0] + 8, pos[1] + 0.5);
                         ctx.lineTo(pos[0] - 4, pos[1] + 6 + 0.5);
                         ctx.lineTo(pos[0] - 4, pos[1] - 6 + 0.5);
                         ctx.closePath();
-                    }  else if (slot_shape === LiteGraph.GRID_SHAPE) {
+                    }  else if (slot_shape === LiteGraph.CARD_SHAPE){
+                        // dimond shape
+						ctx.strokeStyle = 'transparent';
+                        ctx.moveTo(pos[0] - 8, pos[1]);
+                        ctx.lineTo(pos[0], pos[1] - 8);
+                        ctx.lineTo(pos[0] + 8, pos[1]);
+                        ctx.lineTo(pos[0], pos[1] + 8);
+                        ctx.closePath();
+                    } else if (slot_shape === LiteGraph.NETWORK_SHAPE){
+                        // disable color fill
+						ctx.strokeStyle = 'white';
+                        ctx.fillStyle = "transparent";
+                        // draw 4 horizontal lines
+                        ctx.moveTo(pos[0] - 7, pos[1] - 7);
+                        ctx.lineTo(pos[0] + 7, pos[1] - 7);
+                        ctx.moveTo(pos[0] - 7, pos[1] - 4);
+                        ctx.lineTo(pos[0] + 7, pos[1] - 4);
+                        ctx.moveTo(pos[0] - 7, pos[1] + 4);
+                        ctx.lineTo(pos[0] + 7, pos[1] + 4);
+                        ctx.moveTo(pos[0] - 7, pos[1] + 7);
+                        ctx.lineTo(pos[0] + 7, pos[1] + 7);
+                        // draw 4 vertical lines
+                        ctx.moveTo(pos[0] - 7, pos[1] - 7);
+                        ctx.lineTo(pos[0] - 7, pos[1] + 7);
+                        ctx.moveTo(pos[0] - 4, pos[1] - 7);
+                        ctx.lineTo(pos[0] - 4, pos[1] + 7);
+                        ctx.moveTo(pos[0] + 4, pos[1] - 7);
+                        ctx.lineTo(pos[0] + 4, pos[1] + 7);
+                        ctx.moveTo(pos[0] + 7, pos[1] - 7);
+                        ctx.lineTo(pos[0] + 7, pos[1] + 7);
+                        ctx.closePath();
+                    }
+                    else if (slot_shape === LiteGraph.GRID_SHAPE) {
+						ctx.strokeStyle = 'transparent';
                         ctx.rect(pos[0] - 4, pos[1] - 4, 2, 2);
                         ctx.rect(pos[0] - 1, pos[1] - 4, 2, 2);
                         ctx.rect(pos[0] + 2, pos[1] - 4, 2, 2);
@@ -8863,17 +8952,13 @@ LGraphNode.prototype.executeAction = function(action)
                         ctx.rect(pos[0] + 2, pos[1] + 2, 2, 2);
                         doStroke = false;
                     } else {
+						ctx.strokeStyle = 'transparent';
 						if(low_quality)
 	                        ctx.rect(pos[0] - 4, pos[1] - 4, 8, 8 );
 						else
 	                        ctx.arc(pos[0], pos[1], 4, 0, Math.PI * 2);
                     }
 
-                    //trigger
-                    //if(slot.node_id != null && slot.slot == -1)
-                    //	ctx.fillStyle = "#F85";
-
-                    //if(slot.links != null && slot.links.length)
                     ctx.fill();
 					if(!low_quality && doStroke)
 	                    ctx.stroke();
@@ -14667,5 +14752,3 @@ if (typeof exports != "undefined") {
     exports.LGraphCanvas = this.LGraphCanvas;
     exports.ContextMenu = this.ContextMenu;
 }
-
-

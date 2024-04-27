@@ -12,7 +12,9 @@ class IsNotNoneNode(StableRendererNodeBase):
     
     Args:
         - value: The value to check.
-        - mode: The mode to use. If 'strict', the node will only return True if the value is not None. If 'normal', the node will return True if the value is not None and not False.
+        - mode(strict/normal): 
+            If 'strict', the node will only return True when eval(value is not None). 
+            If 'normal', the node will let the bool(value) to decide the result.
     '''
     
     Category = "Logic"

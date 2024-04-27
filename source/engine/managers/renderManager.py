@@ -1,5 +1,6 @@
 import glm
 import glfw
+import torch
 import ctypes
 import OpenGL.GL as gl
 import numpy as np
@@ -40,6 +41,7 @@ def _wrapPostProcessTask(render_manager:'RenderManager', shader, task):
 
 def _wrapDeferRenderTask(render_manager:'RenderManager', shader, task):
     shader.useProgram()
+    shader.setUniform("usingSD", int(not render_manager.engine.disableComfyUI))
     _bindGTexture(shader, 0, render_manager.colorFBOTex.textureID, "gColor")  # type: ignore
     _bindGTexture(shader, 1, render_manager.idFBOTex.textureID, "gID")  # type: ignore
     _bindGTexture(shader, 2, render_manager.posFBOTex.textureID, "gPos")  # type: ignore
@@ -551,20 +553,21 @@ class RenderManager(Manager):
             depthData = normal_and_depth_data[:, :, 3]
             noiseData = self.noiseFBOTex.numpy_data(flipY=True)
             
-            diffuseManager = self.engine.DiffusionManager
-            diffuseManager.OutputMap('color', colorData)
-            diffuseManager.OutputMap('normal', normalData)
-            diffuseManager.OutputNumpyData('id', idData)
-            diffuseManager.OutputNumpyData('pos', posData)
-            diffuseManager.OutputNumpyData('noise', noiseData)
-            diffuseManager.OutputDepthMap(depthData)
-            diffuseManager.OutputCannyMap(colorData)
+            diffManager = self.engine.DiffusionManager
+            diffManager.OutputMap('color', colorData)
+            diffManager.OutputMap('normal', normalData)
+            diffManager.OutputNumpyData('id', idData)
+            diffManager.OutputNumpyData('pos', posData)
+            diffManager.OutputNumpyData('noise', noiseData)
+            diffManager.OutputDepthMap(depthData)
+            if diffManager.NeedOutputCannyMap:
+                diffManager.OutputCannyMap(colorData)
         
         # get data back from SD
         if not self.engine.disableComfyUI:
             from comfyUI.types import FrameData
-            frameData = FrameData(frame_index= self.engine.RuntimeManager.FrameCount,
-                                  color_map=self.colorFBOTex,
+            frameData = FrameData(frame_index = self.engine.RuntimeManager.FrameCount,
+                                  color_map = self.colorFBOTex,
                                   id_map=self.idFBOTex,
                                   pos_map=self.posFBOTex,
                                   normal_and_depth_map=self.normal_and_depth_FBOTex,
@@ -576,7 +579,12 @@ class RenderManager(Manager):
             new_color_data: Tensor = inference_result.frame_color
             if len(new_color_data.shape) == 4:
                 new_color_data = new_color_data[0]
+            new_color_data = new_color_data.flip(0)
             self.colorFBOTex.set_data(new_color_data)
+        
+        rgba_color_map = self.colorFBOTex.tensor(update=True, flip=True).to(torch.float32)
+        rgba_color_map = rgba_color_map.flip(0)
+        self.colorFBOTex.set_data(rgba_color_map)
         
         # defer rendering
         gl.glDisable(gl.GL_DEPTH_TEST)

@@ -25,6 +25,7 @@ class DiffusionManager(Manager):
     
     def __init__(self,
                  needOutputMaps=False,
+                 outputCannyMap=True,
                  saveSDColorOutput=False,
                  maxFrameCacheCount=24,
                  mapSavingInterval=12,
@@ -41,6 +42,7 @@ class DiffusionManager(Manager):
         self._maxFrameCacheCount = maxFrameCacheCount
         self._mapSavingInterval = mapSavingInterval
         self._saveSDColorOutput = saveSDColorOutput
+        self._needOutputCannyMap = outputCannyMap
         
         if not threadPoolSize:
             threadPoolSize = multiprocessing.cpu_count()
@@ -60,6 +62,10 @@ class DiffusionManager(Manager):
         self._workflow = workflow
         
     # region properties
+    @property
+    def NeedOutputCannyMap(self)->bool:
+        return self._needOutputCannyMap
+    
     @property
     def SaveSDColorOutput(self)->bool:
         return self._saveSDColorOutput
