@@ -308,4 +308,7 @@ class Engine:
         global _EngineInstance
         if _EngineInstance is None:
             _EngineInstance = cls(*args, **kwargs)
-        _EngineInstance.run()
+        try:
+            _EngineInstance.run()
+        except KeyboardInterrupt:
+            EngineLogger.info('Engine is stopped by user.')

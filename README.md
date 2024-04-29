@@ -7,11 +7,14 @@
 
 ## TODO
 
-### BUGS
+### BUGS Found
 - `depth map`: seems only outputting last obj? (when multiple objs are rendered)
 - `OBJ load`: error when :
     - loading faces with more than 3 vertices 
     - meets `g` label in .obj
+
+### Potential BUGS 
+- if engine can load multiple workflows at the same time in future, should add codes to prevent the duplicate of node ids.
 
 ### Features
 - `stable-renderer`

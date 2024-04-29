@@ -1,6 +1,8 @@
 import torch
 import sys
+
 from common_utils.debug_utils import ComfyUILogger
+from common_utils.global_utils import is_dev_mode, is_verbose_mode
 from comfy.ldm.modules.diffusionmodules.openaimodel import UNetModel, Timestep
 from comfy.ldm.cascade.stage_c import StageC
 from comfy.ldm.cascade.stage_b import StageB
@@ -75,8 +77,10 @@ class BaseModel(torch.nn.Module):
         if self.adm_channels is None:
             self.adm_channels = 0
         self.inpaint_model = False
-        ComfyUILogger.print("model_type", model_type.name)
-        ComfyUILogger.print("adm", self.adm_channels)
+        
+        if is_dev_mode() and is_verbose_mode():
+            ComfyUILogger.print("model_type", model_type.name)
+            ComfyUILogger.print("adm", self.adm_channels)
 
     def apply_model(self, x, t, c_concat=None, c_crossattn=None, control=None, transformer_options={}, **kwargs):
         sigma = t
@@ -270,7 +274,12 @@ def unclip_adm(unclip_conditioning, device, noise_augmentor, noise_augment_merge
     return adm_out
 
 class SD21UNCLIP(BaseModel):
-    def __init__(self, model_config, noise_aug_config, model_type=ModelType.V_PREDICTION, device=None):
+    def __init__(self, 
+                 model_config, 
+                 noise_aug_config, 
+                 model_type=ModelType.V_PREDICTION, 
+                 device=None,
+                 **kwargs):
         super().__init__(model_config, model_type, device=device)
         self.noise_augmentor = CLIPEmbeddingNoiseAugmentation(**noise_aug_config)
 

@@ -22,7 +22,7 @@ from ..enums import *
 from ..color import Color
 from common_utils.decorators import Overload
 from common_utils.debug_utils import EngineLogger
-from common_utils.math_utils import same_storage_tensor
+from common_utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
 
 from typing import TYPE_CHECKING, Union, Optional, Final, Literal
 
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from ..shader import Shader
 
 
+_SUPPORT_GL_CUDA_SHARE = GetOrAddGlobalValue('__SUPPORT_GL_CUDA_SHARE__', True)
 
 _SUPPORT_ANISOTROPIC_FILTER = glInitTextureFilterAnisotropicEXT()
 if _SUPPORT_ANISOTROPIC_FILTER:
@@ -45,7 +46,7 @@ class Texture(ResourcesObj):
     '''The base class name of all texture sub classes'''
 
     def __init__(self,
-                 name: str,
+                 name: Optional[str],
                  width: Optional[int] = None,
                  height: Optional[int] = None,
                  format:TextureFormat=TextureFormat.RGB,
@@ -381,14 +382,19 @@ class Texture(ResourcesObj):
             self._tensor = torch.zeros((self.height, self.width, self.channel_count), 
                                         dtype=self.data_type.value.torch_dtype, 
                                         device=f"cuda")
+        if not GetOrAddGlobalValue('__SUPPORT_GL_CUDA_SHARE__', True):
+            self._support_gl_share_to_torch = False
+            return
         try:
             self._cuda_buffer = pycuda.gl.RegisteredImage(int(self.textureID),
                                                           int(gl.GL_TEXTURE_2D), 
                                                           pycuda.gl.graphics_map_flags.NONE)
         except Exception as e:
+            SetGlobalValue('__SUPPORT_GL_CUDA_SHARE__', False)
             EngineLogger.warning(f'Warning: Texture {self.name} failed to register image. Error: {e}')
             self._support_gl_share_to_torch = False
         except:
+            SetGlobalValue('__SUPPORT_GL_CUDA_SHARE__', False)
             EngineLogger.warning(f'Warning: Texture {self.name} failed to register image. Error: {sys.exc_info()[0]}')
             self._support_gl_share_to_torch = False
         
@@ -701,7 +707,7 @@ class Texture(ResourcesObj):
         else:
             fake_image = Image.new('RGB', (width, height), (int(fill.r * 255), int(fill.g * 255), int(fill.b * 255)))
         
-        texture = Texture(name,
+        texture = Texture(name=name,
                           width=width,
                           height=height,
                           format=tex_format,
@@ -778,7 +784,7 @@ class Texture(ResourcesObj):
             else:
                 raise Exception('Invalid channel count: {}'.format(channel_count))
         
-        tex = Texture(name,
+        tex = Texture(name=name,
                       width=width,
                       height=height,
                       format=TextureFormat.RGBA if channel_count == 4 else TextureFormat.RGB,
@@ -792,6 +798,28 @@ class Texture(ResourcesObj):
                       share_to_torch=share_to_torch)
         return tex
 
-
-
+    def __deepcopy__(self):
+        '''
+        For `custom_deep_copy` method in common_utils.type_utils.
+        Cloning a texture will only clone the tensor(if it has). The texture will still point to the same OpenGL texture.
+        '''
+        tex = self.__class__(None,  # None means temporary obj
+                            width=self.width,
+                            height=self.height,
+                            format=self.format,
+                            data=self.data,
+                            min_filter=self.min_filter,
+                            mag_filter=self.mag_filter,
+                            s_wrap=self.s_wrap,
+                            t_wrap=self.t_wrap,
+                            internalFormat=self.internal_format,
+                            data_type=self.data_type,
+                            share_to_torch=self.share_to_torch)
+        tex._tensor = self._tensor.clone() if self._tensor is not None else None
+        tex._texID = self._texID
+        if self.share_to_torch and self.textureID is not None:  # when texID is not None, means sent to GPU
+            tex._init_tensor()
+        return tex
+        
+        
 __all__ = ['Texture']

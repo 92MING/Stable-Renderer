@@ -3,6 +3,9 @@ import argparse
 import enum
 import comfy.options
 
+from common_utils.global_utils import GetEnv
+
+
 class EnumAction(argparse.Action):
     """
     Argparse action for handling Enums
@@ -104,7 +107,7 @@ vram_group.add_argument("--novram", action="store_true", help="When lowvram isn'
 vram_group.add_argument("--cpu", action="store_true", help="To use the CPU for everything (slow).")
 
 
-parser.add_argument("--disable-smart-memory", action="store_true", help="Force ComfyUI to agressively offload to regular ram instead of keeping models in vram when it can.")
+parser.add_argument("--disable-smart-memory", action="store_true", help="Force ComfyUI to aggressively offload to regular ram instead of keeping models in vram when it can.")
 parser.add_argument("--deterministic", action="store_true", help="Make pytorch use slower deterministic algorithms when it can. Note that this might not make images deterministic in all cases.")
 
 parser.add_argument("--dont-print-server", action="store_true", help="Don't print server output.")
@@ -114,7 +117,7 @@ parser.add_argument("--windows-standalone-build", action="store_true", help="Win
 parser.add_argument("--disable-metadata", action="store_true", help="Disable saving prompt metadata in files.")
 
 parser.add_argument("--multi-user", action="store_true", help="Enables per-user storage.")
-parser.add_argument("--backend-mode", action="store_true", help="Enables backend mode, which means comfyUI will run as a backend server for appliation deployment.")
+parser.add_argument("--backend-mode", action="store_true", help="Enables backend mode, which means comfyUI will run as a backend server for application deployment.")
 parser.add_argument("--verbose", action="store_true", help="Enables verbose output.")
 
 if comfy.options.args_parsing:
@@ -128,6 +131,6 @@ if args.windows_standalone_build:
 if args.disable_auto_launch:
     args.auto_launch = False
 
-if args.verbose:
+if GetEnv('VERBOSE', False, bool) or args.verbose:
     os.environ["VERBOSE"] = "1"
     args.dont_print_server = False

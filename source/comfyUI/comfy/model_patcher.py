@@ -6,10 +6,26 @@ import comfy.utils
 import comfy.model_management
 from common_utils.debug_utils import ComfyUILogger
 
+from typing import TYPE_CHECKING, Optional, Union, TypeAlias
+if TYPE_CHECKING:
+    from comfyUI.types import ModelPatcherTypes
+
 class ModelPatcher:
-    def __init__(self, model, load_device, offload_device, size=0, current_device=None, weight_inplace_update=False):
+    def __init__(self, 
+                 model: "ModelPatcherTypes",
+                 load_device: torch.device,
+                 offload_device, 
+                 size=0,
+                 current_device=None, 
+                 weight_inplace_update=False,
+                 model_name: Optional[str] = None):
+        
         self.size = size
         self.model = model
+        
+        name = model_name or getattr(model, 'name', None) or f'Unknown {model.__class__.__qualname__}'
+        self._model_name = name
+        
         self.patches = {}
         self.backup = {}
         self.object_patches = {}
@@ -25,6 +41,20 @@ class ModelPatcher:
 
         self.weight_inplace_update = weight_inplace_update
 
+    @property
+    def name(self):
+        """
+        The model's name. If not set, it will return 'Unknown'.
+        This is useful for debugging purposes.
+        
+        This is a new property that is not present in the original code. 
+        Old codes may not passing the `model_name` parameter during initialization, resulting in the model name being 'Unknown'.
+        """
+        return self._model_name
+    
+    def __repr__(self):
+        return f"<ModelPatcher (model={self.name}, device={self.current_device})>"
+    
     def model_size(self):
         if self.size > 0:
             return self.size

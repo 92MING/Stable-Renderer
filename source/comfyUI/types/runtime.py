@@ -4,10 +4,11 @@ from typing import (Union, TypeAlias, Literal, Optional, List, Any, Type, Dict, 
                     Sequence, TypeVar, Generic, Set, NamedTuple, Union, Callable, Any)
 from attr import attrs, attrib
 from dataclasses import dataclass
+from collections import OrderedDict
 from common_utils.debug_utils import ComfyUILogger
 from common_utils.global_utils import is_dev_mode, is_verbose_mode
 from common_utils.type_utils import get_cls_name, NameCheckMetaCls
-from common_utils.decorators import singleton, class_property, class_or_ins_property
+from common_utils.decorators import singleton, class_or_ins_property, Overload
 
 from ._utils import get_node_cls_by_name
 from .hidden import PROMPT, FrameData, BakingData, HIDDEN
@@ -17,13 +18,90 @@ if TYPE_CHECKING:
     from .node_base import ComfyUINode
     from comfyUI.execution import PromptExecutor
 
+
+_CT = TypeVar('_CT')
+
+class ComfyCacheDict(Dict[Tuple[str, str], _CT], Generic[_CT]):
+    '''
+    ComfyCacheDict is a special dictionary that stores the data for each node.
+    
+    The data structure is actually {(node_id, node_type): value, ...}, 
+    but you could still access it by only providing the node_id(its for compatibility with old code).
+    '''
+    
+    _ToBeDeleted: Dict[Tuple[str, str], _CT] = OrderedDict()
+    '''
+    Deleted values will not be remove immediately. They are passing to this list, and wait for future reuse or delete.
+    Too-old items will be removed by LRU strategy. 
+    '''
+    USELESS_CACHE_MAX_COUNT = 32
+    '''how many useless items can be stored in the pool.'''
+    
+    def __getitem__(self, key: Union[str, Tuple[str, str]]) -> Any:
+        if isinstance(key, str):
+            return self.find_by_node_id(key, raise_err=True)
+        if key in self._ToBeDeleted:
+            self[key] = self._ToBeDeleted.pop(key)
+        return super().__getitem__(key)
+    
+    def __setitem__(self, key: Tuple[str, str], val):
+        if isinstance(key, str):
+            node = NodePool.Instance().find_by_node_id(key)
+            if not node:
+                raise KeyError(f'Node id `{key}` not found.')
+            key = (key, node.NAME)
+        if key in self._ToBeDeleted:
+            del self._ToBeDeleted[key]  # no need old value anymore
+        super().__setitem__(key, val)
+    
+    def find_by_node_id(self, id: str, raise_err: bool = False):
+        for (node_id, node_type), val in self.items():
+            if node_id == id:
+                return val
+        for (node_id, node_type), val in self._ToBeDeleted.items():
+            if node_id == id:
+                self[(node_id, node_type)] = self._ToBeDeleted.pop((node_id, node_type))
+                return self[(node_id, node_type)]
+        if raise_err:
+            raise KeyError(f'Node id not found: {id}.')
+        return None
+        
+    def clear_cache(self):
+        '''clear the `nodes to be deleted` cache.'''
+        self._ToBeDeleted.clear()
+        
+    def clear(self, clear_cache=True):
+        '''
+        clear all nodes in the pool.
+        If clear_cache=True, `nodes to be deleted` will also be cleared.
+        '''
+        if clear_cache:
+            self.clear_cache()
+        super().clear()    
+    
+    def _check_if_node_should_be_deleted(self):
+        if len(self._ToBeDeleted) > self.USELESS_CACHE_MAX_COUNT:
+            for key in tuple(self._ToBeDeleted.keys())[:self.USELESS_CACHE_MAX_COUNT//2]:
+                del self._ToBeDeleted[key]
+    
+    @Overload
+    def delete(self, node: "ComfyUINode"):  # type: ignore
+        node_type_name = node.NAME if hasattr(node, 'NAME') else node.__class__.__qualname__
+        return self.delete(node.ID, node_type_name)
+    
+    @Overload
+    def delete(self, node_id: str, node_type: str):
+        '''if node is not in pool, this will do nothing.'''
+        if (node_id, node_type) in self:
+            self._ToBeDeleted[(node_id, node_type)] = self.pop((node_id, node_type))
+            self._check_if_node_should_be_deleted()
+    
 @attrs
 class InferenceOutput:
     '''The output of an inference process(when running through engine).'''
     
     frame_color: "IMAGE" = attrib(default=None)
     '''The final color output of this frame.'''
-
 
 @attrs
 class InferenceContext(HIDDEN): # InferenceContext is also a hidden value
@@ -54,14 +132,17 @@ class InferenceContext(HIDDEN): # InferenceContext is also a hidden value
     _current_node_id: Optional[str] = attrib(default=None, alias='current_node_id')
     '''The current node for this execution.'''
     
-    old_prompt: Optional["PROMPT"] = attrib(default=None)
-    '''The prompt from last execution.'''
+    outputs: Dict[str, List[Any]] = attrib(factory=dict)
+    '''
+    The outputs of the nodes for execution. {node id: [output1, output2, ...], ...}
+    Note that in PromptExecutor, the `outputs` is a `ComfyCacheDict`, while here it is a normal dict.
+    '''
     
-    outputs:'NodeOutputs' = attrib(factory=dict)
-    '''The outputs of the nodes for execution. {node id: [output1, output2, ...], ...}'''
-    
-    outputs_ui: 'NodeOutputs_UI' = attrib(factory=dict)
-    '''The outputs of the nodes for ui. {node id: {output_name: output_value, ...}, ...}'''
+    outputs_ui: Dict[str, Dict[str, Any]] = attrib(factory=dict)
+    '''
+    The outputs of the nodes for ui. {node id: {output_name: [output_value1, ...], ...}, ...}
+    Note that in PromptExecutor, the `outputs_ui` is a `ComfyCacheDict`, while here it is a normal dict.
+    '''
     
     to_be_executed: List[Tuple[int, str]] = attrib(factory=list)
     '''node ids waiting to be executed. [(order, node_id), ...]'''
@@ -112,21 +193,36 @@ class InferenceContext(HIDDEN): # InferenceContext is also a hidden value
         if isinstance(value, int):
             value = str(value)
         elif isinstance(value, ComfyUINode):
-            value = value.ID
-        if value != self._current_node_id:
-            self._current_node_id = value
-            if is_dev_mode() and is_verbose_mode():
-                if self.current_node_cls_name:
-                    ComfyUILogger.debug(f'Current running node id is set to: {value}({self.current_node_cls_name})')
-                else:
-                    ComfyUILogger.debug(f'Current running node id is set to: {value}')
+            node_id = value.ID
+            node_type_name = self.prompt[node_id]['class_type']
+            if node_type_name != value.NAME:
+                raise ValueError(f'The given node is not the same as the node in the prompt: {node_type_name} != {value.NAME}')
+            value = node_id
+            
+        if isinstance(value, str):
+            if value != self._current_node_id:
+                self._current_node_id = value
+                if is_dev_mode() and is_verbose_mode():
+                    if self.current_node_cls_name:
+                        ComfyUILogger.debug(f'Current running node id is set to: {value}({self.current_node_cls_name})')
+                    else:
+                        ComfyUILogger.debug(f'Current running node id is set to: {value}')
+        else:
+            raise ValueError(f'Invalid current node id type: {value}')
+        
     @property
     def current_node_cls_name(self)->Optional[str]:
         '''return the class name of current node.'''
         if not self.current_node_id:
             return None
-        return self.prompt[self.current_node_id]['class_type']
-    
+        try:
+            return self.prompt[self.current_node_id]['class_type']
+        except KeyError as e:
+            if is_dev_mode():
+                raise e
+            else:
+                return None
+        
     @property
     def current_node_cls(self)->Optional[Type["ComfyUINode"]]:
         '''return the origin type of current node.'''
@@ -139,25 +235,20 @@ class InferenceContext(HIDDEN): # InferenceContext is also a hidden value
         '''return the current node instance.'''
         if not self.current_node_id:
             return None
-        return NodePool().get_node(self.current_node_id, self.current_node_cls_name, create_new=True)   # type: ignore
+        return NodePool.Instance().get_or_create(self.current_node_id, self.current_node_cls_name)  # type: ignore
 
     @current_node.setter
     def current_node(self, value: Union[str, int, "ComfyUINode"]):
         self.current_node_id = value
 
-    def destroy(self):
-        if self.old_prompt:
-            self.old_prompt.destroy()   # current prompt no need to be destroyed, it will be destroyed by the context
-
     @classmethod
     def GetHiddenValue(cls, context: "InferenceContext"):
         return context  # just return the context itself
 
-
 @singleton(cross_module_singleton=True)
-class NodePool(Dict[Tuple[str, str], "ComfyUINode"]):
+class NodePool(ComfyCacheDict["ComfyUINode"]):
     '''
-    {node_id: node_instance, ...}
+    {(node_id, node_type): node_instance, ...}
     The global pool of all created nodes.
     
     This node pool is not exactly the same structure as the original ComfyUI's node pool,
@@ -165,198 +256,76 @@ class NodePool(Dict[Tuple[str, str], "ComfyUINode"]):
     but it is not necessary to do that (nodes always have unique id).
     '''
     
-    @class_property # type: ignore
+    def _check_if_node_should_be_deleted(self):
+        if len(self._ToBeDeleted) > self.USELESS_CACHE_MAX_COUNT:
+            for key in tuple(self._ToBeDeleted.keys())[:self.USELESS_CACHE_MAX_COUNT//2]:
+                node = self._ToBeDeleted.pop(key)
+                if hasattr(node, 'ON_DESTROY'):
+                    try:
+                        node.ON_DESTROY()
+                    except Exception as e:
+                        ComfyUILogger.error(f'Error when calling ON_DESTROY for node with id={node.ID}({node.__class__.__qualname__}): {e}, ignored.')
+                del node
+    
+    @classmethod
     def Instance(cls)->'NodePool':
         '''Get the global instance of the node pool.'''
         return cls.__instance__  # type: ignore
     
-    def __setitem__(self, __key: Union[int, str, Tuple[str, Union[str, Type["ComfyUINode"]]]], __value: "ComfyUINode") -> None:
-        '''
-        possible key:
-            - node_id: the unique id of the node
-            - (node_id, node_cls_name): the unique id and class name of the node
-            - (node_id, node_cls): the unique id and class of the node
-        '''
-        if isinstance(__key, tuple):
-            if not len(__key) in (1, 2):
-                raise ValueError(f'Invalid key: {__key}, it should be a tuple with 2 elements(node_id, node_cls_name or node_cls).' )
-            key = str(__key[0]) if not isinstance(__key[0], str) else __key[0]
-            node_type_name = None if len(__key)==1 else __key[1]
-        
-            if node_type_name:
-                if isinstance(node_type_name, type):
-                    node_type_name = get_cls_name(node_type_name) 
-                if node_type_name != get_cls_name(__value):
-                    raise ValueError(f'The given node type `{node_type_name}` is not same as the node instance type `{get_cls_name(__value)}`.')
-                if (key, node_type_name) in self and type((key, node_type_name)).__qualname__ != node_type_name:
-                    raise ValueError(f'The node id {key} is already used by another node type {type(self[key]).__qualname__}.')
-        else:
-            key = str(__key) if isinstance(__key, int) else __key
-            node_type_name = None
-        
-        if not node_type_name:
-            node_type_name = get_cls_name(__value)
-            
-        return super().__setitem__((key, node_type_name), __value)    
+    @Overload
+    def delete(self, node: "ComfyUINode"):  # type: ignore
+        node_type_name = node.NAME if hasattr(node, 'NAME') else node.__class__.__qualname__
+        return self.delete(node.ID, node_type_name)
     
-    def __getitem__(self, __key: Union[int, str, Tuple[str, Union[str, Type["ComfyUINode"]]]]) -> "ComfyUINode":
-        '''
-        possible key:
-            - node_id: the unique id of the node
-            - (node_id, node_cls_name): the unique id and class name of the node
-            - (node_id, node_cls): the unique id and class of the node
-            
-        When a tuple is used as the key, it will create a new node if the node is not found.
-        '''
-        if isinstance(__key, tuple):
-            if not len(__key) in (1, 2):
-                raise ValueError(f'Invalid key: {__key}, it should be a tuple with 2 elements(node_id, node_cls_name or node_cls).' )
-            if len(__key) == 2:
-                node_id = str(__key[0]) if isinstance(__key[0], int) else __key[0]
-                node_type_name = __key[1] if isinstance(__key[1], str) else __key[1].__qualname__
-            else:
-                node_id = str(__key) if isinstance(__key, int) else __key
-                node_type_name = None
-        else:
-            node_id = str(__key) if isinstance(__key, int) else __key
-            node_type_name = None
+    @Overload
+    def delete(self, node_id: str, node_type: str):
+        '''if node is not in pool, this will do nothing.'''
+        if (node_id, node_type) in self:
+            self._ToBeDeleted[(node_id, node_type)] = self.pop((node_id, node_type))
+            self._check_if_node_should_be_deleted()
+    
+    def get_or_create(self, node_id: str, node_type: str):
+        if (node_id, node_type) in self:
+            return self[(node_id, node_type)]
         
-        if node_type_name and not isinstance(node_type_name, str):
-            node_type_name = str(node_type_name)
-        
-        try:
-            node = super().__getitem__((node_id, node_type_name))   # type: ignore
-        except KeyError:
-            node = None
-            
-        if (node is not None) and (node_type_name is not None) and (type(node).__qualname__ != node_type_name):
-            raise KeyError(f'The node id {node_id} is already used by another node type.')
-        
-        if (node is None) or (node_type_name is None):
-            for _key, _n in tuple(super().items()):
-                if isinstance(_key, str):
-                    if _key == node_id:
-                        node = _n
-                        break
-                else:
-                    if _key[0] == node_id:
-                        node = _n
-                        break
-            else:
-                if node_type_name is None:
-                    raise KeyError(f'Node not found: {node_id}. If you wanna create a new node, please provide the node type name.')
-        
-        if not node:
-            if node_type_name is not None:
-                node_type = get_node_cls_by_name(node_type_name)
-                if not node_type:
-                    raise KeyError(f'Invalid node type name: {node_type_name}. Cannot create a new node.')
-                node = node_type()
-                super().__setitem__((node_id, node_type_name), node)
-                if not hasattr(node, 'ID'):
-                    setattr(node, 'ID', node_id)
-                return node
-            else:
-                raise KeyError(f'Node not found: {node_id}. If you wanna create a new node, please provide the node type name.')
-        else:
-            if not hasattr(node, 'ID'):
-                setattr(node, 'ID', node_id)
+        elif (node_id, node_type) in self._ToBeDeleted:
+            node = self._ToBeDeleted.pop((node_id, node_type))
+            self[(node_id, node_type)] = node
             return node
-    
-    def __contains__(self, key):
-        if isinstance(key, (list, tuple)):
-            assert len(key) in (1, 2), f'Invalid key: {key}, it should be a tuple with 2 elements(node_id, node_cls_name).'
-            key = (str(key[0]), str(key[1]))
-            return super().__contains__(key)
-        else:
-            key = str(key)
-            if self.get_node(key, create_new=False, raise_err=False):
-                return True
-            return False
-    
-    def get_node(self, node_id: Union[str, int], node_type: Union[str, Type["ComfyUINode"]]=None, create_new=True, raise_err=False):  # type: ignore
-        '''Get the node instance by node_id.'''
-        node_id = str(node_id) if isinstance(node_id, int) else node_id
-        node_type = get_cls_name(node_type) if (node_type is not None and isinstance(node_type, type)) else node_type
         
-        if not create_new:
-            try:
-                node = self[node_id]    # will raise KeyError if not found
-            except KeyError as e:
-                if raise_err:
-                    raise e
-                if is_dev_mode() and is_verbose_mode():
-                    ComfyUILogger.debug(f'NodePool.get_node({node_id}, {node_type}, {create_new}, {raise_err}) error: {e}. Returns None.')
-                return None
-            if node_type and node_type != get_cls_name(node):
-                if raise_err:
-                    raise KeyError(f'The given node type `{node_type}` is not same as the existing node instance with type `{get_cls_name(node)}`.')
-                else:
-                    if is_dev_mode() and is_verbose_mode():
-                        ComfyUILogger.debug(f'NodePool.get_node({node_id}, {node_type}, {create_new}, {raise_err}) error: The given node type `{node_type}` is not same as the existing node instance with type `{get_cls_name(node)}`. Returns None.')
-                return None
-            return node
-        else:
-            try:
-                if not node_type:
-                    return self[node_id]    # will raise KeyError if not found
-                else:
-                    return self[(node_id, node_type)]   # will create if not found
-            except KeyError as e:
-                if raise_err:
-                    raise e
-                if is_dev_mode() and is_verbose_mode():
-                    ComfyUILogger.debug(f'NodePool.get_node({node_id}, {node_type}, {create_new}, {raise_err}) error: {e}. Returns None.')
-                return None
-    
-    def get(self, key: Union[int, str, Tuple[Union[str, int], str]], default=None):
-        origin_key = key
-        if not isinstance(key, (list, tuple)):
-            key = str(key)
-        else:
-            key = (str(key[0]), key[1])
-        try:
-            return self[key]
-        except KeyError as e:
-            if is_dev_mode() and is_verbose_mode():
-                ComfyUILogger.debug(f'NodePool.get({origin_key}, {default}) error: {e}. Returns default.')
-            return default
-
-    def clear(self):
+        node_cls = get_node_cls_by_name(node_type)
+        if not node_cls:
+            raise ValueError(f'Invalid node type name: {node_type}.')
+        node = node_cls()
+        node.ID = node_id
+        self[(node_id, node_type)] = node
+        return node
+       
+    def clear_cache(self):
+        '''clear the `nodes to be deleted` cache.'''
+        for _, node in self._ToBeDeleted.items():
+            if hasattr(node, 'ON_DESTROY'):
+                try:
+                    node.ON_DESTROY()
+                except Exception as e:
+                    ComfyUILogger.error(f'Error when calling ON_DESTROY for node with id={node.ID}({node.NAME}): {e}, ignored.')
+        self._ToBeDeleted.clear()
+        
+    def clear(self, clear_cache=True):
+        '''
+        clear all nodes in the pool.
+        If clear_cache=True, `nodes to be deleted` will also be cleared.
+        '''
+        if clear_cache:
+            self.clear_cache()
+        
         for _, node in self.items():
             if hasattr(node, 'ON_DESTROY'):
                 try:
                     node.ON_DESTROY()
                 except Exception as e:
-                    ComfyUILogger.error(f'Error when calling ON_DESTROY for node with id={node.ID}({node.__class__.__qualname__}): {e}, ignored.')
+                    ComfyUILogger.error(f'Error when calling ON_DESTROY for node with id={node.ID}({node.NAME}): {e}, ignored.')
         super().clear()
-
-    def pop(self, key: Union[str, int, Tuple[str, str]], default=None):
-        if isinstance(key, tuple):
-            if not len(key) in (1, 2):
-                raise ValueError(f'Invalid key: {key}, it should be a tuple with 2 elements(node_id, node_cls_name).' )
-            id = str(key[0])
-            node_type = key[1] if len(key)==2 else None
-        else:
-            id = str(key)
-            node_type = None
-        
-        node_type = get_cls_name(node_type) if node_type and isinstance(node_type, type) else node_type
-        
-        if node_type:
-            node = super().pop((id, node_type), default)
-        else:
-            node = self.get_node(id, raise_err=False, create_new=False)
-            if node:
-                node_type = get_cls_name(node)
-                super().pop((id, node_type), default)
-        if node:
-            if hasattr(node, 'ON_DESTROY'):
-                try:
-                    node.ON_DESTROY()
-                except Exception as e:
-                    ComfyUILogger.error(f'Error when calling ON_DESTROY for node with id={node.ID}({node.__class__.__qualname__}): {e}, ignored.')
-        return node
 
 class NodeBindingParam(Tuple[str, int], metaclass=NameCheckMetaCls()):
     '''
@@ -381,8 +350,8 @@ class NodeBindingParam(Tuple[str, int], metaclass=NameCheckMetaCls()):
         return self[0]
     
     @property
-    def from_node(self)->"ComfyUINode": # type: ignore
-        return NodePool.Instance[self.from_node_id]  # type: ignore
+    def from_node(self):
+        return NodePool.Instance().find_by_node_id(self.from_node_id)
     
     @property
     def output_slot_index(self)->int:
@@ -479,15 +448,6 @@ class NodeInputs(Dict[str, Union[NodeBindingParam, Any]], metaclass=NameCheckMet
             
         super().__setitem__(__key, __value)
 
-NodeOutputs_UI: TypeAlias = Dict[str, Dict[str, Any]]
-'''All outputs of nodes for ui'''
-
-NodeOutputs: TypeAlias = Dict[str, List[Any]]
-'''
-All outputs of nodes for execution.
-{node id: [output1, output2, ...], ...}
-'''
-
 StatusMsgEvent: TypeAlias = Literal['status', 'progress', 'executing', 'executed', 'execution_start', 'execution_error', 'execution_cached', 'execution_interrupted']
 '''The status message event type for PromptExecutor. See source/comfyUI/web/scripts/api.js'''
 
@@ -553,7 +513,7 @@ class ValidateInputsResult:
     '''the node id that is being validated'''
 
     def __getitem__(self, item: int):
-        if item not in (0, 1, 2, 3):
+        if item not in (0, 1, 2):
             raise IndexError(f"Index out of range: {item}")
         if item == 0:
             return self.success
@@ -561,8 +521,6 @@ class ValidateInputsResult:
             return self.errors
         if item == 2:
             return self.node_id
-        if item == 3:
-            return self.adapter
 
 @dataclass
 class ValidatePromptResult:
@@ -686,7 +644,7 @@ class NODE_MAPPING(Dict[Tuple[str, str], _MT], Generic[_MT]):
         try:
             return super().__getitem__((node_type_name, node_namespace))
         except KeyError as e:
-            if node_namespace:   # namepsace is specified but not found
+            if node_namespace:   # namespace is specified but not found
                 raise e
             for key in tuple(super().keys()):
                 if key[0] == node_type_name:
@@ -757,7 +715,7 @@ SamplerCallback: TypeAlias = Union[
 
 __all__ = ['InferenceOutput', 'InferenceContext', 'SamplingCallbackContext', 'SamplerCallback',
                 
-            'NodePool', 'NodeBindingParam', 'NodeInputs', 'NodeOutputs', 'NodeOutputs_UI',
+            'ComfyCacheDict', 'NodePool', 'NodeBindingParam', 'NodeInputs', 
             
             'StatusMsgEvent', 'StatusMsgs', 'QueueTask', 'ConvertedConditioning', 
             

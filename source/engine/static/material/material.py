@@ -3,7 +3,7 @@ from engine.static.enums import RenderOrder
 from engine.static.resourcesObj import ResourcesObj
 from engine.static.texture import Texture
 from engine.static.shader import Shader, SupportedShaderValueTypes
-from typing import Union, get_args, Dict, Tuple, TypeVar, Type
+from typing import Union, get_args, Dict, Tuple, TypeVar, Type, Optional
 from enum import Enum
 from dataclasses import dataclass
 from common_utils.type_utils import valueTypeCheck
@@ -106,10 +106,10 @@ class Material(ResourcesObj):
         '''Create a new material with default opaque shader.'''
         if name is None:
             name = f'Default_Opaque_Material_{cls._Default_Opaque_Material_Count}'
-        elif name in cls.AllInstances():
+        elif name in cls.BaseInstances():
             raise ValueError(f'Material name {name} already exists.')
         Material._Default_Opaque_Material_Count += 1
-        return cls(name, Shader.Default_GBuffer_Shader())
+        return cls(name, shader=Shader.Default_GBuffer_Shader())
 
     @classmethod
     def Debug_Material(cls, grayMode=False, pinkMode=False, whiteMode=False, name=None)->'Material':
@@ -119,7 +119,7 @@ class Material(ResourcesObj):
         elif name in cls.AllInstances():
             raise ValueError(f'Material name {name} already exists.')
         Material._Debug_Material_Count += 1
-        mat = cls(name, Shader.Debug_Shader())
+        mat = cls(name, shader=Shader.Debug_Shader())
         mat.setVariable('grayMode', grayMode)
         mat.setVariable('pinkMode', pinkMode)
         mat.setVariable('whiteMode', whiteMode)
@@ -143,7 +143,10 @@ class Material(ResourcesObj):
         return subcls.Load(path, *args, **kwargs)
     # endregion
 
-    def __init__(self, name, shader:Shader=None, order:Union[RenderOrder, int]=RenderOrder.OPAQUE):
+    def __init__(self, 
+                 name: Optional[str] = None, 
+                 shader:Optional[Shader]=None, 
+                 order:Union[RenderOrder, int]=RenderOrder.OPAQUE):
         '''
         :param name: name of the material
         :param shader: shader of the material. If None, will use Shader.Default_Defer_Shader()
@@ -156,8 +159,8 @@ class Material(ResourcesObj):
         self._renderOrder = order.value if isinstance(order, RenderOrder) else order
         self._textures:Dict[str, Tuple['Texture', int]] = {} # name: (texture, slot)
         self._variables = {} # name: value
-        self._id: int = GetOrAddGlobalValue("_MaterialCount", 0)
-        SetGlobalValue("_MaterialCount", self._id+1)
+        self._id: int = GetOrAddGlobalValue("_MaterialCount", 0)    # type: ignore
+        SetGlobalValue("_MaterialCount", self._id+1)    # type: ignore
 
 
     @property
@@ -245,7 +248,7 @@ class Material(ResourcesObj):
                 if i < len(DefaultTextureType):
                     # means this is not a default texture, but it is in the default texture slot, so we need to set the default texture to None
                     defaultTexType = DefaultTextureType.FindDefaultTextureBySlot(i)
-                    self._shader.setUniform(defaultTexType.value.shader_check_name, 0)
+                    self._shader.setUniform(defaultTexType.value.shader_check_name, 0)  # type: ignore
             tex.bind(i, self._shader.getUniformID(name))
         for name, value in self._variables.items():
             self._shader.setUniform(name, value)

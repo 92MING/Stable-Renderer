@@ -73,7 +73,7 @@ class DiffusionManager(Manager):
     @property
     def DefaultWorkflow(self)->Optional[Workflow]:
         '''the current running workflow'''
-        return self._workflow
+        return self._workflow   # type: ignore
     
     @property
     def PromptExecutor(self)->"PromptExecutor":
@@ -87,7 +87,7 @@ class DiffusionManager(Manager):
     def ShouldOutputFrame(self):
         '''
         Return if the current frame's map data should be output to disk.
-        This is different from `NeedOutputMaps`: `NeedOutputMaps` is a global flag, while `ShouldOutputFrame` will only be True when the current frame fullfills the condition set by `MapSavingInterval`.
+        This is different from `NeedOutputMaps`: `NeedOutputMaps` is a global flag, while `ShouldOutputFrame` will only be True when the current frame fulfills the condition set by `MapSavingInterval`.
         '''
         return self._needOutputMaps and self.engine.RuntimeManager.FrameCount % self._mapSavingInterval == 0
     
@@ -242,8 +242,8 @@ class DiffusionManager(Manager):
             return
         
         prompt, node_ids_to_be_ran, extra_data = workflow.build_prompt()
-        context = self.engine.PromptExecutor.execute(prompt = prompt, 
-                                                     extra_data = extra_data,
+        context = self.engine.PromptExecutor.execute(prompt=prompt, 
+                                                     extra_data=extra_data,
                                                      node_ids_to_be_ran=node_ids_to_be_ran, 
                                                      frame_data=frameData)
         if self.SaveSDColorOutput:

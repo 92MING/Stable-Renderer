@@ -1,15 +1,17 @@
 import torch
 import math
 import os
-from abc import ABC, abstractmethod
 import comfy.utils
 import comfy.model_management
 import comfy.model_detection
 import comfy.model_patcher
 import comfy.ops
-
 import comfy.cldm.cldm
 import comfy.t2i_adapter.adapter
+
+from abc import ABC, abstractmethod
+from typing import Optional, Any
+
 from common_utils.debug_utils import ComfyUILogger
 
 
@@ -137,14 +139,34 @@ class ControlBase(ABC):
     def copy(self): ...
 
 class ControlNet(ControlBase):
-    def __init__(self, control_model, global_average_pooling=False, device=None, load_device=None, manual_cast_dtype=None):
+    def __init__(self, 
+                 control_model, 
+                 global_average_pooling=False, 
+                 device=None, 
+                 load_device=None, 
+                 manual_cast_dtype=None,
+                 name: Optional[str] = None,
+                 identifier: Optional[Any] = None):
         super().__init__(device)
+        
+        self.name = name or f'Unknown_{self.__class__.__qualname__}'
+        '''name is a debug property for printing on the UI, it is not used for anything else'''
+        self.identifier = identifier
+        '''identifier is a special property to define the source of the model. It helps on separating the models when __eq__ is called. If it is None, it will not be used for comparison.'''
+        
         self.control_model = control_model
         self.load_device = load_device
-        self.control_model_wrapped = comfy.model_patcher.ModelPatcher(self.control_model, load_device=load_device, offload_device=comfy.model_management.unet_offload_device())
+        self.control_model_wrapped = comfy.model_patcher.ModelPatcher(self.control_model, load_device=load_device, offload_device=comfy.model_management.unet_offload_device(), model_name=self.name)
         self.global_average_pooling = global_average_pooling
         self.model_sampling_current = None
         self.manual_cast_dtype = manual_cast_dtype
+        
+    def __eq__(self, other):
+        if hasattr(self, 'identifier') and hasattr(other, 'identifier'):
+            if self.__class__ == other.__class__:
+                if self.identifier is not None and other.identifier is not None:
+                    return self.identifier == other.identifier
+        return super().__eq__(other)
 
     def get_control(self, x_noisy, t, cond, batched_number):
         control_prev = None
@@ -324,7 +346,10 @@ class ControlLora(ControlNet):
     def inference_memory_requirements(self, dtype):
         return comfy.utils.calculate_parameters(self.control_weights) * comfy.model_management.dtype_size(dtype) + ControlBase.inference_memory_requirements(self, dtype)
 
-def load_controlnet(ckpt_path, model=None):
+def load_controlnet(ckpt_path, model=None, model_name: Optional[str] = None):
+    if not model_name:
+        model_name = f'{os.path.basename(ckpt_path)}_ControlNet'
+            
     controlnet_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
     if "lora_controlnet" in controlnet_data:
         return ControlLora(controlnet_data)
@@ -440,7 +465,12 @@ def load_controlnet(ckpt_path, model=None):
     if filename.endswith("_shuffle") or filename.endswith("_shuffle_fp16"): #TODO: smarter way of enabling global_average_pooling
         global_average_pooling = True
 
-    control = ControlNet(control_model, global_average_pooling=global_average_pooling, load_device=load_device, manual_cast_dtype=manual_cast_dtype)
+    control = ControlNet(control_model, 
+                         global_average_pooling=global_average_pooling, 
+                         load_device=load_device, 
+                         manual_cast_dtype=manual_cast_dtype, 
+                         name=model_name,
+                         identifier=ckpt_path)
     return control
 
 class T2IAdapter(ControlBase):

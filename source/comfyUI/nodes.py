@@ -16,7 +16,7 @@ from PIL import Image, ImageOps, ImageSequence
 from PIL.PngImagePlugin import PngInfo
 from typing import (Dict, Tuple, List, Literal, Any, Optional, Callable, Type, TYPE_CHECKING)
 
-from common_utils.global_utils import GetGlobalValue, SetGlobalValue, GetOrAddGlobalValue, is_dev_mode, should_run_web_server
+from common_utils.global_utils import GetGlobalValue, is_dev_verbose, SetGlobalValue, GetOrAddGlobalValue, is_dev_mode, should_run_web_server
 from common_utils.debug_utils import ComfyUILogger
 
 sys.path.insert(2, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
@@ -532,9 +532,17 @@ class CheckpointLoader:
     CATEGORY = "advanced/loaders"
 
     def load_checkpoint(self, config_name, ckpt_name, output_vae=True, output_clip=True):
+        if is_dev_verbose():
+            ComfyUILogger.debug("Loading Checkpoint: {} with config: {}".format(ckpt_name, config_name))
+        
         config_path = folder_paths.get_full_path("configs", config_name)
         ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
-        return comfy.sd.load_checkpoint(config_path, ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
+        return comfy.sd.load_checkpoint(config_path, 
+                                        ckpt_path, 
+                                        output_vae=output_vae, 
+                                        output_clip=output_clip, 
+                                        embedding_directory=folder_paths.get_folder_paths("embeddings"),
+                                        model_name = ckpt_name)
 
 class CheckpointLoaderSimple:
     @classmethod
@@ -547,8 +555,14 @@ class CheckpointLoaderSimple:
     CATEGORY = "loaders"
 
     def load_checkpoint(self, ckpt_name, output_vae=True, output_clip=True):
+        if is_dev_verbose():
+            ComfyUILogger.debug("Loading Checkpoint: {}".format(ckpt_name))
         ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
-        out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
+        out = comfy.sd.load_checkpoint_guess_config(ckpt_path, 
+                                                    output_vae=output_vae, 
+                                                    output_clip=output_clip,
+                                                    embedding_directory=folder_paths.get_folder_paths("embeddings"),
+                                                    model_name = ckpt_name)
         return out[:3]
 
 class DiffusersLoader:
@@ -610,6 +624,9 @@ class CLIPSetLastLayer:
         return (clip,)
 
 class LoraLoader:
+    
+    loaded_lora: Optional[Tuple[str, Dict[str, torch.Tensor]]] = None
+    
     def __init__(self):
         self.loaded_lora = None
 
@@ -626,7 +643,16 @@ class LoraLoader:
 
     CATEGORY = "loaders"
 
-    def load_lora(self, model, clip, lora_name, strength_model, strength_clip):
+    def load_lora(self, 
+                  model: "ModelPatcher", 
+                  clip: Optional["CLIP"],
+                  lora_name: str,
+                  strength_model: float, 
+                  strength_clip: float):
+        
+        if is_dev_verbose():
+            ComfyUILogger.debug("Loading Lora: {} with strength_model: {} and strength_clip: {}".format(lora_name, strength_model, strength_clip))
+        
         if strength_model == 0 and strength_clip == 0:
             return (model, clip)
 
@@ -644,7 +670,13 @@ class LoraLoader:
             lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
             self.loaded_lora = (lora_path, lora)
 
-        model_lora, clip_lora = comfy.sd.load_lora_for_models(model, clip, lora, strength_model, strength_clip)
+        debug_lora_name = os.path.basename(lora_path).split(".")[0]
+        model_lora, clip_lora = comfy.sd.load_lora_for_models(model=model, 
+                                                              clip=clip, 
+                                                              lora=lora, 
+                                                              strength_model=strength_model, 
+                                                              strength_clip=strength_clip,
+                                                              lora_name=debug_lora_name)
         return (model_lora, clip_lora)
 
 class LoraLoaderModelOnly(LoraLoader):
@@ -657,7 +689,7 @@ class LoraLoaderModelOnly(LoraLoader):
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "load_lora_model_only"
 
-    def load_lora_model_only(self, model, lora_name, strength_model):
+    def load_lora_model_only(self, model: "ModelPatcher", lora_name: str, strength_model: float):# -> tuple[Any | None]:
         return (self.load_lora(model, None, lora_name, strength_model, 0)[0],)
 
 class VAELoader:
@@ -722,7 +754,11 @@ class VAELoader:
         else:
             vae_path = folder_paths.get_full_path("vae", vae_name)
             sd = comfy.utils.load_torch_file(vae_path)
-        vae = comfy.sd.VAE(sd=sd)
+        
+        debug_vae_name = vae_name.split(".")[0]
+        if not debug_vae_name.lower().endswith("vae"):
+            debug_vae_name += "_VAE"
+        vae = comfy.sd.VAE(sd=sd, name=debug_vae_name, identifier=vae_name)
         return (vae,)
 
 class ControlNetLoader:
@@ -736,6 +772,9 @@ class ControlNetLoader:
     CATEGORY = "loaders"
 
     def load_controlnet(self, control_net_name):
+        if is_dev_verbose():
+            ComfyUILogger.debug("Loading ControlNet: {}".format(control_net_name))
+        
         controlnet_path = folder_paths.get_full_path("controlnet", control_net_name)
         controlnet = comfy.controlnet.load_controlnet(controlnet_path)
         return (controlnet,)
@@ -1941,8 +1980,12 @@ if EXTENSION_WEB_DIRS is None:
 
 
 def _init_node_clses():
-    for _, node_cls in NODE_CLASS_MAPPINGS.items():
+    for (node_regis_name, namespace), node_cls in NODE_CLASS_MAPPINGS.items():
         setattr(node_cls, '__IS_COMFYUI_NODE__', True)
+        if not hasattr(node_cls, 'NAME'):
+            setattr(node_cls, 'NAME', node_regis_name)
+        if not hasattr(node_cls, 'NAMESPACE'):
+            setattr(node_cls, 'NAMESPACE', namespace)
         
 _init_node_clses()
     
@@ -2005,6 +2048,11 @@ def _load_custom_node(module_path, ignore=set(), regist_name: Optional[str]=None
                         name = key
                         namespace = module_name_for_regist
                     if name not in ignore:
+                        node_cls = module.NODE_DISPLAY_NAME_MAPPINGS[key]
+                        if hasattr(node_cls, 'NAME'):
+                            name = node_cls.NAME    # override the name
+                        if hasattr(node_cls, 'NAMESPACE'):
+                            namespace = node_cls.NAMESPACE    # override the namespace
                         NODE_DISPLAY_NAME_MAPPINGS[(name, namespace)] = module.NODE_DISPLAY_NAME_MAPPINGS[key]
         return True
             

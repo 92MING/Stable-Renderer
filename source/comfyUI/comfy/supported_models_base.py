@@ -1,13 +1,24 @@
 import torch
+from typing import TYPE_CHECKING, Type, Union
+
 from . import model_base
 from . import utils
 from . import latent_formats
 
+if TYPE_CHECKING:
+    from comfy.sd1_clip import SDClipModel, SD1Tokenizer, SD1ClipModel
+    from comfy.sdxl_clip import SDXLTokenizer, SDXLClipModel
+
+
 class ClipTarget:
-    def __init__(self, tokenizer, clip):
+    def __init__(self, 
+                 tokenizer: Type[Union["SD1Tokenizer", "SDXLTokenizer"]],
+                 clip: Type[Union['SDClipModel', "SD1ClipModel", "SDXLClipModel"]],
+                 **extra_params,
+                 ):
         self.clip = clip
         self.tokenizer = tokenizer
-        self.params = {}
+        self.params = extra_params
 
 class BASE:
     unet_config = {}

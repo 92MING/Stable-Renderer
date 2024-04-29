@@ -8,7 +8,13 @@ import comfy.model_patcher
 import comfy.model_management
 import comfy.utils
 import comfy.clip_model
+
+from typing import TYPE_CHECKING, Optional, Any
 from common_utils.debug_utils import ComfyUILogger
+
+if TYPE_CHECKING:
+    from comfy.clip_model import CLIPVisionModelProjection
+
 
 class Output:
     def __getitem__(self, key):
@@ -30,17 +36,31 @@ def clip_preprocess(image, size=224):
     return (image - mean.view([3,1,1])) / std.view([3,1,1])
 
 class ClipVisionModel():
-    def __init__(self, json_config):
+    def __init__(self, 
+                 json_config, 
+                 name: Optional[str]=None,
+                 identifier: Optional[Any]=None):
+        
         with open(json_config) as f:
             config = json.load(f)
-
+        
+        self.name = name or f"Unknown_{self.__class__.__qualname__}"
+        self.identifier = identifier
+        
         self.load_device = comfy.model_management.text_encoder_device()
         offload_device = comfy.model_management.text_encoder_offload_device()
         self.dtype = comfy.model_management.text_encoder_dtype(self.load_device)
-        self.model = comfy.clip_model.CLIPVisionModelProjection(config, self.dtype, offload_device, comfy.ops.manual_cast)
+        self.model: "CLIPVisionModelProjection" = comfy.clip_model.CLIPVisionModelProjection(config, self.dtype, offload_device, comfy.ops.manual_cast)
         self.model.eval()
 
-        self.patcher = comfy.model_patcher.ModelPatcher(self.model, load_device=self.load_device, offload_device=offload_device)
+        self.patcher = comfy.model_patcher.ModelPatcher(self.model, load_device=self.load_device, offload_device=offload_device, model_name=self.name)
+
+    def __eq__(self, other):
+        if hasattr(self, 'identifier') and hasattr(other, 'identifier'):
+            if self.__class__ == other.__class__:
+                if self.identifier is not None and other.identifier is not None:
+                    return self.identifier == other.identifier
+        return super().__eq__(other)
 
     def load_sd(self, sd):
         return self.model.load_state_dict(sd, strict=False)
@@ -85,7 +105,7 @@ def convert_to_transformers(sd, prefix):
         sd = state_dict_prefix_replace(sd, replace_prefix)
     return sd
 
-def load_clipvision_from_sd(sd, prefix="", convert_keys=False):
+def load_clipvision_from_sd(sd, prefix="", convert_keys=False, model_name: Optional[str]=None, identifier: Optional[Any]=None):
     if convert_keys:
         sd = convert_to_transformers(sd, prefix)
     if "vision_model.encoder.layers.47.layer_norm1.weight" in sd:
@@ -97,7 +117,7 @@ def load_clipvision_from_sd(sd, prefix="", convert_keys=False):
     else:
         return None
 
-    clip = ClipVisionModel(json_config)
+    clip = ClipVisionModel(json_config, name=model_name, identifier=identifier)
     m, u = clip.load_sd(sd)
     if len(m) > 0:
         ComfyUILogger.print("missing clip vision:", m)
@@ -109,9 +129,12 @@ def load_clipvision_from_sd(sd, prefix="", convert_keys=False):
             del t
     return clip
 
-def load(ckpt_path):
+def load(ckpt_path, name: Optional[str]=None):
+    if not name:
+        name = f'{os.path.basename(ckpt_path)}_ClipVision'
+    
     sd = load_torch_file(ckpt_path)
     if "visual.transformer.resblocks.0.attn.in_proj_weight" in sd:
-        return load_clipvision_from_sd(sd, prefix="visual.", convert_keys=True)
+        return load_clipvision_from_sd(sd, prefix="visual.", convert_keys=True, model_name=name, identifier=ckpt_path)
     else:
-        return load_clipvision_from_sd(sd)
+        return load_clipvision_from_sd(sd, model_name=name, identifier=ckpt_path)

@@ -1,11 +1,18 @@
 import sys
 import psutil
-from enum import Enum
-
-from common_utils.debug_utils import ComfyUILogger
-from comfy.cli_args import args
 import comfy.utils
 import torch
+
+from enum import Enum
+from typing import List, TYPE_CHECKING, Sequence, Union
+from comfy.cli_args import args
+from common_utils.global_utils import GetOrCreateGlobalValue, is_verbose_mode, is_dev_mode
+from common_utils.debug_utils import ComfyUILogger
+
+if TYPE_CHECKING:
+    from comfy.model_patcher import ModelPatcher
+
+
 
 class VRAMState(Enum):
     DISABLED = 0    #No vram present: no need to move models to vram
@@ -36,7 +43,7 @@ if args.deterministic:
 
 directml_enabled = False
 if args.directml is not None:
-    import torch_directml
+    import torch_directml   # type: ignore
     directml_enabled = True
     device_index = args.directml
     if device_index < 0:
@@ -45,10 +52,10 @@ if args.directml is not None:
         directml_device = torch_directml.device(device_index)
     ComfyUILogger.debug("Using directml with device:" + str(torch_directml.device_name(device_index)))
     # torch_directml.disable_tiled_resources(True)
-    lowvram_available = False #TODO: need to find a way to get free memory in directml before this can be enabled by default.
+    lowvram_available = False   #TODO: need to find a way to get free memory in directml before this can be enabled by default.
 
 try:
-    import intel_extension_for_pytorch as ipex
+    import intel_extension_for_pytorch as ipex  # type: ignore
     if torch.xpu.is_available():
         xpu_available = True
 except:
@@ -133,7 +140,7 @@ except:
 XFORMERS_VERSION = ""
 XFORMERS_ENABLED_VAE = True
 
-if args.disable_xformers:   # for any case that comfyUI start by editor or game, `xfomrers` is not available
+if args.disable_xformers:   # for any case that comfyUI start by editor or game, `xformers` is not available
     ComfyUILogger.debug('Disabled xformers.')
     XFORMERS_IS_AVAILABLE = False
 else:
@@ -264,7 +271,11 @@ except:
 
 ComfyUILogger.debug("VAE dtype:" + str(VAE_DTYPE))
 
-current_loaded_models = []
+current_loaded_models: List["LoadedModel"] = GetOrCreateGlobalValue("__COMFY_CURRENT_LOADED_MODELS__", list)
+'''
+A list of currently loaded models.
+The more frequently used models should be at the start of the list.
+'''
 
 def module_size(module):
     module_mem = 0
@@ -275,10 +286,17 @@ def module_size(module):
     return module_mem
 
 class LoadedModel:
-    def __init__(self, model):
+    def __init__(self, model: "ModelPatcher"):
         self.model = model
         self.model_accelerated = False
         self.device = model.load_device
+        
+    @property
+    def name(self):
+        return self.model.name
+        
+    def __repr__(self):
+        return f"<LoadedModel (model={self.model.name} device={self.device} type={self.model.model.__class__.__qualname__})>"
 
     def model_memory(self):
         return self.model.model_size()
@@ -338,9 +356,13 @@ class LoadedModel:
 
         self.model.unpatch_model(self.model.offload_device)
         self.model.model_patches_to(self.model.offload_device)
+        ComfyUILogger.print("Unloaded model:", self)
 
-    def __eq__(self, other):
-        return self.model is other.model
+    def __eq__(self, other: Union["ModelPatcher", "LoadedModel"]):
+        from comfy.model_patcher import ModelPatcher
+        if isinstance(other, ModelPatcher):
+            return self.model == other
+        return self.model == other.model
 
 def minimum_inference_memory():
     return (1024 * 1024 * 1024)
@@ -352,10 +374,12 @@ def unload_model_clones(model):
             to_unload = [i] + to_unload
 
     for i in to_unload:
-        ComfyUILogger.debug("unload clone", i)
+        ComfyUILogger.print(f"Unloading model clone: {current_loaded_models[i]}")
         current_loaded_models.pop(i).model_unload()
 
 def free_memory(memory_required, device, keep_loaded=[]):
+    if memory_required <= 0:
+        return
     unloaded_model = False
     for i in range(len(current_loaded_models) -1, -1, -1):
         if not DISABLE_SMART_MEMORY:
@@ -377,24 +401,33 @@ def free_memory(memory_required, device, keep_loaded=[]):
             if mem_free_torch > mem_free_total * 0.25:
                 soft_empty_cache()
 
-def load_models_gpu(models, memory_required=0):
+def load_models_gpu(models: Union[Sequence["ModelPatcher"], "ModelPatcher"], memory_required=0):
     global vram_state
+    
+    if not isinstance(models, Sequence):
+        models = [models]
 
     inference_memory = minimum_inference_memory()
     extra_mem = max(inference_memory, memory_required)
 
     models_to_load = []
     models_already_loaded = []
+    
     for x in models:
         loaded_model = LoadedModel(x)
 
         if loaded_model in current_loaded_models:
             index = current_loaded_models.index(loaded_model)
-            current_loaded_models.insert(0, current_loaded_models.pop(index))
+            if index != 0:
+                current_loaded_models.insert(0, current_loaded_models.pop(index))
             models_already_loaded.append(loaded_model)
+            if is_dev_mode() and is_verbose_mode():
+                ComfyUILogger.debug(f"Model already loaded: {loaded_model}")
         else:
             if hasattr(x, "model"):
-                ComfyUILogger.debug(f"Requested to load {x.model.__class__.__name__}")
+                ComfyUILogger.debug(f"Requested to load model: `{x.name}({x.model.__class__.__qualname__})`")
+            else:
+                ComfyUILogger.debug(f"Requested to load model: `{x.name}`")
             models_to_load.append(loaded_model)
 
     if len(models_to_load) == 0:
@@ -404,12 +437,10 @@ def load_models_gpu(models, memory_required=0):
                 free_memory(extra_mem, d, models_already_loaded)
         return
 
-    ComfyUILogger.debug(f"Loading {len(models_to_load)} new model{'s' if len(models_to_load) > 1 else ''}")
-
     total_memory_required = {}
-    for loaded_model in models_to_load:
-        unload_model_clones(loaded_model.model)
-        total_memory_required[loaded_model.device] = total_memory_required.get(loaded_model.device, 0) + loaded_model.model_memory_required(loaded_model.device)
+    for model in models_to_load:
+        unload_model_clones(model.model)
+        total_memory_required[model.device] = total_memory_required.get(model.device, 0) + model.model_memory_required(model.device)
 
     for device in total_memory_required:
         if device != torch.device("cpu"):
@@ -437,10 +468,12 @@ def load_models_gpu(models, memory_required=0):
 
         cur_loaded_model = loaded_model.model_load(lowvram_model_memory)
         current_loaded_models.insert(0, loaded_model)
-    return
+    
+    if is_dev_mode() and is_verbose_mode():
+        ComfyUILogger.debug(f"Load models success. Current loaded models: {current_loaded_models}")
 
 
-def load_model_gpu(model):
+def load_model_gpu(model: "ModelPatcher"):
     return load_models_gpu([model])
 
 def cleanup_models():

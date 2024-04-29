@@ -44,6 +44,10 @@ class FrameDataNode(StableRendererNodeBase):
                 frame_data.noise_map,
                 frame_data.mask)
 
+    def IsChanged(self, frame_data: FrameData):
+        from engine.engine import Engine
+        return Engine.Instance().RuntimeManager.FrameCount  # use frame count to determine if the frame data is changed
+
 
 class InferenceOutputNode(StableRendererNodeBase):
     '''

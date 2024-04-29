@@ -145,7 +145,7 @@ def get_input_param_type(param: Parameter,
     return 'required'  
 
 def get_node_cls_by_name(name: str, namespace: Optional[str]=None, init_nodes_if_not_yet=False)->Optional[Type["ComfyUINode"]]:
-    '''this method will only return corret result when custom nodes are initialized'''
+    '''this method will only return correct result when custom nodes are initialized'''
     from comfyUI.nodes import NODE_CLASS_MAPPINGS
     try:
         return NODE_CLASS_MAPPINGS[(name, namespace)]
@@ -179,7 +179,7 @@ __all__ = ['get_comfy_name', 'get_comfy_type_definition', 'get_input_param_type'
 _comfy_get_input_type_name_cache: Dict[Tuple[int, str], str] = GetOrCreateGlobalValue("__COMFY_GET_INPUT_TYPE_NAME_CACHE__", dict)
 
 def get_comfy_node_input_type(node_type: Union["ComfyUINode", Type["ComfyUINode"]], input_name: str)->str:
-    '''return the type of the input parameter of the node.'''
+    '''return the type name of the input parameter of the node.'''
     if not isinstance(node_type, type):
         node_type = node_type.__class__
         
@@ -215,7 +215,6 @@ def check_input_param_is_lazy(param_name: str, node_class: Union["ComfyUINode", 
         return False
     lazy_inputs = node_class.LAZY_INPUTS
     return param_name in lazy_inputs
-
 
 
 __all__.extend(['get_comfy_node_input_type', 'check_input_param_is_list_type', 'check_input_param_is_lazy'])

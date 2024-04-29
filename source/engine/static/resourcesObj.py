@@ -57,7 +57,7 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
 
     _internal_id: str
     '''For internal use only, do not override this'''
-    _name: str
+    _name: Optional[str]
     '''name of this obj. Each obj should have a unique name for identification.'''
     
     @classmethod
@@ -145,21 +145,22 @@ class ResourcesObj(metaclass=ResourcesObjMeta):
         return path, name
     # endregion
 
-    def __new__(cls: Type[RC], name, *args, **kwargs)->RC:
-        if name in cls.BaseInstances():
+    def __new__(cls: Type[RC], name: Optional[str] = None, **kwargs)->RC:
+        if name is not None and name in cls.BaseInstances():
             return cls.BaseInstances()[name]    # type: ignore
         else:
             obj = super().__new__(cls)  # type: ignore
             obj._name = name
             obj._internal_id = _random_str()
-            cls.BaseInstances()[name] = obj
+            if name is not None:
+                cls.BaseInstances()[name] = obj
             return obj
 
-    def __init__(self, name: str, *args, **kwargs):
-        pass
+    def __init__(self, name: Optional[str]): ...
 
     @property
     def name(self):
+        '''The name of the obj can be None, which means that it is a temporary obj that is not stored in the ResourcesManager.'''
         return self._name
 
     _engine = None

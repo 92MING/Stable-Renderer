@@ -12,14 +12,19 @@ except ModuleNotFoundError:
     
 import safetensors.torch
 import numpy as np
+
+from typing import Dict
 from common_utils.debug_utils import ComfyUILogger
 from PIL import Image
 
-def load_torch_file(ckpt, safe_load=False, device=None):
+
+def load_torch_file(ckpt: str, safe_load=False, device=None) -> Dict[str, torch.Tensor]:
     if device is None:
         device = torch.device("cpu")
+        
     if ckpt.lower().endswith(".safetensors"):
         sd = safetensors.torch.load_file(ckpt, device=device.type)
+    
     else:
         if safe_load:
             if not 'weights_only' in torch.load.__code__.co_varnames:

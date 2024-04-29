@@ -12,11 +12,13 @@ import numpy as np
 import inspect
 import re
 import json
+
+from copy import deepcopy
 from dataclasses import dataclass
 from inspect import Parameter, signature, _empty, getmro
 from collections import OrderedDict
 from typing import (Any, Sequence, Union, ForwardRef, get_args as tp_get_args, get_origin as tp_get_origin, Callable, Awaitable, 
-                    Iterable, Mapping, Literal, TypeAlias, Tuple, _SpecialForm, Type, Dict)
+                    List, Iterable, Mapping, Literal, TypeAlias, Tuple, _SpecialForm, Type, Dict, TypeVar)
 from types import UnionType
 from inspect import getmro, signature
 from pydantic.v1 import BaseModel as BaseModelV1
@@ -30,6 +32,7 @@ except ImportError: # version problem
 _tg_check_type_params = signature(tg_check_type).parameters
 _tg_check_type_required_param_count = sum(1 for p in _tg_check_type_params.values() if p.default == _empty)
 def _wrapped_tg_check_type(val, t):
+    '''to avoid the problem of typeguard.check_type in different versions.'''
     if _tg_check_type_required_param_count >= 3:
         try:
             tg_check_type("", val, t)   # type: ignore
@@ -184,8 +187,7 @@ def subClassCheck(sub_cls:Union[str, type, TypeAlias, Any], super_cls: Union[str
 __all__ = ['subClassCheck', 'valueTypeCheck']
 # endregion
 
-
-# region helper functions
+# region helper funcs for type checking
 def get_origin(t:Any)->Union[Type, _SpecialForm, None]:
     '''
     Return the origin type of the type hint.
@@ -197,7 +199,7 @@ def get_origin(t:Any)->Union[Type, _SpecialForm, None]:
         * _empty -> Any
     '''
     if t == _empty:
-        return Any
+        return Any  # type: ignore
     if isinstance(t, ForwardRef):
         return ForwardRef
 
@@ -224,6 +226,8 @@ def get_cls_name(cls_or_ins: Any):
     Return the pure class name, without module name. e.g. 'A' instead of 'utils.xxx....A
     Preventing error when `__qualname__` is not available.
     '''
+    if hasattr(cls_or_ins, 'NAME') and hasattr(cls_or_ins, '__IS_COMFYUI_NODE__') and cls_or_ins.__IS_COMFYUI_NODE__:
+        return cls_or_ins.NAME
     if not isinstance(cls_or_ins, type):
         cls = type(cls_or_ins)
     else:
@@ -327,11 +331,9 @@ def get_attr(obj: Any, attr_name: str)->Union[Any, None]:
 __all__.extend(['get_origin', 'get_args', 'get_cls_name', 'get_mro_names', 'get_mro_distance', 'get_proper_module_name', 'get_attr'])
 # endregion
 
-
-# region functions type related
+# region function-related utils
 class InvalidParamError(TypeError):
     '''Invalid parameter error'''
-    pass
 
 @dataclass
 class PackParamOutput:
@@ -454,6 +456,10 @@ def is_empty_method(method):
     lines = [line for line in lines if not line.startswith(('#', '"""',"'''")) and not line == 'pass']
     return not lines
 
+__all__.extend(['pack_param', 'func_param_type_check', 'is_empty_method'])
+# endregion
+
+# region data dump/formatting/processing
 def _check_dumpable(val):
     if isinstance(val, (BaseModelV1, BaseModelV2)):
         try:
@@ -507,27 +513,79 @@ def brute_dump_json(data):
         else:
             return str(data)
 
-def format_data_for_console_log(data):
+def format_data_for_console_log(data: Any, detail_mode:bool=False)->str:
+    '''
+    Since sometimes printing data is too long for review,
+    this method will format the data to a more readable format.
+    
+    Args:
+        - data: the data to be formatted. It can be any type.
+        - detail_mode: if True, the inner data of the origin data will be shown. Otherwise the formatted data will be more short.
+    '''
+    data_str = ""
     if isinstance(data, dict):
-        data_str_dict = {}
+        data_str += "{"
         for k, v in data.items():
-            data_str_dict[k] = format_data_for_console_log(v)
-        return data_str_dict
+            data_str += f"{k}: "
+            formatted = format_data_for_console_log(v, detail_mode=detail_mode)
+            if not detail_mode and len(formatted) > 100:
+                formatted = f'`{formatted[:95]}...`'
+            data_str += f"{formatted}, "
+        data_str += "}"
     elif isinstance(data, (list, tuple)):
-        data_strs = []
-        for d in data:
-            data_strs.append(format_data_for_console_log(d))
-        return data_strs
+        data_str += "["
+        for v in data:
+            formatted = format_data_for_console_log(v, detail_mode=detail_mode)
+            if not detail_mode and len(formatted) > 100:
+                formatted = f'`{formatted[:95]}...`'
+            data_str += f"{formatted}, "
+        data_str += "]"
     else:
         data_str = str(data)
-        if len(data_str) > 20:
-            data_str = f'`{data_str[:15]}...`'
-        return data_str
+        if len(data_str) > 100 and not detail_mode:
+            data_str = f'`{data_str[:95]}...`'
+    
+    return data_str.replace('\n', ' ')
 
+_T = TypeVar('_T')
+_DefaultCustomCopyMethods = ('__deepcopy__', 'deepcopy', 'deep_copy')
+def custom_deep_copy(val: _T, methods: Union[List[str], Tuple[str, ...], str] = _DefaultCustomCopyMethods)->_T: # type: ignore
+    '''
+    by default, this method will call one of the methods below:
+        - `__deepcopy__`
+        - `deepcopy`
+        - `deep_copy`
+        
+    in case the object has(and also it has to be a no arg callable).
+    You can also specify the methods to be called by passing the `methods` parameter.
+    Otherwise, it will call `copy.deepcopy`.
+    '''
+    if isinstance(methods, str):
+        methods = (methods,)
+    if isinstance(val, dict):
+        return {k: custom_deep_copy(v) for k, v in val.items()} # type: ignore
+    elif isinstance(val, list):
+        return [custom_deep_copy(v) for v in val] # type: ignore
+    elif isinstance(val, tuple):
+        return tuple([custom_deep_copy(v) for v in val]) # type: ignore
+    elif isinstance(val, set):
+        return set([custom_deep_copy(v) for v in val]) # type: ignore
+    elif isinstance(val, np.ndarray):
+        return np.copy(val)
+    elif isinstance(val, torch.Tensor):
+        return val.clone()
+    else:
+        if methods:
+            for method in methods:
+                try:
+                    if hasattr(val, method) and callable(getattr(val, method)) and len(signature(getattr(val, method)).parameters) == 0:
+                        return getattr(val, method)()
+                except ValueError:  # no signature
+                    pass
+        return deepcopy(val)
 
-__all__.extend(['pack_param', 'func_param_type_check', 'is_empty_method', 'brute_dump_json', 'format_data_for_console_log'])
+__all__.extend(['brute_dump_json', 'format_data_for_console_log', 'custom_deep_copy'])
 # endregion
-
 
 # region common used types
 BasicType = Union[int, float, str, bool, bytes, list, tuple, dict, set, type(None)]
@@ -538,7 +596,6 @@ AsyncFunc = Callable[..., Awaitable[Any]]
 
 __all__.extend(['BasicType', 'AsyncFunc'])
 # endregion
-
 
 # region base clses
 _NameCheckClses: Dict[Tuple[str,...], type] = GetOrCreateGlobalValue('__NameCheckClses__', dict)

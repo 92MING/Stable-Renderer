@@ -18,12 +18,12 @@ from attr import attrs, attrib
 from functools import partial
 from folder_paths import get_temp_directory
 
-from comfy.cli_args import args
 from common_utils.path_utils import get_comfyUI_output_dir
 from common_utils.decorators import cache_property
-from common_utils.type_utils import valueTypeCheck, NameCheckMetaCls, GetableFunc, DynamicLiteral, subClassCheck
+from common_utils.type_utils import valueTypeCheck, NameCheckMetaCls, GetableFunc, DynamicLiteral
 from common_utils.global_utils import is_dev_mode, is_verbose_mode, GetOrAddGlobalValue, SetGlobalValue, GetOrCreateGlobalValue, is_engine_looping
 from common_utils.debug_utils import ComfyUILogger
+
 try:
     from comfy.samplers import KSampler
 except ModuleNotFoundError as e:
@@ -34,14 +34,14 @@ except ModuleNotFoundError as e:
         from comfy.samplers import KSampler
     else:
         raise e    
-from comfy.sd import VAE as comfy_VAE, CLIP as comfy_CLIP
-from comfy.controlnet import ControlBase as comfy_ControlNetBase
-from comfy.model_patcher import ModelPatcher
-
+    
 if TYPE_CHECKING:
     from .runtime import InferenceContext
     from .hidden import PROMPT, EXTRA_PNG_INFO
     from .node_base import ComfyUINode
+    from comfy.model_patcher import ModelPatcher
+    from comfy.sd import VAE as ComfyVAE, CLIP as ComfyCLIP
+    from comfy.controlnet import ControlBase as ComfyControlNetBase, T2IAdapter, ControlLora
 
 from ._utils import *
 
@@ -547,20 +547,26 @@ class LATENT(dict):
     def __ComfyValueFormatter__(cls, value):    # for converting the normal dict type to LATENT
         return cls(value)
 
-CLIP: TypeAlias = Annotated[comfy_CLIP, AnnotatedParam(origin=comfy_CLIP, comfy_name='CLIP')]
+
+CLIP: TypeAlias = "ComfyCLIP"
 '''type hint for ComfyUI's built-in type `CLIP`.'''
+globals()['CLIP'] = Annotated["ComfyCLIP", AnnotatedParam(origin="ComfyCLIP", comfy_name='CLIP')]
 
-VAE: TypeAlias = Annotated[comfy_VAE, AnnotatedParam(origin=comfy_VAE, comfy_name='VAE')]
+VAE: TypeAlias = "ComfyVAE"
 '''type hint for ComfyUI's built-in type `VAE`.'''
+globals()['VAE'] = Annotated["ComfyVAE", AnnotatedParam(origin="ComfyVAE", comfy_name='VAE')]
 
-CONTROL_NET: TypeAlias = Annotated[comfy_ControlNetBase, AnnotatedParam(origin=comfy_ControlNetBase, comfy_name='CONTROL_NET')]
+CONTROL_NET: TypeAlias = Union["ComfyControlNetBase", "T2IAdapter", "ControlLora"]
 '''
 Type hint for ComfyUI's built-in type `CONTROL_NET`.
 This type includes all control networks in ComfyUI, including `ControlNet`, `T2IAdapter`, and `ControlLora`.
 '''
+globals()['CONTROL_NET'] = Annotated["ComfyControlNetBase", AnnotatedParam(origin="ComfyControlNetBase", comfy_name='CONTROL_NET')]
 
-MODEL: TypeAlias = Annotated[ModelPatcher, AnnotatedParam(origin=ModelPatcher, comfy_name='MODEL')]
+MODEL: TypeAlias = "ModelPatcher"
 '''type hint for ComfyUI's built-in type `MODEL`.'''
+globals()['MODEL'] = Annotated["ModelPatcher", AnnotatedParam(origin="ModelPatcher", comfy_name='MODEL')]   
+# since Annotated cannot read forward type, we need to firstly define it(so as to make IDE know the real type), and override it in `globals()`
 
 IMAGE: TypeAlias = Annotated[Tensor, AnnotatedParam(origin=Tensor, comfy_name='IMAGE')]
 '''Type hint for ComfyUI's built-in type `IMAGE`.
@@ -721,6 +727,8 @@ class UIImage(UI, valueT=IMAGE):
         
         os.makedirs(os.path.join(file_dir, subfolder), exist_ok=True)
         
+        from comfy.cli_args import args
+        
         if not animated:
             if len(value) == 1:
                 i = 255. * value[0].cpu().numpy()
@@ -846,7 +854,9 @@ class UILatent(UI, valueT=LATENT):
                 output_count += 1
                 SetGlobalValue('__COMFY_OUTPUT_DEFAULT_NAME_COUNT__', output_count)
                 filename = f"{prefix}{output_count:05}"
-                
+        
+        from comfy.cli_args import args
+        
         if not args.disable_metadata:
             prompt_info = ""
             if prompt is not None:
@@ -960,7 +970,7 @@ class Lazy(Generic[_T]):
             executor: PromptExecutor = PromptExecutor.Instance  # type: ignore
             
             from_node_id = self.from_node_id
-            from_node = pool.get_node(from_node_id, self.from_node_cls_name, create_new=True, raise_err=False)
+            from_node = pool.get_or_create(from_node_id, self.from_node_cls_name)
             if not from_node:
                 raise ValueError(f"Node `{self.from_node_cls_name}`({from_node_id}) not found.")
             slot_index = self.from_output_slot

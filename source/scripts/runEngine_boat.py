@@ -88,7 +88,7 @@ if __name__ == '__main__':
     
     class AutoRotation(Component):
         def update(self):
-            self.transform.rotateLocalY(0.5 * self.engine.RuntimeManager.DeltaTime)
+            self.transform.rotateLocalY(2.5 * self.engine.RuntimeManager.DeltaTime)
     
     class Sample(Engine):
         def beforePrepare(self):
@@ -113,11 +113,11 @@ if __name__ == '__main__':
             #self.camera.addComponent(HelicalOrbitWrapper, theta_speed=1, phi=180)
 
     img2img_boat_path = EXAMPLE_WORKFLOWS_DIR / 'boat-img2img-example.json'
-    Sample.Run(enableGammaCorrection=True,
+    Sample.Run(enableGammaCorrection=False,
                debug=False,
                winSize=(512, 512),
                mapSavingInternal=1,
-               needOutputMaps=True,
+               needOutputMaps=False,
                outputCannyMap=False,
                saveSDColorOutput=True,
                disableComfyUI=False,

@@ -8,6 +8,7 @@ if _STABLE_RENDERER_PROJ_PATH not in sys.path:
 
 from common_utils.debug_utils import ComfyUILogger
 from common_utils.global_utils import GetOrCreateGlobalValue, is_game_mode, is_dev_mode, is_verbose_mode
+from common_utils.type_utils import format_data_for_console_log
 from common_utils.system_utils import get_available_port, check_port_is_using
 
 import comfy.options
@@ -83,10 +84,6 @@ from comfy.cli_args import args
 def run()->execution.PromptExecutor:
     '''Run comfyUI and return the prompt executor.'''
     
-    if args.backend_mode:
-        args.multi_user = True
-        os.environ['BACKEND_MODE'] = 'True'
-    
     if args.cuda_device is not None:
         os.environ['CUDA_VISIBLE_DEVICES'] = str(args.cuda_device)
         ComfyUILogger.debug("Set cuda device to:", args.cuda_device)
@@ -126,7 +123,7 @@ def run()->execution.PromptExecutor:
                 context = e.execute(item[2], prompt_id, item[3], item[4])
                 context.outputs_ui = {k: v for k, v in context.outputs_ui.items() if v}
                 if is_dev_mode() and is_verbose_mode():
-                    ComfyUILogger.print("Execution UI outputs:", context.outputs_ui)
+                    ComfyUILogger.print("Execution UI outputs:", format_data_for_console_log(context.outputs_ui))
                 need_gc = True
                 q.task_done(item_id=item_id,
                             outputs_ui=context.outputs_ui,

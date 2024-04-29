@@ -56,8 +56,6 @@ class HIDDEN(ABC, metaclass=_hidden_meta):
         '''All hidden types should implement this method to get the real value from current inference context.'''
         raise NotImplementedError
 
-
-_AllPrompts: dict = GetOrCreateGlobalValue('_all_prompts', dict)
 @prevent_re_init
 class PROMPT(Dict[str, Dict[Literal['inputs', 'class_type', 'is_changed'], Any]], HIDDEN):
     '''
@@ -85,13 +83,6 @@ class PROMPT(Dict[str, Dict[Literal['inputs', 'class_type', 'is_changed'], Any]]
             if 'class_type' in node_info_dict:
                 if isinstance(node_info_dict['class_type'], type):
                     node_info_dict['class_type'] = get_cls_name(node_info_dict['class_type'])
-    
-    def __new__(cls, *args, id:str=None, **kwargs): # type: ignore
-        if id is not None and id in _AllPrompts:
-            val = _AllPrompts[id]
-        else:
-            val = super().__new__(cls)
-        return val
     
     def __init__(self, *args, id:str=None, **kwargs): # type: ignore
         super().__init__(*args, **kwargs)
@@ -199,11 +190,6 @@ class PROMPT(Dict[str, Dict[Literal['inputs', 'class_type', 'is_changed'], Any]]
             node = node.ID
         return self[node].get('is_changed', None)
     
-    def destroy(self):
-        self.clear()
-        _AllPrompts.pop(self.id, None) if self.id is not None else None
-
-
 class EXTRA_PNG_INFO(Dict[str, Any], HIDDEN):
     '''Extra information for saving png file.'''
     
@@ -258,7 +244,7 @@ class FrameData(HIDDEN):
     def id_map(self)->"IDMap":
         if self._updated_id_map is None:
             from comfyUI.stable_renderer import IDMap
-            self._updated_id_map = IDMap(self._id_map, self.frame_index)
+            self._updated_id_map = IDMap(origin_tex=self._id_map, frame_index=self.frame_index)
         return self._updated_id_map
     
     _pos_map: "Texture" = attrib(default=None, kw_only=True, alias='pos_map')

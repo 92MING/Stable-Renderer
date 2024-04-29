@@ -17,11 +17,9 @@ import comfy.model_management
 
 from common_utils.debug_utils import ComfyUILogger, get_log_level_by_name
 from common_utils.decorators import singleton, class_property, Overload
-from common_utils.global_utils import is_dev_mode, is_verbose_mode
-from common_utils.type_utils import format_data_for_console_log
+from common_utils.global_utils import is_dev_mode, is_verbose_mode, is_engine_looping
+from common_utils.type_utils import format_data_for_console_log, custom_deep_copy
 from comfyUI.types import *
-from comfyUI.types._utils import (get_comfy_node_input_type as _get_comfy_node_input_type_name,
-                                  check_input_param_is_list_type as _check_input_param_is_list_origin)
 from comfyUI.adapters import find_adapter
 
 if TYPE_CHECKING:
@@ -81,27 +79,83 @@ def get_input_data(inputs: dict,
                 input_data_all[x] = [unique_id]
     return input_data_all
 
-        
-@deprecated # changed to use `get_node_func_ret` now
-def map_node_over_list(obj, input_data_all, func, allow_interrupt=False):
-    return get_node_func_ret(obj, input_data_all, func, allow_interrupt)
+@deprecated(reason='Use `PromptExecutor._get_node_output_data` instead.')
+def get_output_data(obj, input_data_all):
+    '''
+    !! Deprecated !! Use Executor._get_node_output_data instead.
+    This method is the old version of `_get_node_output_data`. It is kept for compatibility.
+    This does not support all new type attributes in node system, e.g. Lazy type, context, ...
+    '''
+    results = []
+    uis = []
+    return_values = map_node_over_list(obj, input_data_all, obj.FUNCTION, allow_interrupt=True)
+
+    for r in return_values:
+        if isinstance(r, dict):
+            if 'ui' in r:
+                uis.append(r['ui'])
+            if 'result' in r:
+                results.append(r['result'])
+        else:
+            results.append(r)
+    
+    output = []
+    if len(results) > 0:
+        # check which outputs need concatenating
+        output_is_list = [False] * len(results[0])
+        if hasattr(obj, "OUTPUT_IS_LIST"):
+            output_is_list = obj.OUTPUT_IS_LIST
+
+        # merge node execution results
+        for i, is_list in zip(range(len(results[0])), output_is_list):
+            if is_list:
+                output.append([x for o in results for x in o[i]])
+            else:
+                output.append([o[i] for o in results])
+
+    ui = dict()    
+    if len(uis) > 0:
+        ui = {k: [y for x in uis for y in x[k]] for k in uis[0].keys()}
+    return output, ui
 
 _node_ins_methods = {"IS_CHANGED", "ON_DESTROY"}
 
-def get_node_func_ret(node: Union[str, ComfyUINode, Type[ComfyUINode]], 
-                      func_params: dict,    # not `NodeInputs`, cuz values should already be resolved
-                      func: Optional[str] = None,   # the target function name of the node
-                      allow_interrupt: bool = False,
-                      create_node_if_need: bool = True):
-    '''return the result of the given function name of the node.'''
+def map_node_over_list(node: Union[str, ComfyUINode, Type[ComfyUINode]], 
+                       func_params: dict,    # not `NodeInputs`, cuz values should already be resolved
+                       func: Optional[str] = None,   # the target function name of the node
+                       allow_interrupt: bool = False,
+                       create_node_if_need: bool = True,
+                       **kwargs):
+    '''
+    Return the result of the given function name of the node.
+    It is called `map_node_over_list` because it will repeat the input values if the node accepts list input but only single value is provided.
+    
+    Args:
+        - node: the node instance or the node type name
+        - func_params: the input values for the node
+        - func: the target function name of the node
+        - allow_interrupt: whether to allow interrupting the execution
+        - create_node_if_need: whether to create a new node instance if the node is not found in the pool
+        - kwargs: args for supporting old version params of `map_node_over_list`
+    '''
+    if obj:=kwargs.get('obj', None):
+        ComfyUILogger.warn("`obj` parameter is deprecated, use `node` instead.")
+        node = obj
+        
+    if input_data_all:=kwargs.get('input_data_all', None):
+        ComfyUILogger.warn("`input_data_all` parameter is deprecated, use `func_params` instead.")
+        func_params = input_data_all
+    
     if isinstance(node, str):
         if node.isdigit():   # node id
             node = NodePool().get_node(node, create_new=False)  #  type: ignore
             if not node:
                 raise ValueError(f"Node {node} not found.")
-        else:   # node type name
+        else:   # is node type name
             node_type = get_node_cls_by_name(node)
-            node = node_type()  # type: ignore
+            if not node_type:
+                raise ValueError(f"Node type {node} not found.")
+            node = node_type()
     
     temp_node_ins = None
     if not isinstance(node, type):
@@ -173,13 +227,11 @@ def get_node_func_ret(node: Union[str, ComfyUINode, Type[ComfyUINode]],
             if allow_interrupt:
                 nodes.before_node_execution()
             results.append(real_func(**slice_dict(func_params, i)))
-            
+    
     if temp_node_ins is not None:
-        NodePool().pop(temp_node_ins.ID)
-        temp_node_ins.ON_DESTROY() if hasattr(temp_node_ins, "ON_DESTROY") else None
+        NodePool.Instance().delete(temp_node_ins)
     return results
 
-@deprecated # should be a private function
 def format_value(x):        
     if x is None:
         return None
@@ -187,6 +239,13 @@ def format_value(x):
         return x
     else:
         return str(x)
+
+@deprecated('old codes which using this method has been removed. Thus, this method is no longer needed.')
+def full_type_name(klass):
+    module = klass.__module__
+    if module == 'builtins':
+        return klass.__qualname__
+    return module + '.' + klass.__qualname__
 
 @deprecated('`recursive_execute` method has been moved into `PromptExecutor`.')
 def recursive_execute(server: "PromptServer", 
@@ -199,41 +258,86 @@ def recursive_execute(server: "PromptServer",
                       outputs_ui: dict,     
                       object_storage: dict  # node pool, will not use now.
                       ):
-    e = PromptExecutor()
-    e.server = server
-    context = e.current_context
-    if not context: # no current context
-        context = InferenceContext(prompt=prompt,   # type: ignore
-                                   extra_data=extra_data,
-                                   current_node_id=current_item,
-                                   old_prompt=None,
-                                   outputs=outputs or {},
-                                   outputs_ui=outputs_ui or {},
-                                   frame_data=None,
-                                   baking_data=None,
-                                   status_messages=[],
-                                   executed_node_ids=executed or set(),
-                                   success=False)
-        return e.execute(context)
+    '''
+    !! Deprecated !! Use `PromptExecutor._recursive_execute` instead.
+    This method is the old version of `_recursive_execute`. It is kept for compatibility.
+    Note that the `object_storage`(node pool) parameter is not used in the new version.
+    '''
+    unique_id = current_item
+    inputs = prompt[unique_id]['inputs']
+    class_type = prompt[unique_id]['class_type']
+    class_def = nodes.NODE_CLASS_MAPPINGS[class_type]
+    if unique_id in outputs:
+        return (True, None, None)
 
-    elif context.prompt.id == prompt_id:   # is current context
-        cur_output = copy.deepcopy(e.current_context.outputs) if e.current_context and e.current_context.outputs else {}
-        cur_output.update(outputs)
-        context.outputs = cur_output
-        
-        cur_output_ui = copy.deepcopy(e.current_context.outputs_ui) if e.current_context and e.current_context.outputs_ui else {}
-        cur_output_ui.update(outputs_ui)
-        context.outputs_ui = cur_output_ui
-        
-        context.extra_data.update(extra_data)
-        context.current_node_id = current_item
-        context.executed_node_ids.update(executed)
-        e.current_context = context
-        
-        return e._recursive_execute(context)
-    
-    else:   # already some other context is running
-        raise ValueError("Prompt id mismatch, some other prompt is running.")
+    for x in inputs:
+        input_data = inputs[x]
+
+        if isinstance(input_data, list):
+            input_unique_id = input_data[0]
+            output_index = input_data[1]
+            if input_unique_id not in outputs:
+                result = recursive_execute(server, prompt, outputs, input_unique_id, extra_data, executed, prompt_id, outputs_ui, object_storage)
+                if result[0] is not True:
+                    # Another node failed further upstream
+                    return result
+
+    input_data_all = None
+    try:
+        input_data_all = get_input_data(inputs, class_def, unique_id, outputs, prompt, extra_data)
+        if server.client_id is not None:
+            server.last_node_id = unique_id
+            server.send_sync("executing", { "node": unique_id, "prompt_id": prompt_id }, server.client_id)
+
+        obj = object_storage.get((unique_id, class_type), None)
+        if obj is None:
+            obj = class_def()
+            object_storage[(unique_id, class_type)] = obj
+
+        output_data, output_ui = get_output_data(obj, input_data_all)
+        outputs[unique_id] = output_data
+        if len(output_ui) > 0:
+            outputs_ui[unique_id] = output_ui
+            if server.client_id is not None:
+                server.send_sync("executed", { "node": unique_id, "output": output_ui, "prompt_id": prompt_id }, server.client_id)
+    except comfy.model_management.InterruptProcessingException as iex:
+        logging.info("Processing interrupted")
+
+        # skip formatting inputs/outputs
+        error_details = {
+            "node_id": unique_id,
+        }
+
+        return (False, error_details, iex)
+    except Exception as ex:
+        typ, _, tb = sys.exc_info()
+        exception_type = full_type_name(typ)
+        input_data_formatted = {}
+        if input_data_all is not None:
+            input_data_formatted = {}
+            for name, inputs in input_data_all.items():
+                input_data_formatted[name] = [format_value(x) for x in inputs]
+
+        output_data_formatted = {}
+        for node_id, node_outputs in outputs.items():
+            output_data_formatted[node_id] = [[format_value(x) for x in l] for l in node_outputs]
+
+        logging.error(f"!!! Exception during processing!!! {ex}")
+        logging.error(traceback.format_exc())
+
+        error_details = {
+            "node_id": unique_id,
+            "exception_message": str(ex),
+            "exception_type": exception_type,
+            "traceback": traceback.format_tb(tb),
+            "current_inputs": input_data_formatted,
+            "current_outputs": output_data_formatted
+        }
+        return (False, error_details, ex)
+
+    executed.add(unique_id)
+
+    return (True, None, None)
 
         
 @singleton(cross_module_singleton=True)
@@ -249,50 +353,34 @@ class PromptExecutor:
     '''
     
     # runtime data
-    is_baking: bool = False
-    '''whether the executor is in baking mode or not'''
-    
-    current_context: Optional[InferenceContext] = None
-    '''current context of inference. It will be set when executing a node.'''
-    last_context: Optional[InferenceContext] = None
-    '''last context of inference. It will be set when executing a node.'''
+    latest_context: Optional[InferenceContext] = None
+    '''latest context(can be both running or ran). Context is the object passing through the whole `execute` process.'''
+    outputs: ComfyCacheDict[List[Any]] = ComfyCacheDict()
+    '''
+    Dictionary to cache all outputted data from nodes. After each execution, the executed data will be update to this dict.
+    {node_id: [output1, output2, ...], ...}
+    '''
+    outputs_ui: ComfyCacheDict[Dict[str, Any]] = ComfyCacheDict()
+    '''
+    Dictionary to cache all outputted UI data from nodes.
+    After each execution, the executed UI data will be update to this dict.
+    '''
+    all_prompts: ComfyCacheDict[Dict[Literal['inputs', 'class_type', 'is_changed'], Any]] = ComfyCacheDict()
+    '''
+    Saved all prompts for each node. After each execution, the executed prompt will be update to this dict.
+    {(node_id, node_type): prompt, ...}
+    '''
     
     # region deprecated
     @property
-    @deprecated(reason="access PromptExecutor's context directly instead.")
-    def prompt(self)->Optional[PROMPT]:
+    @deprecated(reason="access PromptExecutor's `all_prompts` directly instead.")
+    def old_prompt(self)->ComfyCacheDict:
         '''
-        current prompt to execute.
-        You should use `current_context.prompt` instead.
+        !!Deprecated!! Use `all_prompts` instead.
+        Note that this is a dictionary containing all prompts' cache. 
+        After each execution, the executed prompt will be update to this dict.
         '''
-        return self.current_context.prompt if self.current_context else None
-    
-    @property
-    @deprecated(reason="access PromptExecutor's context directly instead.")
-    def extra_data(self)->Optional[dict]:
-        '''
-        extra data for current execution.
-        You should use `current_context.extra_data` instead.
-        '''
-        return self.current_context.extra_data if self.current_context else None
-    
-    @property
-    @deprecated(reason="access PromptExecutor's context directly instead.")
-    def executed_node_ids(self)->Optional[Set[str]]:
-        '''
-        executed node ids in current execution.
-        You should use `current_context.executed_node_ids` instead.
-        '''
-        return self.current_context.executed_node_ids if self.current_context else None
-    
-    @property
-    @deprecated(reason="use `last_context.prompt` directly instead.")
-    def old_prompt(self)->Optional[PROMPT]:
-        '''
-        last executed prompt(running).
-        You should use `last_context.prompt` instead.
-        '''
-        return self.last_context.prompt if self.last_context else None
+        return self.all_prompts
     
     @property
     @deprecated(reason="access PromptExecutor's context directly instead.")
@@ -306,33 +394,13 @@ class PromptExecutor:
     
     @property
     @deprecated(reason="access PromptExecutor's context directly instead.")
-    def outputs_ui(self)-> NodeOutputs_UI:
-        '''
-        !!Deprecated!!
-        Latest UI outputs from nodes(running/executed).
-        You should use `current_context.outputs_ui` instead.
-        '''
-        return self.current_context.outputs_ui if self.current_context else {}
-    
-    @property
-    @deprecated(reason="access PromptExecutor's context directly instead.")
     def status_messages(self)->StatusMsgs:
         '''
         !!Deprecated!!
         latest status messages in current execution.
         You should use `current_context.status_messages` instead.
         '''
-        return self.current_context.status_messages if self.current_context else []
-    
-    @property
-    @deprecated(reason="access PromptExecutor's context directly instead.")
-    def outputs(self)-> NodeOutputs:
-        '''
-        !!Deprecated!!
-        Latest outputs from nodes(running/executed).
-        You should use `current_context.outputs` instead.
-        '''
-        return self.current_context.outputs if self.current_context else {}
+        return self.latest_context.status_messages if self.latest_context else []
     
     @property
     @deprecated(reason="use `current_context.success` directly instead.")
@@ -342,10 +410,10 @@ class PromptExecutor:
         Whether the latest execution is successful or not.
         You should use `current_context.success` instead.
         '''
-        return self.current_context.success if self.current_context else False
+        return self.latest_context.success if self.latest_context else True
     # endregion
     
-    @class_property # type: ignore
+    @class_property     # type: ignore
     def Instance(cls)->'PromptExecutor':
         return cls()    # type: ignore
     
@@ -353,29 +421,33 @@ class PromptExecutor:
         self.server = server
         self.reset()
     
-    def _format_value(self, x):        
-        if x is None:
-            return None
-        elif isinstance(x, (int, float, bool, str)):
-            return x
-        else:
-            return str(x)
-    
-    def _get_node_output_data(self, context: InferenceContext, input_data_all: dict, save_to_current_output=True)->Tuple[List[Any], Dict[str, Any]]:
+    def _get_node_output_data(self, 
+                              context: InferenceContext, 
+                              current_node: Union[ComfyUINode, str],
+                              input_data_all: dict)->Tuple[List[Any], Dict[str, Any]]:
         '''Get the output data of the given node.'''
-        current_node = context.current_node
+        if isinstance(current_node, str):
+            current_node_id = current_node
+            context.current_node_id = current_node_id
+            current_node = context.current_node # type: ignore
+        else:
+            current_node_id = current_node.ID
+            context.current_node_id = current_node_id
+            
         if not current_node:
             raise ValueError("No node to execute for `_get_output_data`.")
+        
         results = []
         uis = {}
-        return_values = get_node_func_ret(current_node, input_data_all, current_node.FUNCTION, allow_interrupt=True)
+        return_values = map_node_over_list(current_node, input_data_all, current_node.FUNCTION, allow_interrupt=True)   # type: ignore
         for r in return_values:
             if isinstance(r, dict):
                 if 'ui' in r:
-                    for key, val in r['ui'].items():
-                        if key not in uis:
-                            uis[key] = []
-                        uis[key].extend(val)    # val is a list or tuple
+                    if not is_engine_looping(): # when engine is looping, ui outputs is not required
+                        for key, val in r['ui'].items():
+                            if key not in uis:
+                                uis[key] = []
+                            uis[key].extend(val)    # val is a list or tuple
                 if 'result' in r:
                     results.append(r['result'])
             else:
@@ -385,11 +457,11 @@ class PromptExecutor:
         if len(results) > 0:
             # check which outputs need concatenating
             if hasattr(current_node, "OUTPUT_IS_LIST"):
-                output_is_list = current_node.OUTPUT_IS_LIST
+                output_is_list = current_node.OUTPUT_IS_LIST     # type: ignore
             else:
-                if hasattr(current_node, '__ADVANCED_NODE_CLASS__') and current_node.__ADVANCED_NODE_CLASS__:
+                if hasattr(current_node, '__ADVANCED_NODE_CLASS__') and current_node.__ADVANCED_NODE_CLASS__:    # type: ignore
                     output_is_list = []
-                    output_infos = current_node.__ADVANCED_NODE_CLASS__._ReturnFields
+                    output_infos = current_node.__ADVANCED_NODE_CLASS__._ReturnFields    # type: ignore
                     for _, anno in output_infos:
                         output_is_list.append(True if ('list' in anno.tags) else False)
                 else:    
@@ -402,17 +474,22 @@ class PromptExecutor:
                 else:
                     output.append([o[i] for o in results])
         
-        if save_to_current_output:
-            context.outputs[current_node.ID] = output
-            context.outputs_ui[current_node.ID] = uis
+        context.outputs[current_node_id] = output
+        if not is_engine_looping(): # when engine is looping, ui outputs is not required
+            context.outputs_ui[current_node_id] = uis
+        
         return output, uis
 
-    def _get_input_data(self, inputs: dict, context: InferenceContext):
-        node_id = context.current_node_id
+    def _get_input_data(self, 
+                        inputs: dict, 
+                        node_id: str,
+                        context: InferenceContext):
+        context.current_node_id = node_id
         node_cls = context.current_node_cls
+        
         if not node_id or not node_cls:
             raise ValueError("No node id or node class to get input data.")
-        node = self.node_pool.get_node(node_id, node_cls, create_new=True)
+        node = self.node_pool.get_or_create(node_id, node_cls.NAME)
         
         valid_inputs = node_cls.INPUT_TYPES()
         lazy_inputs = node_cls.LAZY_INPUTS if hasattr(node_cls, "LAZY_INPUTS") else []
@@ -432,17 +509,17 @@ class PromptExecutor:
 
                 if from_node_id not in context.outputs:
                     if input_param_name in lazy_inputs:
-                        val = [Lazy(from_node_id, 
-                                    output_slot_index, 
-                                    node_id,
-                                    input_param_name,
-                                    context) # type: ignore
-                            ]
-                        if _check_output_param_only_output_to(from_node_id, 
-                                                            output_slot_index, 
-                                                            node_id, 
-                                                            input_param_name, 
-                                                            context.prompt):
+                        val = [Lazy(from_node_id=from_node_id, 
+                                    from_output_slot=output_slot_index, 
+                                    to_node_id=node_id,
+                                    to_param_name=input_param_name,
+                                    context=context)
+                               ]
+                        if _check_output_param_only_output_to(from_node_id=from_node_id, 
+                                                              from_node_output_slot_index=output_slot_index, 
+                                                              to_node_id=node_id, 
+                                                              to_node_input_param=input_param_name, 
+                                                              prompt=context.prompt):
                             context.remove_from_execute_waitlist(from_node_id) # will ignore if not in the list
                     else:
                         if is_dev_mode() and is_verbose_mode():
@@ -450,7 +527,7 @@ class PromptExecutor:
                         val = (None,)
                         
                 else:   # in outputs
-                    input_param_is_list = _check_input_param_is_list_origin(input_param_name, node_cls)
+                    input_param_is_list = check_input_param_is_list_type(input_param_name, node_cls)
                     val = context.outputs[from_node_id][output_slot_index]
                     if not input_param_is_list and isinstance(val, list) and len(val) == 1:
                             val = val[0]
@@ -458,18 +535,20 @@ class PromptExecutor:
                         if isinstance(val, Lazy) and not input_param_name in lazy_inputs:
                             val = val.value
                         elif not isinstance(val, Lazy) and input_param_name in lazy_inputs:
-                            val = Lazy(from_node_id, 
-                                       output_slot_index, 
-                                       node_id,
-                                       input_param_name,
-                                       context,
+                            val = Lazy(from_node_id=from_node_id, 
+                                       from_output_slot=output_slot_index, 
+                                       to_node_id=node_id,
+                                       to_param_name=input_param_name,
+                                       context=context,
                                        _gotten=True,
                                        _value=val)
                         
                         from_node_type_name = context.prompt[from_node_id]['class_type']
                         from_node_type = get_node_cls_by_name(from_node_type_name)
-                        from_type_name = from_node_type.RETURN_TYPES[output_slot_index]    # type: ignore
-                        to_type_name = _get_comfy_node_input_type_name(node_cls, input_param_name)
+                        if not from_node_type:
+                            raise ValueError(f"Node type {from_node_type_name} not found.")
+                        from_type_name = from_node_type.RETURN_TYPES[output_slot_index]    
+                        to_type_name = get_comfy_node_input_type(node_cls, input_param_name)
                         if from_type_name != to_type_name:
                             if adapter := find_adapter(from_type_name, to_type_name):
                                 val = adapter(val)
@@ -483,7 +562,7 @@ class PromptExecutor:
                         val_str = str(val)
                         if len(val_str) > 18:
                             val_str = val_str[:15] + '...'
-                        ComfyUILogger.debug(f"got output={val_str} (index={output_slot_index}) from {from_node_type_name}({from_node_id})'s executed output.")
+                        ComfyUILogger.debug(f"got cached output={val_str} (index={output_slot_index}) from {from_node_type_name}({from_node_id})'s executed output.")
                     
                     val = [val]
 
@@ -493,11 +572,11 @@ class PromptExecutor:
                 if input_param_name in lazy_inputs:
                     if not isinstance(input_data, Lazy):
                         input_data_all[input_param_name] = [
-                            Lazy(from_node_id, 
-                                output_slot_index, 
-                                node_id,
-                                input_param_name,
-                                current_context,   # type: ignore
+                            Lazy(from_node_id=from_node_id, 
+                                from_output_slot=output_slot_index, 
+                                to_node_id=node_id,
+                                to_param_name=input_param_name,
+                                context=context,
                                 _gotten=True,
                                 _value=input_data)
                             ]
@@ -508,7 +587,7 @@ class PromptExecutor:
                     val = input_data
                     if val is not None:
                         val_type_name = get_comfy_name(type(val))
-                        to_type_name = _get_comfy_node_input_type_name(node_cls, input_param_name)
+                        to_type_name = get_comfy_node_input_type(node_cls, input_param_name)
                         if val_type_name != to_type_name:
                             if adapter := find_adapter(val_type_name, to_type_name):
                                 val = adapter(val)
@@ -517,10 +596,13 @@ class PromptExecutor:
         def get_proper_hidden_keys(key: str):
             keys = set()
             keys.add(key)
-            no_bottom_bar_key = key
-            while no_bottom_bar_key.startswith("_"):
-                no_bottom_bar_key = key[1:]
-            keys.add(no_bottom_bar_key)
+            no_underscope_key = key
+            
+            while no_underscope_key.startswith("_"):
+                no_underscope_key = key[1:]
+            
+            keys.add(no_underscope_key)
+            
             for k in keys.copy():
                 keys.add(k.lower())
                 keys.add(k.upper())
@@ -557,14 +639,17 @@ class PromptExecutor:
                     input_data_all[input_param_name] = [node_id]
                 
                 elif hidden_cls := HIDDEN.FindHiddenClsByName(input_param_type):
-                    context.current_node = node # type: ignore
+                    context.current_node = node
                     input_data_all[input_param_name] = [hidden_cls.GetHiddenValue(context)]
                 else:
                     input_data_all = try_put_hidden_value(input_param_name, context.extra_data, input_data_all)
                     
         return input_data_all
 
-    def _recursive_will_execute(self, context:"InferenceContext", current_node_id: Optional[str]=None, memo:Optional[dict]=None):
+    def _recursive_will_execute(self, 
+                                context:"InferenceContext", 
+                                current_node_id: Optional[str]=None, 
+                                memo:Optional[dict]=None):
         memo = memo or {}
         outputs = context.outputs
         unique_id = current_node_id or context.current_node_id
@@ -592,64 +677,72 @@ class PromptExecutor:
         memo[unique_id] = will_execute + [unique_id]
         return memo[unique_id]
     
-    def _recursive_execute(self, context: InferenceContext)->RecursiveExecuteResult:
+    def _recursive_execute(self, 
+                           context: InferenceContext,
+                           node_id: Optional[str]=None)->RecursiveExecuteResult:
         prompt = context.prompt
         if not prompt:
             return RecursiveExecuteResult(False, None, ValueError("No prompt to execute."))
         
         executed_node_ids = context.executed_node_ids
         
-        current_node_id=context.current_node_id
+        current_node_id = node_id or context.current_node_id
         if current_node_id is None:
             return RecursiveExecuteResult(False, None, ValueError("No node specify to execute in the context."))
+        context.current_node_id = current_node_id
         
         inputs = prompt[current_node_id]['inputs']
-        current_node_type_name = prompt[current_node_id]['class_type']
-        current_node_type = nodes.NODE_CLASS_MAPPINGS[current_node_type_name]
-        lazy_input_params = current_node_type.LAZY_INPUTS if hasattr(current_node_type, "LAZY_INPUTS") else []
+        current_node_cls_name = prompt[current_node_id]['class_type']
+        current_node_cls = get_node_cls_by_name(current_node_cls_name)
+        if not current_node_cls:
+            return RecursiveExecuteResult(False, None, ValueError(f"Node class `{current_node_cls_name}` not found."))
+        lazy_input_params = current_node_cls.LAZY_INPUTS if hasattr(current_node_cls, "LAZY_INPUTS") else []
         
         if current_node_id in context.outputs:
             return RecursiveExecuteResult(True, None, None)
         
         for input_param_name in inputs:
             input_data = inputs[input_param_name]
+            
             if is_dev_mode() and is_verbose_mode():
-                ComfyUILogger.debug(f"(recursive_execute)checking input `{input_param_name}`=`{input_data}` for node `{current_node_type.__qualname__}`({current_node_id})")
+                ComfyUILogger.debug(f"(recursive_execute)checking input `{input_param_name}`=`{input_data}` for node `{current_node_cls.NAME}`({current_node_id})")
+            
             if isinstance(input_data, NodeBindingParam):
                 from_node_id, from_slot = input_data[0], input_data[1]
                 from_node_type_name = prompt.get_node_type_name(from_node_id)
                 
                 if from_node_id not in context.outputs:
+                    if is_dev_mode() and is_verbose_mode():
+                        ComfyUILogger.debug(f"from node `{from_node_type_name}`({from_node_id})'s output {from_slot} not found in context.outputs for input `{input_param_name}` of node `{current_node_cls.NAME}`({current_node_id}).")
+                        
                     if input_param_name in lazy_input_params:
                         
                         if is_dev_mode() and is_verbose_mode():
-                            ComfyUILogger.debug(f"skip lazy input `{input_param_name}` for node `{current_node_type.__qualname__}`({current_node_id})")
+                            ComfyUILogger.debug(f"skip lazy input `{input_param_name}` for node `{current_node_cls.NAME}`({current_node_id})")
                         
-                        val = Lazy(from_node_id, 
-                                   from_slot, 
-                                   current_node_id,
-                                   input_param_name,
-                                   context)
+                        val = Lazy(from_node_id=from_node_id, 
+                                   from_output_slot=from_slot, 
+                                   to_node_id=current_node_id,
+                                   to_param_name=input_param_name,
+                                   context=context)
                         context.outputs[current_node_id] = [val]
-                        if _check_output_param_only_output_to(from_node_id, 
-                                                              from_slot, 
-                                                              current_node_id, 
-                                                              input_param_name, 
-                                                              prompt):
+                        if _check_output_param_only_output_to(from_node_id=from_node_id, 
+                                                              from_node_output_slot_index=from_slot, 
+                                                              to_node_id=current_node_id, 
+                                                              to_node_input_param=input_param_name, 
+                                                              prompt=prompt):
                             context.remove_from_execute_waitlist(from_node_id) # will ignore if not in the list
                     else:
                         if is_dev_mode() and is_verbose_mode():
-                            ComfyUILogger.debug(f"start recursive execute for node `{current_node_type.__qualname__}`({current_node_id})'s input `{input_param_name}` from `{from_node_type_name}`({from_node_id})'s output {input_data[1]}")
+                            ComfyUILogger.debug(f"start recursive execute for node `{current_node_cls.NAME}`({current_node_id})'s input `{input_param_name}` from `{from_node_type_name}`({from_node_id})'s output {input_data[1]}")
                         
-                        context.current_node_id = from_node_id
-                        result = self._recursive_execute(context)
+                        result = self._recursive_execute(context, from_node_id)
                         if not result.success:
                             return result # Another node failed further upstream
 
         input_data_all = None
         try:
-            context.current_node_id = current_node_id
-            input_data_all = self._get_input_data(inputs, context)
+            input_data_all = self._get_input_data(inputs, current_node_id, context)
             
             if self.server:
                 if self.server.client_id is not None:
@@ -658,13 +751,14 @@ class PromptExecutor:
                                           {"node": current_node_id, "prompt_id": prompt.id if prompt else None}, 
                                           self.server.client_id)
             if is_dev_mode() and is_verbose_mode():
-                ComfyUILogger.debug(f"executing node `{current_node_type.__qualname__}`({current_node_id}) with inputs: {format_data_for_console_log(input_data_all)}")
+                ComfyUILogger.debug(f"executing node `{current_node_cls.NAME}`({current_node_id}) with inputs: {format_data_for_console_log(input_data_all)}")
             
-            context.current_node_id = current_node_id
-            self._get_node_output_data(context, input_data_all, save_to_current_output=True)
+            self._get_node_output_data(context, 
+                                       current_node_id,
+                                       input_data_all)
             
             if is_dev_mode() and is_verbose_mode():
-                ComfyUILogger.debug(f"executed node `{current_node_type.__qualname__}`({current_node_id}) with results: {format_data_for_console_log(context.outputs[current_node_id])}")
+                ComfyUILogger.debug(f"executed node `{current_node_cls.NAME}`({current_node_id}) with results: {format_data_for_console_log(context.outputs[current_node_id])}")
             
             if len(context.outputs_ui) > 0:
                 if self.server:
@@ -694,15 +788,15 @@ class PromptExecutor:
                 input_data_formatted = {}
                 for name, inputs in input_data_all.items():
                     try:
-                        input_data_formatted[name] = [self._format_value(x) for x in inputs]
+                        input_data_formatted[name] = [format_value(x) for x in inputs]
                     except TypeError:
-                        input_data_formatted[name] = self._format_value(inputs)
+                        input_data_formatted[name] = format_value(inputs)
                         
             output_data_formatted = {}
-            for node_id, node_outputs in context.outputs.items():
-                if not isinstance(node_outputs, (list, tuple)):
-                    node_outputs = [node_outputs]
-                output_data_formatted[node_id] = [[self._format_value(x) for x in l] if isinstance(l, (tuple, list)) else [l] for l in node_outputs]
+            for (_node_id, _), _node_outputs in context.outputs.items():
+                if not isinstance(_node_outputs, (list, tuple)):
+                    _node_outputs = [_node_outputs]
+                output_data_formatted[_node_id] = [[format_value(x) for x in l] if isinstance(l, (tuple, list)) else [l] for l in _node_outputs]
 
             logging.error("!!! Exception during processing !!!")
             logging.error(traceback.format_exc())
@@ -721,55 +815,77 @@ class PromptExecutor:
 
         return RecursiveExecuteResult(True, None, None)
 
-    def _recursive_output_delete_if_changed(self, context: InferenceContext)->bool:
-        if not context.current_node_id:
+    def _recursive_output_delete_if_changed(self, 
+                                            context: InferenceContext,
+                                            node: Union[str, ComfyUINode, None]=None)->bool:
+        if node is None:
+            current_node = context.current_node
+            current_node_id = context.current_node_id
+        elif isinstance(node, str):
+            current_node_id = node
+            context.current_node_id = current_node_id
+            current_node = context.current_node # type: ignore
+        else:
+            current_node_id = node.ID
+            context.current_node_id = current_node_id
+            current_node = node
+        
+        if current_node is None or current_node_id is None:
             raise ValueError("No node to execute in the context.")
-        unique_id = context.current_node_id
+        
         prompt = context.prompt
-        old_prompt = context.old_prompt
-        if not old_prompt or old_prompt.id == prompt.id:
+        if not self.all_prompts:
             return True
         
         outputs = context.outputs
-        inputs = prompt[unique_id]['inputs']
-        class_type = prompt[unique_id]['class_type']
-        class_def = nodes.NODE_CLASS_MAPPINGS[class_type]
+        inputs = prompt[current_node_id]['inputs']
+        current_node_cls_name = prompt[current_node_id]['class_type']
+        current_node_cls = get_node_cls_by_name(current_node_cls_name)
+        if not current_node_cls:
+            raise ValueError(f"Node class `{current_node_cls_name}` not found.")
 
         is_changed_old = ''
         is_changed = ''
         to_delete = False
-        if hasattr(class_def, 'IS_CHANGED'):
-            if unique_id in old_prompt and 'is_changed' in old_prompt[unique_id]:
-                is_changed_old = old_prompt[unique_id]['is_changed']
-            if 'is_changed' not in prompt[unique_id]:
-                context.current_node_id = unique_id
-                input_data_all = self._get_input_data(inputs, context)
+        '''means the node's old output should be removed from the outputs dict.'''
+        
+        if hasattr(current_node_cls, 'IS_CHANGED'):    # should be an instance method
+            if (current_node_id, current_node_cls_name) in self.all_prompts and 'is_changed' in self.all_prompts[(current_node_id, current_node_cls_name)]:
+                is_changed_old = self.all_prompts[(current_node_id, current_node_cls_name)]['is_changed']
+                
+            if 'is_changed' not in prompt[current_node_id]:
+                input_data_all = self._get_input_data(inputs, current_node_id, context)
                 if input_data_all is not None:
                     try:
-                        is_changed = get_node_func_ret(class_def, input_data_all, "IS_CHANGED")
-                        prompt[unique_id]['is_changed'] = is_changed
-                    except:
+                        origin_is_changed_func = current_node_cls.__dict__['IS_CHANGED']
+                        if isinstance(origin_is_changed_func, (staticmethod, classmethod)):
+                            is_changed = map_node_over_list(current_node_cls, input_data_all, "IS_CHANGED")
+                        else:
+                            is_changed = map_node_over_list(current_node, input_data_all, "IS_CHANGED")
+                        prompt[current_node_id]['is_changed'] = is_changed
+                    except Exception as ex:
+                        if is_dev_mode():
+                            raise ex
+                        ComfyUILogger.error(f"Error when calling IS_CHANGED of node {current_node_cls_name}({current_node_id}), error: {ex}")
                         to_delete = True
             else:
-                is_changed = prompt[unique_id]['is_changed']
+                is_changed = prompt[current_node_id]['is_changed']
 
-        if unique_id not in outputs:
+        if current_node_id not in outputs:
             return True
 
         if not to_delete:
             if is_changed != is_changed_old:
                 to_delete = True
-            elif unique_id not in old_prompt:
+            elif (current_node_id, current_node_cls_name) not in self.all_prompts:
                 to_delete = True
-            elif inputs == old_prompt[unique_id]['inputs']:
+            elif inputs == self.all_prompts[(current_node_id, current_node_cls_name)]['inputs']:
                 for x in inputs:
                     input_data = inputs[x]
-
                     if isinstance(input_data, NodeBindingParam):
                         input_unique_id = input_data[0]
                         if input_unique_id in outputs:
-                            context.current_node_id = input_unique_id
-                            to_delete = self._recursive_output_delete_if_changed(context)
+                            to_delete = self._recursive_output_delete_if_changed(context, input_unique_id)
                         else:
                             to_delete = True
                         if to_delete:
@@ -778,58 +894,39 @@ class PromptExecutor:
                 to_delete = True
 
         if to_delete:
-            d = outputs.pop(unique_id)
-            del d
+            if is_dev_mode() and is_verbose_mode():
+                ComfyUILogger.debug(f"Deleted node `{current_node_cls_name}`({current_node_id})'s output.")
+            
+            val = outputs.pop(current_node_id, None)
+            if val is not None:
+                del val
+            val = context.outputs_ui.pop(current_node_id, None)
+            if val is not None:
+                del val
+                    
         return to_delete
 
     def reset(self):
         self.node_pool.clear()
-        if self.last_context:
-            self.last_context.destroy()
-            self.last_context = None
-        if self.current_context:
-            self.current_context.destroy()
-            self.current_context = None
-    
-    def get_node(self, node_id:str, class_type_name: str)->Optional[ComfyUINode]:
-        '''Return the target node from the pool, or create a new one if not found.'''
-        return self.node_pool.get_node(node_id, class_type_name)
+        self.outputs.clear()
+        self.outputs_ui.clear()
+        self.all_prompts.clear()
     
     def add_message(self, 
                     event: StatusMsgEvent, 
                     data: dict, 
                     broadcast: bool, 
                     level: Literal['debug', 'info', 'warning', 'error', 'critical', 'success']='info'):
-        if not self.current_context:
+        if not self.latest_context:
             raise ValueError("No context to add message.")
-        self.current_context.status_messages.append((event, data))
+        self.latest_context.status_messages.append((event, data))
         if self.server:
             if self.server.client_id is not None or broadcast:
                 self.server.send_sync(event, data, self.server.client_id)
         else:
             ComfyUILogger.log(get_log_level_by_name(level), f"Comfy Execution Msg: {event}, {data}")
 
-    @Overload
-    @deprecated
-    def handle_execution_error(self, prompt_id: str, prompt: dict, current_outputs, executed, error, ex):   # type: ignore
-        '''!Deprecated! Use `handle_execution_error(context, error, ex)` instead.'''
-        context = self.current_context
-        if not context:
-            raise ValueError("No context to handle error.")
-        if context.prompt.id != prompt_id:
-            raise ValueError("Prompt id mismatch.")
-        context.outputs.update(current_outputs)
-        return self.handle_execution_error(context, error, ex)
-        
-    @Overload
-    def handle_execution_error(self, context: InferenceContext, error, ex):
-        prompt = context.prompt
-        prompt_id = prompt.id
-        
-        executed = context.executed_node_ids
-        current_outputs = context.outputs
-        old_outputs = self.last_context.outputs if self.last_context else {}
-        
+    def handle_execution_error(self, prompt_id: str, prompt: dict, current_outputs, executed, error, ex):
         node_id = error["node_id"]
         class_type = prompt[node_id]["class_type"]
 
@@ -842,7 +939,8 @@ class PromptExecutor:
                 "node_type": class_type,
                 "executed": list(executed),
             }
-            self.add_message("execution_interrupted", mes, broadcast=True, level="warning")
+            if not is_engine_looping():
+                self.add_message("execution_interrupted", mes, broadcast=True, level="warning")
         else:
             mes = {
                 "prompt_id": prompt_id,
@@ -856,36 +954,20 @@ class PromptExecutor:
                 "current_inputs": error["current_inputs"],
                 "current_outputs": error["current_outputs"],
             }
-            self.add_message("execution_error", mes, broadcast=False, level="error")
+            if not is_engine_looping():
+                self.add_message("execution_error", mes, broadcast=False, level="error")
         
         # Next, remove the subsequent outputs since they will not be executed
         to_delete = []
-        for o in old_outputs:
-            if (o not in current_outputs) and (o not in executed):
-                to_delete += [o]
-                if prompt and o in prompt:
-                    d = prompt.pop(o)
-                    del d
-        for o in to_delete:
-            try:
-                d = context.outputs.pop(o)
-                if hasattr(d, 'destroy'):
-                    d.destroy() # type: ignore
-                del d
-            except KeyError:
-                pass
-
-    @Overload
-    def execute(self, context: InferenceContext)->InferenceContext:     # type: ignore
-        all_node_ids = list(context.prompt.keys())
-        return self.execute(prompt=context.prompt, 
-                            prompt_id=context.prompt_id, 
-                            extra_data=context.extra_data, 
-                            node_ids_to_be_ran=all_node_ids,    # type: ignore
-                            frame_data=context.frame_data,
-                            baking_data=context.baking_data)
+        for (node_id, node_type) in self.outputs:
+            if (node_id not in current_outputs) and (node_id not in executed):
+                to_delete.append((node_id, node_type))
+                if (node_id, node_type) in self.all_prompts:
+                    self.all_prompts.delete(node_id, node_type)
         
-    @Overload
+        for (node_id, node_type) in to_delete:
+            self.outputs.delete(node_id, node_type)
+    
     def execute(self, 
                 prompt: Union[PROMPT, dict], 
                 prompt_id: Optional[str] = None, # random string by uuid4 
@@ -893,7 +975,10 @@ class PromptExecutor:
                 node_ids_to_be_ran: Union[List[str], List[int], None] = None,
                 frame_data: Optional['FrameData'] = None,
                 baking_data: Optional[BakingData] = None)->InferenceContext:
-        '''The entry for inference.'''
+        '''
+        The entry for inference.
+        When using web UI, this method will be called instead of `loop_executed`.
+        '''
         extra_data = extra_data or {}
         node_ids_to_be_ran = [str(x) for x in node_ids_to_be_ran] if node_ids_to_be_ran else []
         
@@ -902,18 +987,45 @@ class PromptExecutor:
         if not isinstance(prompt, PROMPT):
             prompt = PROMPT(prompt, id=prompt_id)
         
+        context_outputs = {}
+        context_outputs_ui = {}
+        for node_id in prompt:
+            node_type = prompt[node_id]['class_type']
+            if (node_id, node_type) in self.outputs:
+                out = self.outputs[node_id, node_type]
+                if is_engine_looping():
+                    context_outputs[node_id] = out
+                else:
+                    if not is_model_type(out):
+                        context_outputs[node_id] = custom_deep_copy(self.outputs[node_id, node_type])
+                    else:
+                        context_outputs[node_id] = out
+            else:
+                self.outputs.delete(node_id, node_type)
+                
+            if (node_id, node_type) in self.outputs_ui:
+                if is_engine_looping():
+                    context_outputs[node_id] = self.outputs_ui[node_id, node_type]
+                else:
+                    context_outputs_ui[node_id] = custom_deep_copy(self.outputs_ui[node_id, node_type])
+            else:
+                self.outputs_ui.delete(node_id, node_type)
+        
+        if is_dev_mode() and is_verbose_mode():
+            ComfyUILogger.debug(f"(PromptExecutor.execute)context outputs before run: {format_data_for_console_log(context_outputs)}")
+            ComfyUILogger.debug(f"(PromptExecutor.execute)context outputs ui before run: {format_data_for_console_log(context_outputs_ui)}")
+        
         current_context = InferenceContext(prompt=prompt, 
                                            extra_data=extra_data, 
                                            current_node_id=None,
-                                           old_prompt=self.last_context.prompt if self.last_context else None,
-                                           outputs={},
-                                           outputs_ui={},
+                                           outputs=context_outputs,
+                                           outputs_ui=context_outputs_ui,
                                            frame_data=frame_data,
                                            baking_data=baking_data,
                                            status_messages=[],
                                            executed_node_ids=set(),
                                            success=False)
-        self.current_context = current_context
+        self.latest_context = current_context
         
         if self.server:
             if "client_id" in extra_data:
@@ -923,18 +1035,11 @@ class PromptExecutor:
         
         nodes.interrupt_processing(False)
         
-        self.add_message("execution_start", { "prompt_id": prompt_id}, broadcast=False, level="info")
+        if not is_engine_looping():
+            self.add_message("execution_start", { "prompt_id": prompt_id}, broadcast=False, level="info")
 
         with torch.inference_mode():
             #delete cached outputs if nodes don't exist for them
-            to_delete = []
-            for node_pool_key in current_context.outputs:
-                if node_pool_key not in prompt:
-                    to_delete += [node_pool_key]
-            for node_pool_key in to_delete:
-                d = current_context.outputs.pop(node_pool_key)
-                del d
-            
             nodes_to_be_deleted: List[Tuple[str, str]] = []
             for node_id, node_type in self.node_pool:
                 if node_id not in prompt:
@@ -945,27 +1050,24 @@ class PromptExecutor:
                         nodes_to_be_deleted += [(node_id, node_type)]
             
             for (node_id, node_type) in nodes_to_be_deleted:
-                d = self.node_pool.pop((node_id, node_type))
-                del d
-
+                self.node_pool.delete(node_id, node_type)
+        
             for node_id in prompt:
-                current_context.current_node_id = node_id
-                self._recursive_output_delete_if_changed(current_context)
+                self._recursive_output_delete_if_changed(current_context, node_id)
 
             current_outputs = set(current_context.outputs.keys())
             for x in list(current_context.outputs_ui.keys()):
                 if x not in current_outputs:
                     d = current_context.outputs_ui.pop(x)
                     del d
-
-            comfy.model_management.cleanup_models()
-            self.add_message(event="execution_cached", 
-                             data={"nodes": list(current_outputs), "prompt_id": prompt_id}, 
-                             broadcast=False,
-                             level="info")
-            output_node_id = None
-            current_context.to_be_executed = []
-
+            
+            if not is_engine_looping():
+                comfy.model_management.cleanup_models()
+                self.add_message(event="execution_cached", 
+                                 data={"nodes": list(current_outputs), "prompt_id": prompt_id}, 
+                                 broadcast=False,
+                                 level="info")
+            
             for node_id in list(node_ids_to_be_ran):
                 current_context.to_be_executed.append((0, str(node_id)))
 
@@ -979,29 +1081,36 @@ class PromptExecutor:
                 # This call shouldn't raise anything if there's an error deep in
                 # the actual SD code, instead it will report the node where the
                 # error was raised
-                output_node_id = current_context.to_be_executed.pop(0)[-1]
-                current_context.current_node_id = output_node_id
-                success, error, ex = self._recursive_execute(current_context)
+                success, error, ex = self._recursive_execute(current_context, current_context.to_be_executed.pop(0)[-1])
                 current_context.success = success
                 if success is not True:
-                    self.handle_execution_error(current_context, error, ex)
+                    self.handle_execution_error(prompt_id=prompt_id, 
+                                                prompt=prompt, 
+                                                current_outputs=current_outputs, 
+                                                executed=current_context.executed_node_ids, 
+                                                error=error, 
+                                                ex=ex)
                     break
 
-            for x in current_context.executed_node_ids:
-                prompt[x] = copy.deepcopy(prompt[x])
-                
             if self.server:
                 self.server.last_node_id = None
             
-            if comfy.model_management.DISABLE_SMART_MEMORY:
+            if not is_engine_looping() and comfy.model_management.DISABLE_SMART_MEMORY:
                 comfy.model_management.unload_all_models()
         
-        if self.last_context:
-            self.last_context.destroy()
-        self.last_context = current_context
-        self.last_context._current_node_id = None
-        self.current_context = None
-        return self.last_context
+        # update data to global cache dicts
+        for node_id in prompt:
+            node_type = prompt[node_id]['class_type']
+            if node_id in current_context.outputs:
+                self.outputs[node_id, node_type] = current_context.outputs[node_id]
+            if node_id in current_context.outputs_ui:
+                self.outputs_ui[node_id, node_type] = current_context.outputs_ui[node_id]
+            self.all_prompts[node_id, node_type] = custom_deep_copy(prompt[node_id])
+        
+        if is_dev_mode() and is_verbose_mode():
+            ComfyUILogger.debug(f"(PromptExecutor.execute)global outputs after run: {format_data_for_console_log(self.outputs)}")
+        
+        return current_context
 
 def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[str, ValidateInputsResult])->ValidateInputsResult:
     if node_id in validated:
@@ -1113,7 +1222,7 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
         else:
             try:
                 if type_input == "INT":
-                    val = int(val)  # type: ignore
+                    val = int(val)      # type: ignore
                     inputs[x] = val
                 elif type_input == "FLOAT":
                     val = float(val)    # type: ignore
@@ -1168,7 +1277,7 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
 
             if x not in validate_function_inputs:
                 if isinstance(type_input, list):
-                    if val not in type_input:   # type: ignore
+                    if val not in type_input:   
                         input_config = info
                         list_info = ""
 
@@ -1200,7 +1309,7 @@ def validate_inputs(prompt: Union[dict, PROMPT], node_id: str, validated: Dict[s
             if x in validate_function_inputs:
                 input_filtered[x] = input_data_all[x]
 
-        ret = get_node_func_ret(obj_class, input_filtered, "VALIDATE_INPUTS")
+        ret = map_node_over_list(obj_class, input_filtered, "VALIDATE_INPUTS")
         for x in input_filtered:
             for i, r in enumerate(ret):
                 if r is not True:

@@ -1,5 +1,7 @@
+import os
 import torch
 from enum import Enum
+from typing import Optional, TYPE_CHECKING, Type, List, Union, Any, Tuple, Dict
 
 from comfy import model_management
 from .ldm.models.autoencoder import AutoencoderKL, AutoencodingEngine
@@ -25,6 +27,15 @@ import comfy.lora
 import comfy.t2i_adapter.adapter
 import comfy.supported_models_base
 import comfy.taesd.taesd
+
+from comfyUI.types import ModelLike
+
+if TYPE_CHECKING:
+    from comfyUI.types import ClipTargetProtocol, ClipModelType, TokenizerType
+    from comfy.supported_models_base import ClipTarget
+    from comfy.model_patcher import ModelPatcher
+    from comfy.t2i_adapter.adapter import StyleAdapter
+
 
 def load_model_weights(model, sd):
     m, u = model.load_state_dict(sd, strict=False)
@@ -55,8 +66,12 @@ def load_clip_weights(model, sd):
     sd = comfy.utils.clip_text_transformers_convert(sd, "cond_stage_model.model.", "cond_stage_model.transformer.")
     return load_model_weights(model, sd)
 
-
-def load_lora_for_models(model, clip, lora, strength_model, strength_clip):
+def load_lora_for_models(model: "ModelPatcher", 
+                         clip: Optional["CLIP"], 
+                         lora: Dict[str, torch.Tensor], 
+                         strength_model: float, 
+                         strength_clip: float,
+                         lora_name: Optional[str]=None):
     key_map = {}
     if model is not None:
         key_map = comfy.lora.model_lora_keys_unet(model.model, key_map)
@@ -83,30 +98,47 @@ def load_lora_for_models(model, clip, lora, strength_model, strength_clip):
         if (x not in k) and (x not in k1):
             ComfyUILogger.print("NOT LOADED", x)
 
+    if new_modelpatcher is not None:
+        lora_name = lora_name or 'Unknown'
+        new_modelpatcher._model_name = f'{model.name}({lora_name} LORA)'
     return (new_modelpatcher, new_clip)
 
-
-class CLIP:
-    def __init__(self, target=None, embedding_directory=None, no_init=False):
-        if no_init:
+class CLIP(ModelLike):
+    def __init__(self, 
+                 target: Union["ClipTarget", "ClipTargetProtocol", None] = None, 
+                 embedding_directory: Optional[List[str]] = None, 
+                 no_init=False,
+                 name: Optional[str] = None,
+                 identifier: Optional[Any] = None):
+        
+        '''identifier is a property to be used for comparison purposes(__eq__). It would be used when it is not None.'''
+        if no_init or target is None:
+            self._name = name or f'Unknown_{self.__class__.__qualname__}'
+            super().__init__(name=name, identifier=identifier)
             return
+        
         params = target.params.copy()
+        name = name or params.get("name", f"Unknown_{self.__class__.__qualname__}")
+        super().__init__(name=name, identifier=identifier)
+        
         clip = target.clip
         tokenizer = target.tokenizer
 
-        load_device = model_management.text_encoder_device()
+        load_device: torch.device = model_management.text_encoder_device()
         offload_device = model_management.text_encoder_offload_device()
         params['device'] = offload_device
         params['dtype'] = model_management.text_encoder_dtype(load_device)
-
+        
         self.cond_stage_model = clip(**(params))
-
         self.tokenizer = tokenizer(embedding_directory=embedding_directory)
-        self.patcher = comfy.model_patcher.ModelPatcher(self.cond_stage_model, load_device=load_device, offload_device=offload_device)
+        self.patcher = comfy.model_patcher.ModelPatcher(self.cond_stage_model, 
+                                                        load_device=load_device, 
+                                                        offload_device=offload_device,
+                                                        model_name=self.name)
         self.layer_idx = None
 
     def clone(self):
-        n = CLIP(no_init=True)
+        n = CLIP(no_init=True, name=self.name, identifier=self.identifier)
         n.patcher = self.patcher.clone()
         n.cond_stage_model = self.cond_stage_model
         n.tokenizer = self.tokenizer
@@ -157,8 +189,21 @@ class CLIP:
     def get_key_patches(self):
         return self.patcher.get_key_patches()
 
-class VAE:
-    def __init__(self, sd=None, device=None, config=None, dtype=None):
+class VAE(ModelLike):
+    def __init__(self, 
+                 sd:dict=None, 
+                 device=None, 
+                 config=None, 
+                 dtype=None,
+                 name: Optional[str]=None, 
+                 identifier: Optional[Any]=None):
+        
+        if sd is None:
+            raise ValueError("`sd` is required")
+        
+        name = name or f"Unknown_{self.__class__.__qualname__}"
+        super().__init__(name=name, identifier=identifier)
+        
         if 'decoder.up_blocks.0.resnets.0.norm1.weight' in sd.keys(): #diffusers format
             sd = diffusers_convert.convert_vae_state_dict(sd)
 
@@ -240,8 +285,11 @@ class VAE:
         self.first_stage_model.to(self.vae_dtype)
         self.output_device = model_management.intermediate_device()
 
-        self.patcher = comfy.model_patcher.ModelPatcher(self.first_stage_model, load_device=self.device, offload_device=offload_device)
-
+        self.patcher = comfy.model_patcher.ModelPatcher(self.first_stage_model, 
+                                                        load_device=self.device, 
+                                                        offload_device=offload_device,
+                                                        model_name=self.name)
+   
     def vae_encode_crop_pixels(self, pixels):
         x = (pixels.shape[1] // self.downscale_ratio) * self.downscale_ratio
         y = (pixels.shape[2] // self.downscale_ratio) * self.downscale_ratio
@@ -332,35 +380,52 @@ class VAE:
     def get_sd(self):
         return self.first_stage_model.state_dict()
 
-class StyleModel:
-    def __init__(self, model, device="cpu"):
+class StyleModel(ModelLike):
+    def __init__(self, 
+                 model: "StyleAdapter", 
+                 device="cpu",
+                 name: Optional[str]=None,
+                 identifier: Optional[Any]=None):
+        super().__init__(name=name, identifier=identifier)
         self.model = model
 
     def get_cond(self, input):
         return self.model(input.last_hidden_state)
 
 
-def load_style_model(ckpt_path):
+def load_style_model(ckpt_path: str, name: Optional[str]=None):
     model_data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
     keys = model_data.keys()
     if "style_embedding" in keys:
-        model = comfy.t2i_adapter.adapter.StyleAdapter(width=1024, context_dim=768, num_head=8, n_layes=3, num_token=8)
+        model = comfy.t2i_adapter.adapter.StyleAdapter(width=1024, context_dim=768, num_head=8, n_layers=3, num_token=8)
     else:
         raise Exception("invalid style model {}".format(ckpt_path))
     model.load_state_dict(model_data)
-    return StyleModel(model)
+    name = name or os.path.basename(ckpt_path).split(".")[0]
+    
+    return StyleModel(model, name=name, identifier=ckpt_path)
 
 class CLIPType(Enum):
     STABLE_DIFFUSION = 1
     STABLE_CASCADE = 2
 
-def load_clip(ckpt_paths, embedding_directory=None, clip_type=CLIPType.STABLE_DIFFUSION):
+def load_clip(ckpt_paths: Union[List[str], Tuple[str, ...], str], 
+              embedding_directory=None, 
+              clip_type=CLIPType.STABLE_DIFFUSION, 
+              model_name: Optional[str]=None):
+    
+    if not isinstance(ckpt_paths, (list, tuple)):
+        ckpt_paths = [ckpt_paths]
+    
+    model_name = model_name or '+'.join([os.path.basename(p).split('.')[0] for p in ckpt_paths])
     clip_data = []
     for p in ckpt_paths:
         clip_data.append(comfy.utils.load_torch_file(p, safe_load=True))
 
     class EmptyClass:
-        pass
+        params: dict
+        clip: Type["ClipModelType"]
+        tokenizer: Type["TokenizerType"]
 
     for i in range(len(clip_data)):
         if "transformer.resblocks.0.ln_1.weight" in clip_data[i]:
@@ -371,25 +436,35 @@ def load_clip(ckpt_paths, embedding_directory=None, clip_type=CLIPType.STABLE_DI
 
     clip_target = EmptyClass()
     clip_target.params = {}
+    clip_name = None
     if len(clip_data) == 1:
         if "text_model.encoder.layers.30.mlp.fc1.weight" in clip_data[0]:
             if clip_type == CLIPType.STABLE_CASCADE:
                 clip_target.clip = sdxl_clip.StableCascadeClipModel
                 clip_target.tokenizer = sdxl_clip.StableCascadeTokenizer
+                clip_name = "StableCascadeClip"
             else:
                 clip_target.clip = sdxl_clip.SDXLRefinerClipModel
                 clip_target.tokenizer = sdxl_clip.SDXLTokenizer
+                clip_name = "SDXLRefinerClip"
         elif "text_model.encoder.layers.22.mlp.fc1.weight" in clip_data[0]:
             clip_target.clip = sd2_clip.SD2ClipModel
             clip_target.tokenizer = sd2_clip.SD2Tokenizer
+            clip_name = "SD2Clip"
         else:
             clip_target.clip = sd1_clip.SD1ClipModel
             clip_target.tokenizer = sd1_clip.SD1Tokenizer
+            clip_name = "SD1Clip"
     else:
         clip_target.clip = sdxl_clip.SDXLClipModel
         clip_target.tokenizer = sdxl_clip.SDXLTokenizer
+        clip_name = "SDXLClip"
+    if clip_name:
+        clip_name = f'{model_name}_{clip_name}'
+    else:
+        clip_name = f'{model_name}_UnknownClip'
 
-    clip = CLIP(clip_target, embedding_directory=embedding_directory)
+    clip = CLIP(clip_target, embedding_directory=embedding_directory, name=clip_name, identifier='+'.join(ckpt_paths))
     for c in clip_data:
         m, u = clip.load_sd(c)
         if len(m) > 0:
@@ -399,18 +474,31 @@ def load_clip(ckpt_paths, embedding_directory=None, clip_type=CLIPType.STABLE_DI
             ComfyUILogger.print("clip unexpected:", u)
     return clip
 
-def load_gligen(ckpt_path):
+def load_gligen(ckpt_path: str, name: Optional[str]=None):
     data = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
     model = gligen.load_gligen(data)
+    name = name or os.path.basename(ckpt_path).split('.')[0]
     if model_management.should_use_fp16():
         model = model.half()
-    return comfy.model_patcher.ModelPatcher(model, load_device=model_management.get_torch_device(), offload_device=model_management.unet_offload_device())
+    return comfy.model_patcher.ModelPatcher(model, load_device=model_management.get_torch_device(), offload_device=model_management.unet_offload_device(), model_name=name)
 
-def load_checkpoint(config_path=None, ckpt_path=None, output_vae=True, output_clip=True, embedding_directory=None, state_dict=None, config=None):
+def load_checkpoint(config_path: Optional[str] = None, 
+                    ckpt_path: str =None, 
+                    output_vae=True, 
+                    output_clip=True, 
+                    embedding_directory=None, 
+                    state_dict=None, 
+                    config=None,
+                    model_name: Optional[str]=None):
     #TODO: this function is a mess and should be removed eventually
     if config is None:
+        if config_path is None:
+            raise ValueError("config_path is required if config is not provided")
         with open(config_path, 'r') as stream:
             config = yaml.safe_load(stream)
+            
+    model_name = model_name or os.path.basename(ckpt_path).split('.')[0]
+    
     model_config_params = config['model']['params']
     clip_config = model_config_params['cond_stage_config']
     scale_factor = model_config_params['scale_factor']
@@ -445,7 +533,9 @@ def load_checkpoint(config_path=None, ckpt_path=None, output_vae=True, output_cl
         state_dict = comfy.utils.load_torch_file(ckpt_path)
 
     class EmptyClass:
-        pass
+        params: dict
+        clip: Type["ClipModelType"]
+        tokenizer: Type["TokenizerType"]
 
     model_config = comfy.supported_models_base.BASE({})
 
@@ -470,27 +560,43 @@ def load_checkpoint(config_path=None, ckpt_path=None, output_vae=True, output_cl
 
     if output_vae:
         vae_sd = comfy.utils.state_dict_prefix_replace(state_dict, {"first_stage_model.": ""}, filter_keys=True)
-        vae = VAE(sd=vae_sd, config=vae_config)
+        vae_name = f'{model_name}_VAE'
+        vae = VAE(sd=vae_sd, config=vae_config, name=vae_name, identifier=ckpt_path)
 
     if output_clip:
         w = WeightsLoader()
         clip_target = EmptyClass()
         clip_target.params = clip_config.get("params", {})
+        
         if clip_config["target"].endswith("FrozenOpenCLIPEmbedder"):
             clip_target.clip = sd2_clip.SD2ClipModel
             clip_target.tokenizer = sd2_clip.SD2Tokenizer
-            clip = CLIP(clip_target, embedding_directory=embedding_directory)
+            clip = CLIP(clip_target, embedding_directory=embedding_directory, name=f'{model_name}_SD2Clip', identifier=ckpt_path)
             w.cond_stage_model = clip.cond_stage_model.clip_h
+            
         elif clip_config["target"].endswith("FrozenCLIPEmbedder"):
             clip_target.clip = sd1_clip.SD1ClipModel
             clip_target.tokenizer = sd1_clip.SD1Tokenizer
-            clip = CLIP(clip_target, embedding_directory=embedding_directory)
+            clip = CLIP(clip_target, embedding_directory=embedding_directory, name=f'{model_name}_SD1Clip', identifier=ckpt_path)
             w.cond_stage_model = clip.cond_stage_model.clip_l
+        
         load_clip_weights(w, state_dict)
 
-    return (comfy.model_patcher.ModelPatcher(model, load_device=model_management.get_torch_device(), offload_device=offload_device), clip, vae)
+    return (comfy.model_patcher.ModelPatcher(model, 
+                                             load_device=model_management.get_torch_device(), 
+                                             offload_device=offload_device,
+                                             model_name=model_name), 
+            clip, 
+            vae)
 
-def load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, output_clipvision=False, embedding_directory=None, output_model=True):
+def load_checkpoint_guess_config(ckpt_path, 
+                                 output_vae=True, 
+                                 output_clip=True, 
+                                 output_clipvision=False, 
+                                 embedding_directory=None, 
+                                 output_model=True,
+                                 model_name: Optional[str]=None):
+    model_name = model_name or os.path.basename(ckpt_path).split('.')[0]
     sd = comfy.utils.load_torch_file(ckpt_path)
     sd_keys = sd.keys()
     clip = None
@@ -516,26 +622,27 @@ def load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, o
             clipvision = clip_vision.load_clipvision_from_sd(sd, model_config.clip_vision_prefix, True)
 
     if output_model:
-        inital_load_device = model_management.unet_inital_load_device(parameters, unet_dtype)
+        initial_load_device = model_management.unet_inital_load_device(parameters, unet_dtype)
         offload_device = model_management.unet_offload_device()
-        model = model_config.get_model(sd, "model.diffusion_model.", device=inital_load_device)
+        model = model_config.get_model(sd, "model.diffusion_model.", device=initial_load_device)
         model.load_model_weights(sd, "model.diffusion_model.")
 
     if output_vae:
         vae_sd = comfy.utils.state_dict_prefix_replace(sd, {k: "" for k in model_config.vae_key_prefix}, filter_keys=True)
         vae_sd = model_config.process_vae_state_dict(vae_sd)
-        vae = VAE(sd=vae_sd)
+        vae = VAE(sd=vae_sd, name=f'{model_name}_VAE', identifier=ckpt_path)
 
     if output_clip:
         clip_target = model_config.clip_target()
+
         if clip_target is not None:
             clip_sd = model_config.process_clip_state_dict(sd)
+            
             if len(clip_sd) > 0:
-                clip = CLIP(clip_target, embedding_directory=embedding_directory)
+                clip = CLIP(clip_target, embedding_directory=embedding_directory, name=f'{model_name}_CLIP', identifier=ckpt_path)
                 m, u = clip.load_sd(clip_sd, full_model=True)
                 if len(m) > 0:
                     ComfyUILogger.print("clip missing:", m)
-
                 if len(u) > 0:
                     ComfyUILogger.print("clip unexpected:", u)
             else:
@@ -546,8 +653,12 @@ def load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, o
         ComfyUILogger.print("left over keys:", left_over)
 
     if output_model:
-        model_patcher = comfy.model_patcher.ModelPatcher(model, load_device=load_device, offload_device=model_management.unet_offload_device(), current_device=inital_load_device)
-        if inital_load_device != torch.device("cpu"):
+        model_patcher = comfy.model_patcher.ModelPatcher(model, 
+                                                         load_device=load_device, 
+                                                         offload_device=model_management.unet_offload_device(), 
+                                                         current_device=initial_load_device,
+                                                         model_name=model_name)
+        if initial_load_device != torch.device("cpu"):
             ComfyUILogger.print("loaded straight to GPU")
             model_management.load_model_gpu(model_patcher)
 

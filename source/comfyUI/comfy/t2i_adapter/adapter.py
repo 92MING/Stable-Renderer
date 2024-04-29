@@ -1,6 +1,8 @@
 #taken from https://github.com/TencentARC/T2I-Adapter
 import torch
 import torch.nn as nn
+
+from deprecated import deprecated
 from collections import OrderedDict
 
 
@@ -196,17 +198,25 @@ class ResidualAttentionBlock(nn.Module):
 
 class StyleAdapter(nn.Module):
 
-    def __init__(self, width=1024, context_dim=768, num_head=8, n_layes=3, num_token=4):
+    def __init__(self, width=1024, context_dim=768, num_head=8, n_layers=3, num_token=4, **kwargs):
         super().__init__()
+        if wrong_layers_word_arg := kwargs.get('n_layes', None):    # type: ignore
+            if n_layers != wrong_layers_word_arg:
+                n_layers = wrong_layers_word_arg
 
         scale = width ** -0.5
-        self.transformer_layes = nn.Sequential(*[ResidualAttentionBlock(width, num_head) for _ in range(n_layes)])
+        self.transformer_layers = nn.Sequential(*[ResidualAttentionBlock(width, num_head) for _ in range(n_layers)])
         self.num_token = num_token
         self.style_embedding = nn.Parameter(torch.randn(1, num_token, width) * scale)
         self.ln_post = LayerNorm(width)
         self.ln_pre = LayerNorm(width)
         self.proj = nn.Parameter(scale * torch.randn(width, context_dim))
 
+    @property
+    @deprecated('Please use `transformer_layers` instead. This is a typo and will be removed in the future.')
+    def transformer_layes(self):    # type: ignore
+        return self.transformer_layers
+    
     def forward(self, x):
         # x shape [N, HW+1, C]
         style_embedding = self.style_embedding + torch.zeros(
@@ -214,7 +224,7 @@ class StyleAdapter(nn.Module):
         x = torch.cat([x, style_embedding], dim=1)
         x = self.ln_pre(x)
         x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer_layes(x)
+        x = self.transformer_layers(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
 
         x = self.ln_post(x[:, -self.num_token:, :])

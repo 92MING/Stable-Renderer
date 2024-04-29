@@ -48,10 +48,22 @@ class ComfyUINode(Protocol, metaclass=_ComfyUINodeMeta):
     
     __real_node_instance__: 'AdvancedNodeBase'
     '''real node instance after creation. This is only available for advanced comfyUI nodes which inherit from `NodeBase`.'''
+    # endregion
     
     ID: str
     '''The unique id of the node. This will be assigned in runtime.'''
-    # endregion
+    NAME: str
+    '''
+    The name of the node. You can define it or not. 
+    If you are not defining, this field will be passed to the node class during initialization.
+    The default value is the class name.
+    '''
+    NAMESPACE: str
+    '''
+    Namespace for avoiding name conflict. You can define it or not.
+    If you are not defining, this value will be passed to the node class during initialization.
+    The default value is ""(empty string).
+    '''
     
     FUNCTION: str
     '''the target function name of the node. If not define, will try to use the only function it have.'''
@@ -59,9 +71,7 @@ class ComfyUINode(Protocol, metaclass=_ComfyUINodeMeta):
     '''the description of the node'''
     CATEGORY: str
     '''the category of the node. For searching'''
-    NAMESPACE: Union[str, None] = None
-    '''the namespace of the node. It is used to avoid name conflicts.'''
-    
+
     INPUT_IS_LIST: bool
     '''whether the input is a list'''
     OUTPUT_IS_LIST: Tuple[bool, ...]
@@ -458,7 +468,8 @@ class AdvancedNodeBase(CrossModuleABC):
             return packed_params
         
         def real_calling(ins, *args, **kwargs):
-            proper_kwargs = proper_input(ins, *args, **kwargs)
+            real_ins = ins.__real_node_instance__
+            proper_kwargs = proper_input(real_ins, *args, **kwargs)
             if cls._HasServerModeCall:
                 result = cls.__server_call__(**proper_kwargs)
             else:
@@ -480,15 +491,16 @@ class AdvancedNodeBase(CrossModuleABC):
         setattr(newcls, 'INPUT_TYPES', INPUT_TYPES)
         
         if cls._HasIsChangedMethod:
-            def IS_CHANGED(self, *args, **kwargs):
-                proper_kws = proper_input(*args, **kwargs)
+            def IS_CHANGED(ins, *args, **kwargs):
+                real_ins = ins.__real_node_instance__
+                proper_kws = proper_input(real_ins, *args, **kwargs)
                 return cls.IsChanged(**proper_kws)
             setattr(newcls, 'IS_CHANGED', IS_CHANGED)
         
         if cls._HasValidateInputMethod:
             @classmethod
-            def VALIDATE_INPUTS(cls, *args, **kwargs):
-                proper_kws = proper_input(*args, **kwargs)
+            def VALIDATE_INPUTS(_cls, *args, **kwargs):
+                proper_kws = proper_input(_cls, *args, **kwargs)
                 first_key = list(proper_kws.keys())[0]
                 proper_kws.pop(first_key)  # remove the first key(self), cuz this is a classmethod
                 return cls.ValidateInput(**proper_kws)
@@ -513,7 +525,7 @@ class AdvancedNodeBase(CrossModuleABC):
         else:
             cls._HasServerModeCall = False
         if is_dev_mode() and is_verbose_mode():
-            ComfyUILogger.debug(f'Node {cls.__qualname__} _IsAbstract={cls._IsAbstract}, _HasServerModeCall={cls._HasServerModeCall}')
+            ComfyUILogger.debug(f'Node {cls.__qualname__} IsAbstract={cls._IsAbstract}, HasServerModeCall={cls._HasServerModeCall}')
         
         cls._InitBasicInfo()
         
@@ -576,7 +588,7 @@ class AdvancedNodeBase(CrossModuleABC):
         
         ret['ui'].update(ui_dict)
         if is_dev_mode() and is_verbose_mode():
-            ComfyUILogger.debug(f'({cls.__qualname__}) UI return values: {ui_dict}')
+            ComfyUILogger.debug(f'({cls.__qualname__}) UI return values: {format_data_for_console_log(ui_dict)}')
         return ret
         
     @staticmethod
