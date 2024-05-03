@@ -4,11 +4,10 @@ from typing import Union, List, Optional, Set, Dict, TypeVar, Type
 import heapq
 import glm
 
-from common_utils.base_clses import NamedObj
 from common_utils.global_utils import GetOrAddGlobalValue
 from .component import Component, ComponentMeta
 from .components.transform import Transform
-from .engineObj import EngineObj
+from .base_clses import EngineObj, NamedObj
 
 class AutoSortList(list):
     def append(self, obj):
@@ -17,10 +16,10 @@ class AutoSortList(list):
         for obj in objs:
             self.append(obj)
 
-_gameObj_tags: Dict[str, Set['GameObject']] = GetOrAddGlobalValue("_GAMEOBJ_TAGS", {})
+_gameObj_tags: Dict[str, Set['GameObject']] = GetOrAddGlobalValue("_GAMEOBJ_TAGS", {})  # type: ignore
 '''{tag: set[gameObj]}'''
 
-_root_gameObjs: List['GameObject'] = GetOrAddGlobalValue("_ROOT_GAMEOBJS", []) # list of root gameObj(no parent)
+_root_gameObjs: List['GameObject'] = GetOrAddGlobalValue("_ROOT_GAMEOBJS", []) # type: ignore
 '''list of root gameObj. Root gameObjs are gameObjs without parent'''
 
 CT = TypeVar('CT', bound='Component')
@@ -40,17 +39,17 @@ class GameObject(EngineObj, NamedObj):
     @classmethod
     def FindObj_ByName(cls, name)->'GameObject':
         '''Return None if not found'''
-        return cls.GetInstance(name)
+        return cls.Find(name)   # type: ignore
     # endregion
 
     def __init__(self,
                  name:str,
                  active:bool=True,
-                 parent:'GameObject'=None,
-                 tags:Union[str, list, tuple, set]=None,
-                 position:Union[list, tuple, glm.vec3]=None,
-                 rotation:Union[list, tuple, glm.vec3]=None,
-                 scale:Union[list, tuple, glm.vec3]=None,
+                 parent:Optional['GameObject']=None,
+                 tags:Union[str, list, tuple, set, None]=None,
+                 position:Union[list, tuple, glm.vec3, None]=None,
+                 rotation:Union[list, tuple, glm.vec3, None]=None,
+                 scale:Union[list, tuple, glm.vec3, None]=None,
                  needTransform=True):
         '''
         GameObject is the class contains components.
@@ -58,12 +57,12 @@ class GameObject(EngineObj, NamedObj):
         :param active: whether this gameObj is active. If not active, this gameObj and all its children will not be updated.
         :param parent: parent gameObj. If None, this gameObj will be added to root gameObj list.
         :param tags: tags of this gameObj. Can be used to find this gameObj. Can be None, str, list, tuple or set.
-        :param position: local position of this gameObj. If needTransform is False, error will be raised if posiiton is not None.
+        :param position: local position of this gameObj. If needTransform is False, error will be raised if position is not None.
         :param rotation: local rotation of this gameObj in euler angles. If needTransform is False, error will be raised if rotation is not None.
         :param scale: local scale of this gameObj. If needTransform is False, error will be raised if scale is not None.
         :param needTransform: whether this gameObj need a transform component.
         '''
-        super().__init__(name)
+        NamedObj.__init__(self, name)
         self._active = active
         self._tags = set()
         self._parent = parent
@@ -81,13 +80,13 @@ class GameObject(EngineObj, NamedObj):
         if needTransform:
             self.addComponent(Transform)
         if not needTransform and (position is not None or rotation is not None or scale is not None):
-            raise ValueError("If needTransform is False, posiiton, rotation and scale cannot be set.")
+            raise ValueError("If needTransform is False, position, rotation and scale cannot be set.")
         if position is not None:
-            self.transform.localPosition = glm.vec3(position)
+            self.transform.localPosition = glm.vec3(position)  # type: ignore
         if rotation is not None:
             self.transform.localRotation = glm.vec3(rotation[0], rotation[1], rotation[2])
         if scale is not None:
-            self.transform.localScale = glm.vec3(scale)
+            self.transform.localScale = glm.vec3(scale)  # type: ignore
 
     # region child & parent
     def hasChild(self, child):
@@ -327,7 +326,7 @@ class GameObject(EngineObj, NamedObj):
                     c.onDisable() # call onDisable before destroy
                     c.onDestory()
 
-    def addComponent(self, comp: Union[Type[CT], str, CT], enable=True, *args, **kwargs)->Optional[CT]:
+    def addComponent(self, comp: Union[Type[CT], str, CT], enable=True, *args, **kwargs)->CT:
         '''
         add a component of type `comp`
         :param comp: Subclass of Component / component instance / component name
@@ -338,24 +337,30 @@ class GameObject(EngineObj, NamedObj):
         '''
         if not isinstance(comp, (ComponentMeta, str, Component)):
             raise TypeError("comp must be a subclass of Component")
+        
         if isinstance(comp, (ComponentMeta, str)):
             comp = Component.FindComponentCls(comp) if isinstance(comp, str) else comp
-            if comp.Unique and self.hasComponent(comp):
-                return None # already has a unique component
-            for require in comp.RequireComponent:
+            
+            if comp.Unique and self.hasComponent(comp): # type: ignore
+                return self.getComponent(comp)  # type: ignore
+            
+            for require in comp.RequireComponent:   # type: ignore
                 if not self.hasComponent(require):
                     newComp = self.addComponent(require, enable=enable, )
                     if newComp is None:
                         raise RuntimeError(f"GameObject: {self.name} has no component: {require}. Auto add failed")
-            c = comp(self, enable, *args, **kwargs)
+            
+            c = comp(self, enable, *args, **kwargs) # type: ignore
             self._components.append(c)
             c._tryAwake() # call awake if the gameobject is active and the component is enabled
-            return c
+            return c    # type: ignore
+        
         else: # comp is a component instance
             if comp.gameObj != self:
                 raise RuntimeError(f"Component: {comp} is not belong to GameObject: {self.name}. Can't add")
             if comp.Unique and self.hasComponent(comp):
-                return None
+                return self.getComponent(comp)  # type: ignore
+            
             for require in comp.RequireComponent:
                 if not self.hasComponent(require):
                     newComp = self.addComponent(require, enable=enable, )
@@ -363,6 +368,8 @@ class GameObject(EngineObj, NamedObj):
                         raise RuntimeError(f"GameObject: {self.name} has no component: {require}. Auto add failed")
             self._components.append(comp)
             comp._tryAwake()  # call awake if the gameobject is active and the component is enabled
+
+            return comp
 
     @property
     def transform(self) -> Transform:

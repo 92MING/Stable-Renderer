@@ -1,11 +1,13 @@
 #version 430 core
 
-uniform sampler2D gColor; // color and depth (r, g, b, depth) in g-buffer
-uniform sampler2D gPos; // global position in g-buffer
-uniform sampler2D gNormal; // global normal in g-buffer
-uniform sampler2D gID; // uv and obj-ID in g-buffer
-uniform sampler2D gNoise; // noise texture
-uniform sampler2D gDepth; // depth texture
+uniform sampler2D gColor;   // vec4, rgba
+uniform sampler2D gID;      
+// ivec4
+//	when normal render mode:  (objID, material id, vertexID, 0.0)
+//  when baking mode: 		  (objID, material id, vertexID, 3D pixel index)  
+uniform sampler2D gPos;     // vec3, world space position
+uniform sampler2D gNormalAndDepth; // vec4, (vec3(view space normal), depth)
+uniform sampler2D gNoise; // vec4, latent noise
 
 in vec2 uv;  // screen space UV
 

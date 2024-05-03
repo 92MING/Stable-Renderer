@@ -37,7 +37,7 @@ if is_dev_mode():
 
 
 
-_EngineInstance: Optional['Engine'] = GetOrAddGlobalValue("_ENGINE_SINGLETON", None)    # type: ignore
+_EngineInstance: Optional['Engine'] = GetOrAddGlobalValue("__ENGINE_INSTANCE__", None)    # type: ignore
 _OnEngineStageChanged: Event = GetOrCreateGlobalValue("_ON_ENGINE_STAGE_CHANGED", Event, EngineStage)
 
 @prevent_re_init
@@ -69,17 +69,17 @@ class Engine:
             return _EngineInstance
         else:
             e = super().__new__(cls)
-            SetGlobalValue("_ENGINE_SINGLETON", e)
+            SetGlobalValue("__ENGINE_INSTANCE__", e)
             _EngineInstance = e
             return e
 
     def __init__(self,
                  scene: Optional[Scene] = None,
                  winTitle=None,
-                 winSize=(1080, 720),
+                 winSize=(1024, 1024),
                  windowResizable=False,
                  bgColor=Color.CLEAR,
-                 enableHDR=True,
+                 enableHDR=False,
                  enableGammaCorrection=False,
                  gamma=2.2,
                  exposure=1.0,
@@ -96,7 +96,7 @@ class Engine:
                  disableComfyUI: bool = False,
                  workflow: Union[Workflow, str, Path, None] = None,
                  **kwargs):
-        
+        self._stage = EngineStage.INIT
         if disableComfyUI:
             EngineLogger.warn('ComfyUI is disable. This setting is just for debugging. Please make sure you are not in production mode.')
             self.disableComfyUI = True
@@ -163,7 +163,6 @@ class Engine:
         self._resourceManager = ResourcesManager(**find_kwargs_for_manager(ResourcesManager))
         # endregion
         
-        self._stage = EngineStage.INIT
         _OnEngineStageChanged.invoke(self._stage)
     
     @property

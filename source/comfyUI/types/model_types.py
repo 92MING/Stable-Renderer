@@ -1,7 +1,7 @@
 '''Type hints & data structs specific to model related stuffs.'''
 
 from typing import (Any, Optional, Type, Union, Protocol, TYPE_CHECKING, TypeAlias)
-from common_utils.type_utils import get_cls_name
+from common_utils.type_utils import get_cls_name, valueTypeCheck
 
 if TYPE_CHECKING:
     from comfy.sd1_clip import SDClipModel, SDTokenizer, SD1ClipModel, SD1Tokenizer
@@ -68,7 +68,13 @@ class ModelLike:
 def is_model_type(model):
     from comfy.model_patcher import ModelPatcher
     from comfy.model_management import LoadedModel
-    return isinstance(model, (ModelPatcherTypes, ModelPatcher, LoadedModel))
+    from comfy.clip_model import CLIPVisionModelProjection
+    from comfy.gligen import Gligen
+    from comfy.model_base import BaseModel, SD21UNCLIP
+    from comfy.sd1_clip import SDClipModel, SD1ClipModel
+    return valueTypeCheck(model, 
+                          (ModelPatcher, LoadedModel, CLIPVisionModelProjection, Gligen, 
+                                BaseModel, SD21UNCLIP, SDClipModel, SD1ClipModel))    # type: ignore
 
 
 __all__ = ['ClipModelType', 'TokenizerType', 'ModelPatcherTypes', 'ModelLike', 'ClipTargetProtocol', 'is_model_type']

@@ -67,7 +67,7 @@ class Renderer(Component):
 
     def _drawAvailable(self):
         '''Check if this renderer is available to draw. Override this method to implement your own logic.'''
-        return len(self._materials) > 0 and reduce(lambda x, y: x and y, map(lambda x: x.drawAvailable, self._materials), True)
+        return len(self._materials) > 0 and reduce(lambda x, y: x and y, map(lambda x: x.draw_available, self._materials), True)
 
     def lateUpdate(self):
         '''Called after all components' update() method are called.'''

@@ -11,18 +11,19 @@ import pycuda.gl
 import pycuda.driver
 import glm
 
+from attr import attrs, attrib
 from torch import Tensor
 from pathlib import Path
 from PIL import Image
 from PIL.Image import Image as ImageType
 from OpenGL.GL.EXT.texture_filter_anisotropic import GL_TEXTURE_MAX_ANISOTROPY_EXT, glInitTextureFilterAnisotropicEXT
 
-from ..resourcesObj import ResourcesObj
+from ..resources_obj import ResourcesObj
 from ..enums import *
 from ..color import Color
 from common_utils.decorators import Overload
 from common_utils.debug_utils import EngineLogger
-from common_utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
+from common_utils.global_utils import GetOrAddGlobalValue, SetGlobalValue, is_dev_mode
 
 from typing import TYPE_CHECKING, Union, Optional, Final, Literal
 
@@ -30,123 +31,68 @@ if TYPE_CHECKING:
     from ..shader import Shader
 
 
-_SUPPORT_GL_CUDA_SHARE = GetOrAddGlobalValue('__SUPPORT_GL_CUDA_SHARE__', True)
-
 _SUPPORT_ANISOTROPIC_FILTER = glInitTextureFilterAnisotropicEXT()
 if _SUPPORT_ANISOTROPIC_FILTER:
     _MAX_ANISOTROPY = gl.glGetFloatv(GL_TEXTURE_MAX_ANISOTROPY_EXT)
 else:
     _MAX_ANISOTROPY = None
 
+def __SUPPORT_GL_CUDA_SHARE__():
+    return GetOrAddGlobalValue('__SUPPORT_GL_CUDA_SHARE__', True)
 
+@attrs(eq=False, repr=False)
 class Texture(ResourcesObj):
     '''Base class for texture.'''
 
-    _BaseName : Final['str'] = 'Texture'
+    BaseClsName = 'Texture'
     '''The base class name of all texture sub classes'''
 
-    def __init__(self,
-                 name: Optional[str],
-                 width: Optional[int] = None,
-                 height: Optional[int] = None,
-                 format:TextureFormat=TextureFormat.RGB,
-                 data: Optional[bytes]=None,
-                 min_filter:TextureFilter=TextureFilter.LINEAR_MIPMAP_LINEAR,
-                 mag_filter:TextureFilter=TextureFilter.LINEAR,
-                 s_wrap:TextureWrap=TextureWrap.REPEAT,
-                 t_wrap:TextureWrap=TextureWrap.REPEAT,
-                 internalFormat: Optional[TextureInternalFormat]=None,
-                 data_type: Optional[TextureDataType]=None,
-                 share_to_torch: bool = False,
-                 ):
-        '''
-        Texture datatype for this engine.
-        
-        Args:
-            - name: The name of the texture.
-            - width: The width of the texture
-            - height: The height of the texture
-            - format: The specific OpenGL format of the texture.
-            - data: The data of the texture. It should be a bytes object.
-            - min_filter: The minification filter of the texture.
-            - mag_filter: The magnification filter of the texture.
-            - s_wrap: The wrap mode of the texture in s direction.
-            - t_wrap: The wrap mode of the texture in t direction.
-            - internalFormat: The specific OpenGL internal format of the texture. If not given, it will be set to the default internal format of the format.
-            - data_type: The specific OpenGL data type of the texture. If not given, it will be set to the default data type of the format.
-            - share_to_torch: If true, the texture will be shared to torch by using cuda.
-        '''
-        super().__init__(name)
-        self._texID = None
-        '''The opengl texture id. It could be None if the texture is not loaded.'''
-        self._cleared = False
-        
-        if width is not None and height is not None:
-            assert width > 0 and height > 0, 'Invalid texture size, got width: {}, height: {}'.format(width, height)
-        self._width = width
-        self._height = height
-
-        self._data = data
-        '''Buffer for the texture data. It should be a bytes object.'''
-
-        self._format = format
-        self._min_filter = min_filter
-        self._mag_filter = mag_filter
-        self._s_wrap = s_wrap
-        self._t_wrap = t_wrap
-        self._internalFormat = internalFormat or self.format.default_internal_format
-        self._data_type = data_type or self._internalFormat.value.default_data_type
-        
-        if share_to_torch and not self.data_type.value.tensor_supported:
-            raise Exception(f'The data type {self.data_type} does not support tensor. Cannot share to torch.')
-        
-        self._share_to_torch = share_to_torch
-        self._tensor: Optional[Tensor] = None
-        self._support_gl_share_to_torch = True
+    width: int = attrib(default=512)
+    '''The width of the texture'''
+    height: int = attrib(default=512)
+    '''The height of the texture'''
+    format: TextureFormat = attrib(default=TextureFormat.RGB)
+    '''The specific OpenGL format of the texture.'''
+    data: Optional[bytes] = attrib(default=None)
+    '''The data of the texture. It should be a bytes object.'''
+    min_filter: TextureFilter = attrib(default=TextureFilter.LINEAR_MIPMAP_LINEAR)
+    '''The minification filter of the texture.'''
+    mag_filter: TextureFilter = attrib(default=TextureFilter.LINEAR)
+    '''The magnification filter of the texture.'''
+    s_wrap: TextureWrap = attrib(default=TextureWrap.REPEAT)
+    '''The wrap mode of the texture in s direction.'''
+    t_wrap: TextureWrap = attrib(default=TextureWrap.REPEAT)
+    '''The wrap mode of the texture in t direction.'''
+    internal_format: TextureInternalFormat = attrib(default=None)
+    '''The specific OpenGL internal format of the texture. If not given, it will be set to the default internal format of the format.
+    During creation, you can set this to `None`, and it will be set to the default internal format of the format.'''
+    data_type: TextureDataType = attrib(default=None)
+    '''The specific OpenGL data type of the texture. If not given, it will be set to the default data type of the format.
+    During creation, you can set this to `None`, and it will be set to the default data type of the format.'''
+    share_to_torch: bool = attrib(default=False)
+    '''If true, the texture will be shared to torch by using cuda.'''
+    _tensor: Optional[Tensor] = attrib(default=None, alias='tensor')
+    '''The tensor of the texture. It could be None if the texture is not shared to torch.'''
+    texID: Optional[int] = attrib(default=None)
+    '''The opengl texture id. It could be None if the texture is not loaded.'''
     
+    def __attrs_post_init__(self):
+        super().__attrs_post_init__()
+        
+        if self.internal_format is None:
+            self.internal_format = self.format.default_internal_format
+        if self.data_type is None:
+            self.data_type = self.internal_format.value.default_data_type
+        
+        if self.share_to_torch and not __SUPPORT_GL_CUDA_SHARE__():
+            if is_dev_mode():
+                EngineLogger.warn(f'The data type {self.data_type} does not support tensor. Cannot share to torch. `share_to_torch` will be set to False.')
+                self.share_to_torch = False
+   
     @property
-    def textureID(self)->Optional[int]:
-        '''The texture id for this texture in OpenGL. It could be None if the texture is not loaded.'''
-        assert not self._cleared, 'This texture has been cleared.'
-        return self._texID
-    
-    @property
-    def initedTensor(self)->bool:
-        '''If true, the tensor sharing has been inited.'''
-        assert not self._cleared, 'This texture has been cleared.'
-        return self._tensor is not None
-    
-    @property
-    def sentToGPU(self)->bool:
+    def loaded(self)->bool:
         '''If true, the texture has been sent to GPU.'''
-        assert not self._cleared, 'This texture has been cleared.'
-        return self._texID is not None
-    
-    @property
-    def share_to_torch(self)->bool:
-        '''If true, the texture will be shared to torch by using cuda.'''
-        assert not self._cleared, 'This texture has been cleared.'
-        return self._share_to_torch
-
-    @property
-    def data(self)->Optional[bytes]:
-        '''The data of the texture. It could be None if the texture is not loaded. It should be a bytes object.'''
-        assert not self._cleared, 'This texture has been cleared.'
-        return self._data
-
-    @property
-    def width(self)->int:
-        '''The width of the texture.'''
-        assert not self._cleared, 'This texture has been cleared.'
-        assert self._width is not None, 'Width is not set for this texture.'
-        return self._width
-
-    @property
-    def height(self)->int:
-        '''The height of the texture.'''
-        assert not self._cleared, 'This texture has been cleared.'
-        assert self._height is not None, 'Height is not set for this texture.'
-        return self._height
+        return self.texID is not None
     
     @property
     def nbytes(self)->int:
@@ -179,239 +125,74 @@ class Texture(ResourcesObj):
             
             case _:
                 return self.data_type.value.nbytes
-        
-    @property
-    def format(self)->TextureFormat:
-        '''
-        The specific OpenGL format of the texture. 
-        See:
-            * https://www.khronos.org/opengl/wiki/Image_Format
-            * https://registry.khronos.org/OpenGL-Refpages/gl4/html/glTexImage2D.xhtml
-        '''
-        assert not self._cleared, 'This texture has been cleared.'
-        return self._format
-
-    @format.setter
-    def format(self, value: TextureFormat):
-        '''
-        The specific OpenGL format of the texture. 
-        See:
-            * https://www.khronos.org/opengl/wiki/Image_Format
-            * https://registry.khronos.org/OpenGL-Refpages/gl4/html/glTexImage2D.xhtml
-        '''
-        assert not self._cleared, 'This texture has been cleared.'
-        if self._texID is not None:
-            raise Exception('Cannot change tex format after texture is loaded.')
-        assert isinstance(value, TextureFormat), 'Invalid format type: {}'.format(value)
-        self._format = value
-    
-    @property
-    def data_type(self) -> TextureDataType:
-        '''
-        The specific OpenGL data type of the texture.
-        See:
-            * https://www.khronos.org/opengl/wiki/Image_Format
-            * https://registry.khronos.org/OpenGL-Refpages/gl4/html/glTexImage2D.xhtml
-        '''
-        assert not self._cleared, 'This texture has been cleared.'
-        return self._data_type
-    
-    @data_type.setter
-    def data_type(self, value: TextureDataType):
-        '''
-        The specific OpenGL data type of the texture.
-        See:
-            * https://www.khronos.org/opengl/wiki/Image_Format
-            * https://registry.khronos.org/OpenGL-Refpages/gl4/html/glTexImage2D.xhtml
-        '''
-        assert not self._cleared, 'This texture has been cleared.'
-        if self._texID is not None:
-            raise Exception('Cannot change data type after texture is loaded.')
-        #TODO: check if the datatype is valid for the current format
-        self._data_type = value
-
-    @property
-    def internal_format(self)->TextureInternalFormat:
-        assert not self._cleared, 'This texture has been cleared.'
-        return self._internalFormat
-
-    @internal_format.setter
-    def internal_format(self, value:TextureInternalFormat):
-        assert not self._cleared, 'This texture has been cleared.'
-        if self._texID is not None:
-            raise Exception('Cannot change internal format after texture is loaded.')
-        # TODO: check if the internal format is valid for the current format
-        self._internalFormat = value
 
     @property
     def channel_count(self)->int:
         '''The channel count of the texture.'''
-        assert not self._cleared, 'This texture has been cleared.'
         return self.format.channel_count
-    
-    @property
-    def min_filter(self) -> TextureFilter:
-        assert not self._cleared, 'This texture has been cleared.'
-        return self._min_filter
-
-    @min_filter.setter
-    def min_filter(self, value:TextureFilter):
-        assert not self._cleared, 'This texture has been cleared.'
-        if self._texID is not None:
-            raise Exception('Cannot change filter after texture is loaded.')
-        self._min_filter = value
-
-    @property
-    def mag_filter(self)->TextureFilter:
-        assert not self._cleared, 'This texture has been cleared.'
-        return self._mag_filter
-
-    @mag_filter.setter
-    def mag_filter(self, value:TextureFilter):
-        assert not self._cleared, 'This texture has been cleared.'
-        if self._texID is not None:
-            raise Exception('Cannot change filter after texture is loaded.')
-        self._mag_filter = value
-
-    @property
-    def s_wrap(self)->TextureWrap:
-        assert not self._cleared, 'This texture has been cleared.'
-        return self._s_wrap
-
-    @s_wrap.setter
-    def s_wrap(self, value):
-        assert not self._cleared, 'This texture has been cleared.'
-        if self._texID is not None:
-            raise Exception('Cannot change s_wrap after texture is loaded.')
-        self._s_wrap = value
-
-    @property
-    def t_wrap(self)->TextureWrap:
-        assert not self._cleared, 'This texture has been cleared.'
-        return self._t_wrap
-
-    @t_wrap.setter
-    def t_wrap(self, value: TextureWrap):
-        assert not self._cleared, 'This texture has been cleared.'
-        if self._texID is not None:
-            raise Exception('Cannot change t_wrap after texture is loaded.')
-        self._t_wrap = value
-    # endregion
-
-
+   
     @Overload
-    def bind(self, slot:int, uniformID):    # type: ignore
+    def bind(self, slot:int, uniformID):
         '''
         Bind texture to a slot and set shader uniform.
         Make sure you have used shader before calling this function.
         '''
-        assert not self._cleared, 'This texture has been cleared.'
-        if self._texID is None:
+        if self.texID is None:
             raise Exception('Texture is not yet sent to GPU. Cannot bind.')
         gl.glActiveTexture(gl.GL_TEXTURE0 + slot)   # type: ignore
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self._texID)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texID)
         gl.glUniform1i(uniformID, slot)
         
     @Overload
     def bind(self):
         '''call `glBindTexture` to bind the texture to the current context.'''
-        assert not self._cleared, 'This texture has been cleared.'
-        if self._texID is None:
+        if self.texID is None:
             raise Exception('Texture is not yet sent to GPU. Cannot bind.')
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self._texID)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texID)
 
     @Overload
     def bind(self, slot:int, name:str, shader:'Shader'):
         '''Use shader, and bind texture to a slot and set shader uniform with your given name.'''
-        assert not self._cleared, 'This texture has been cleared.'
         shader.useProgram()
         self.bind(slot, shader.getUniformID(name))
 
-
-    @Overload
-    def load(self, path: Union[str, Path]): # type: ignore
-        '''Load the image on the given path by PIL.'''
-        assert not self._cleared, 'This texture has been cleared.'
-        EngineLogger.debug('Loading texture by path:' + str(path) + '...')
-        image = Image.open(path).convert(self.format.PIL_convert_mode)
-        self._data = image.transpose(Image.FLIP_TOP_BOTTOM).tobytes()
-        self._height = image.height
-        self._width = image.width
-        image.close() 
-
-    @Overload
-    def load(self, array: np.ndarray):
-        '''Load by numpy array'''
-        assert not self._cleared, 'This texture has been cleared.'
-        EngineLogger.debug('Loading texture by numpy array...')
-        self._data = array.tobytes()
-        self._width = array.shape[1]
-        self._height = array.shape[0]
-    
-    @Overload
-    def load(self, data: bytes, width: int, height: int):
-        '''Load by bytes directly'''
-        assert not self._cleared, 'This texture has been cleared.'
-        EngineLogger.debug('Loading texture by bytes...')
-        self._data = data
-        self._width = width
-        self._height = height
-
-    @Overload
-    def load(self, image: ImageType):
-        '''Load by PIL image'''
-        assert not self._cleared, 'This texture has been cleared.'
-        EngineLogger.debug('Loading texture by PIL image...')
-        self._data = image.transpose(Image.FLIP_TOP_BOTTOM).tobytes()
-        self._height = image.height
-        self._width = image.width
-        image.close()
-    
-    @property
-    def support_gl_share_to_torch(self):
-        '''Whether the hardware support copying data from OpenGL to pytorch tensor directly.'''
-        return self._support_gl_share_to_torch
-
     def _init_tensor(self):
         '''The tensor of the texture. It could be None if the texture is not shared to torch.'''
-        assert not self._cleared, 'This texture has been cleared.'
-        assert self._share_to_torch, 'This texture is not set to be sharing to torch.'
-        assert self.textureID is not None, 'This texture is not yet sent to GPU.'
+        assert self.share_to_torch, 'This texture is not set to be sharing to torch.'
+        assert self.texID is not None, 'This texture is not yet sent to GPU.'
         
         if self._tensor is None:
             self._tensor = torch.zeros((self.height, self.width, self.channel_count), 
                                         dtype=self.data_type.value.torch_dtype, 
                                         device=f"cuda")
         if not GetOrAddGlobalValue('__SUPPORT_GL_CUDA_SHARE__', True):
-            self._support_gl_share_to_torch = False
+            SetGlobalValue('__SUPPORT_GL_CUDA_SHARE__', True)
             return
         try:
-            self._cuda_buffer = pycuda.gl.RegisteredImage(int(self.textureID),
+            self._cuda_buffer = pycuda.gl.RegisteredImage(int(self.texID),
                                                           int(gl.GL_TEXTURE_2D), 
                                                           pycuda.gl.graphics_map_flags.NONE)
         except Exception as e:
             SetGlobalValue('__SUPPORT_GL_CUDA_SHARE__', False)
-            EngineLogger.warning(f'Warning: Texture {self.name} failed to register image. Error: {e}')
-            self._support_gl_share_to_torch = False
+            EngineLogger.warning(f'Warning: Texture {self._name} failed to register image. Error: {e}')
+            return
         except:
             SetGlobalValue('__SUPPORT_GL_CUDA_SHARE__', False)
-            EngineLogger.warning(f'Warning: Texture {self.name} failed to register image. Error: {sys.exc_info()[0]}')
-            self._support_gl_share_to_torch = False
+            EngineLogger.warning(f'Warning: Texture {self._name} failed to register image. Error: {sys.exc_info()[0]}')
+            return
         
-        if self.support_gl_share_to_torch:
-            # prepare copiers. These copiers are used for copying data between GPU and GPU
-            
-            # for copying data from OpenGL to pytorch
-            self._to_tensor_copier = pycuda.driver.Memcpy2D()  # type: ignore
-            self._to_tensor_copier.width_in_bytes = self._to_tensor_copier.src_pitch = self._to_tensor_copier.dst_pitch = self.width * self.channel_count * self.data_type.value.nbytes
-            self._to_tensor_copier.height = self.height
-            self._to_tensor_copier.set_dst_device(self._tensor.data_ptr())
-            
-            # for copying data back from pytorch to OpenGL
-            self._from_tensor_copier = pycuda.driver.Memcpy2D()  # type: ignore
-            self._from_tensor_copier.width_in_bytes = self._from_tensor_copier.src_pitch = self._from_tensor_copier.dst_pitch = self.width * self.channel_count * self.data_type.value.nbytes
-            self._from_tensor_copier.height = self.height
-            self._from_tensor_copier.set_src_device(self._tensor.data_ptr())    # src device may change in `set_data` method
+        # prepare copiers. These copiers are used for copying data between GPU and GPU
+        # for copying data from OpenGL to pytorch
+        self._to_tensor_copier = pycuda.driver.Memcpy2D()  # type: ignore
+        self._to_tensor_copier.width_in_bytes = self._to_tensor_copier.src_pitch = self._to_tensor_copier.dst_pitch = self.width * self.channel_count * self.data_type.value.nbytes
+        self._to_tensor_copier.height = self.height
+        self._to_tensor_copier.set_dst_device(self._tensor.data_ptr())
+        
+        # for copying data back from pytorch to OpenGL
+        self._from_tensor_copier = pycuda.driver.Memcpy2D()  # type: ignore
+        self._from_tensor_copier.width_in_bytes = self._from_tensor_copier.src_pitch = self._from_tensor_copier.dst_pitch = self.width * self.channel_count * self.data_type.value.nbytes
+        self._from_tensor_copier.height = self.height
+        self._from_tensor_copier.set_src_device(self._tensor.data_ptr())    # src device may change in `set_data` method
             
     def numpy_data(self, flipY: bool = True, level: int = 0)->np.ndarray:
         '''
@@ -441,15 +222,14 @@ class Texture(ResourcesObj):
             - update: If true, the tensor will be updated from GPU. If false, the tensor will be returned directly if it has been updated.
             - flip: If true, the tensor will be flipped upside down. This is becuz the origin of OpenGL is at the bottom-left corner.
         '''
-        assert not self._cleared, 'This texture has been cleared.'
-        assert self._texID, 'This texture is not yet sent to GPU.'
+        assert self.texID, 'This texture is not yet sent to GPU.'
         
         if not update and self._tensor is not None:
             if flip:
                 return self._tensor.flip(0)
             return self._tensor
         
-        if self.share_to_torch and self.support_gl_share_to_torch:
+        if self.share_to_torch and __SUPPORT_GL_CUDA_SHARE__():
             mapping = self._cuda_buffer.map()
             array = mapping.array(0, 0)
             self._to_tensor_copier.set_src_array(array)
@@ -464,7 +244,7 @@ class Texture(ResourcesObj):
             return self._tensor.flip(0) # type: ignore
         return self._tensor # type: ignore
     
-    def sendToGPU(self):
+    def load(self):
         '''
         Create texture in GPU and send data.
         
@@ -472,16 +252,14 @@ class Texture(ResourcesObj):
             This method could still be called even when self.data is None. 
             It means you are creating an empty texture(usually for FBO).
         '''
-        assert not self._cleared, 'This texture has been cleared.'
-        assert self._width is not None and self._height is not None, 'Invalid texture size, got width: {}, height: {}'.format(self._width, self._height)
+        if self.loaded:
+            return
         
-        if self._texID is not None:
-            return # already loaded
-
-        self._texID = gl.glGenTextures(1)
-
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self._texID)
-            
+        super().load()
+        
+        self.texID = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texID)
+        
         data = self.data
         if not data:
             data = np.zeros((self.height, self.width, self.format.channel_count), 
@@ -496,7 +274,6 @@ class Texture(ResourcesObj):
                         self.format.value.gl_format, 
                         self.data_type.value.gl_data_type,
                         data)  # data can be None, its ok
-        
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, self.s_wrap.value)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, self.t_wrap.value)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, self.mag_filter.value)
@@ -511,16 +288,16 @@ class Texture(ResourcesObj):
         
         if self.share_to_torch:
             self._init_tensor()
-            
+    
     def clear(self):
         '''
         Clear all data and release GPU memory if it has been loaded.
         This is a default implementation, you may need to override it.
         '''
-        super().clear()
-        if self._texID is not None:
+        super().clear() # just for printing logs
+        if self.texID is not None:
             try:
-                buffer = np.array([self._texID], dtype=np.uint32)
+                buffer = np.array([self.texID], dtype=np.uint32)
                 gl.glDeleteTextures(1, buffer)
             except OpenGL.error.GLError as glErr:
                 if glErr.err == 1282:
@@ -529,13 +306,10 @@ class Texture(ResourcesObj):
                     EngineLogger.warn('Warning: failed to delete texture. Error: {}'.format(glErr))
             except Exception as err:
                 EngineLogger.warn('Warning: failed to delete texture. Error: {}'.format(err))
-            self._texID = None
-        self._data = None
-        self._width = None
-        self._height = None
-        self._tensor = None
-        self._cleared = True
-        del self
+            self.texID = None
+            
+        self.data = None
+        self.tensor = None
 
     def set_data(self, 
                  data: Union[bytes, Tensor, np.ndarray], 
@@ -619,7 +393,7 @@ class Texture(ResourcesObj):
                 gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, xOffset, yOffset, width, height, self.format.value.gl_format, self.data_type.value.gl_data_type, data)
         else:
             raise Exception('Invalid data type: {}'.format(data))
-        
+    
     @classmethod
     def Load(cls,
              path: Union[str, Path], 
@@ -629,41 +403,38 @@ class Texture(ResourcesObj):
              mag_filter: TextureFilter = TextureFilter.LINEAR,
              s_wrap:TextureWrap=TextureWrap.REPEAT,
              t_wrap:TextureWrap=TextureWrap.REPEAT,
-             internalFormat: Optional[TextureInternalFormat]=None,
+             internal_format: Optional[TextureInternalFormat]=None,
              data_type: Optional[TextureDataType]=None,
              share_to_torch: bool = False,
+             **kwargs,
              )->'Texture':
         '''Create & load a texture from a file path. The format will be determined by the file extension.'''
-        
-        path, name = cls._GetPathAndName(path, name)
-
-        if '.' in os.path.basename(path):
-            ext = path.split('.')[-1]
-            formatCls = cls.FindFormat(ext) # try to find a format class
-            if formatCls is not None:
-                texture = formatCls(name, 
-                                    format=format, 
-                                    min_filter=min_filter, 
-                                    mag_filter =mag_filter, 
-                                    s_wrap=s_wrap, 
-                                    t_wrap=t_wrap,
-                                    internalFormat=internalFormat,
-                                    data_type=data_type,
-                                    share_to_torch=share_to_torch)
-                texture.load(path)
-                return texture
-
         # default load by PIL
-        texture = cls(name, 
+        if is_dev_mode():
+            EngineLogger.debug('Loading texture by path:' + str(path) + '...')
+        
+        image = Image.open(path).convert(format.PIL_convert_mode)
+        data = image.transpose(Image.FLIP_TOP_BOTTOM).tobytes()
+        height = image.height
+        width = image.width
+        image.close()
+        
+        internal_format = internal_format or format.default_internal_format
+        data_type = data_type or internal_format.value.default_data_type
+        
+        texture = cls(name=name, 
                       format=format, 
+                      width=width,
+                      height=height,
                       min_filter=min_filter, 
                       mag_filter =mag_filter, 
+                      data=data,
                       s_wrap=s_wrap, 
                       t_wrap=t_wrap,
-                      internalFormat=internalFormat,
+                      internal_format=internal_format,
                       data_type=data_type,
-                      share_to_torch=share_to_torch)
-        texture.load(path)
+                      share_to_torch=share_to_torch,
+                      **kwargs)
         return texture
 
     @staticmethod
@@ -675,22 +446,16 @@ class Texture(ResourcesObj):
                          mag_filter:TextureFilter=TextureFilter.LINEAR,
                          s_wrap:TextureWrap=TextureWrap.REPEAT,
                          t_wrap:TextureWrap=TextureWrap.REPEAT,
-                         internalFormat: Optional[TextureInternalFormat] = None,
+                         internal_format: Optional[TextureInternalFormat] = None,
                          data_type: Optional[TextureDataType] = None,
                          share_to_torch: bool = False,
                          )->'Texture':
         '''Create an empty texture with a fill color as image.'''
-        if not name:
-            name = f"VirtualTex_{width}x{height}"
-            count = 0
-            while name in ResourcesObj.AllInstances():
-                count += 1
-                name = f"VirtualTex_{width}x{height}_{count}"
-        
         if isinstance(fill, (int, float)):
             tex_format = TextureFormat.RED
-            if not internalFormat and isinstance(fill, int):
-                internalFormat = TextureInternalFormat.RED_16UI
+            if not internal_format and isinstance(fill, int):
+                internal_format = TextureInternalFormat.RED_16UI
+                
         if isinstance(fill, glm.vec3):
             tex_format = TextureFormat.RGB
         elif isinstance(fill, (glm.vec4, Color)):
@@ -707,6 +472,9 @@ class Texture(ResourcesObj):
         else:
             fake_image = Image.new('RGB', (width, height), (int(fill.r * 255), int(fill.g * 255), int(fill.b * 255)))
         
+        internal_format = internal_format or tex_format.default_internal_format
+        data_type = data_type or internal_format.value.default_data_type
+        
         texture = Texture(name=name,
                           width=width,
                           height=height,
@@ -716,7 +484,7 @@ class Texture(ResourcesObj):
                           mag_filter=mag_filter,
                           s_wrap=s_wrap,
                           t_wrap=t_wrap,
-                          internalFormat=internalFormat,
+                          internal_format=internal_format,
                           data_type=data_type,
                           share_to_torch=share_to_torch)
         
@@ -724,16 +492,16 @@ class Texture(ResourcesObj):
     
     @staticmethod
     def CreateNoiseTex(name:Optional[str]=None,
-                       height: Optional[int] = None,
-                       width: Optional[int] = None,
+                       height: int = 64,
+                       width: int = 64,
                        sigma: float = 1.0,
-                       channel_count = 4,
-                       data_size: Literal[16, 32] = 16,
-                       min_filter:TextureFilter=TextureFilter.LINEAR_MIPMAP_LINEAR,
-                       mag_filter:TextureFilter=TextureFilter.LINEAR,
+                       channel_count = 4,   # same as latent size
+                       data_size: Literal[16, 32] = 32,
+                       min_filter:TextureFilter=TextureFilter.NEAREST,
+                       mag_filter:TextureFilter=TextureFilter.NEAREST,
                        s_wrap:TextureWrap=TextureWrap.REPEAT,
                        t_wrap:TextureWrap=TextureWrap.REPEAT,
-                       internalFormat: Optional[TextureInternalFormat] = None,
+                       internal_format: Optional[TextureInternalFormat] = None,
                        share_to_torch: bool = False,
                        )->'Texture':
         '''
@@ -741,46 +509,36 @@ class Texture(ResourcesObj):
         
         Args:
             - name: The name of the texture.
-            - height: The height of the texture.
-            - width: The width of the texture.
+            - height: The height of the texture. Default is 64(same as latent size when origin width is 512)
+            - width: The width of the texture. Default is 64(same as latent size when origin height is 512)
             - sigma: The standard deviation of the gaussian noise.
             - channel_count: The channel count of the texture. It should be in [1, 4].
                              Default is 4, which is same as latent size.
             - data_size: The data size of the texture. It should be 16 or 32.
-            - min_filter: The minification filter of the texture.
-            - mag_filter: The magnification filter of the texture.
+            - min_filter: The minification filter of the texture. Default is NEAREST(since it's noise texture, should not be interpolated)
+            - mag_filter: The magnification filter of the texture. Default is NEAREST(since it's noise texture, should not be interpolated)
             - s_wrap: The wrap mode of the texture in s direction.
             - t_wrap: The wrap mode of the texture in t direction.
-            - internalFormat: The specific OpenGL internal format of the texture. If not given, it will be set to the default internal format of the format.
+            - internal_format: The specific OpenGL internal format of the texture. If not given, it will be set to the default internal format of the format.
             - share_to_torch: If true, the texture will be shared to torch by using cuda.
         '''
         
-        from engine.engine import Engine
-        height = height or Engine.Instance().WindowManager.WindowHeight
-        width = width or Engine.Instance().WindowManager.WindowWidth
-        
-        if not name:
-            name = f"RandomNoiseTex_{width}x{height}"
-            count = 0
-            while name in ResourcesObj.AllInstances():
-                count += 1
-                name = f"RandomNoiseTex_{width}x{height}_{count}"
         if channel_count < 1 or channel_count > 4:
             raise Exception(f'Invalid channel count: {channel_count}. It should be in [1, 4].')
         
         assert data_size in (16, 32), 'Invalid data size: {}'.format(data_size)
         dtype = {16: np.float16, 32: np.float32}[data_size]
-        data = np.random.normal(0, sigma, (height, width, channel_count)).astype(dtype) # type: ignore
+        data = np.random.normal(0, sigma, (height, width, channel_count)).astype(dtype)
         
-        if not internalFormat:
+        if not internal_format:
             if channel_count == 1:
-                internalFormat = TextureInternalFormat.RED_32F if data_size == 32 else TextureInternalFormat.RED_16F
+                internal_format = TextureInternalFormat.RED_32F if data_size == 32 else TextureInternalFormat.RED_16F
             elif channel_count == 2:
-                internalFormat = TextureInternalFormat.RG32F if data_size == 32 else TextureInternalFormat.RG16F
+                internal_format = TextureInternalFormat.RG32F if data_size == 32 else TextureInternalFormat.RG16F
             elif channel_count == 3:
-                internalFormat = TextureInternalFormat.RGB32F if data_size == 32 else TextureInternalFormat.RGB16F
+                internal_format = TextureInternalFormat.RGB32F if data_size == 32 else TextureInternalFormat.RGB16F
             elif channel_count == 4:
-                internalFormat = TextureInternalFormat.RGBA32F if data_size == 32 else TextureInternalFormat.RGBA16F
+                internal_format = TextureInternalFormat.RGBA32F if data_size == 32 else TextureInternalFormat.RGBA16F
             else:
                 raise Exception('Invalid channel count: {}'.format(channel_count))
         
@@ -793,7 +551,7 @@ class Texture(ResourcesObj):
                       mag_filter=mag_filter,
                       s_wrap=s_wrap,
                       t_wrap=t_wrap,
-                      internalFormat=internalFormat,
+                      internal_format=internal_format,
                       data_type=TextureDataType.FLOAT if data_size == 32 else TextureDataType.HALF,
                       share_to_torch=share_to_torch)
         return tex
@@ -803,22 +561,20 @@ class Texture(ResourcesObj):
         For `custom_deep_copy` method in common_utils.type_utils.
         Cloning a texture will only clone the tensor(if it has). The texture will still point to the same OpenGL texture.
         '''
-        tex = self.__class__(None,  # None means temporary obj
-                            width=self.width,
-                            height=self.height,
-                            format=self.format,
-                            data=self.data,
-                            min_filter=self.min_filter,
-                            mag_filter=self.mag_filter,
-                            s_wrap=self.s_wrap,
-                            t_wrap=self.t_wrap,
-                            internalFormat=self.internal_format,
-                            data_type=self.data_type,
-                            share_to_torch=self.share_to_torch)
-        tex._tensor = self._tensor.clone() if self._tensor is not None else None
-        tex._texID = self._texID
-        if self.share_to_torch and self.textureID is not None:  # when texID is not None, means sent to GPU
-            tex._init_tensor()
+        tex = self.__class__(name=None,
+                             width=self.width,
+                             height=self.height,
+                             format=self.format,
+                             data=self.data,
+                             min_filter=self.min_filter,
+                             mag_filter=self.mag_filter,
+                             s_wrap=self.s_wrap,
+                             t_wrap=self.t_wrap,
+                             internal_format=self.internal_format,
+                             data_type=self.data_type,
+                             share_to_torch=self.share_to_torch,
+                             tensor=self._tensor.clone() if self._tensor is not None else None,
+                             texID = self.texID)
         return tex
         
         

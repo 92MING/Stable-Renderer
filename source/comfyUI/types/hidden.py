@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from engine.static.texture import Texture
     from .runtime import InferenceContext, NodeInputs
     from .node_base import ComfyUINode
-    from comfyUI.stable_renderer import IDMap
+    from comfyUI.stable_rendering import IDMap
 
 
 _hidden_meta = NameCheckMetaCls(ABCMeta)
@@ -243,7 +243,7 @@ class FrameData(HIDDEN):
     @property
     def id_map(self)->"IDMap":
         if self._updated_id_map is None:
-            from comfyUI.stable_renderer import IDMap
+            from comfyUI.stable_rendering import IDMap
             self._updated_id_map = IDMap(origin_tex=self._id_map, frame_index=self.frame_index)
         return self._updated_id_map
     
@@ -321,7 +321,14 @@ class FrameData(HIDDEN):
 
 @attrs
 class BakingData(HIDDEN):
-    '''TODO: Runtime data during baking.'''
+    '''
+    Extra runtime data during baking. Its basically a pack of necessary tensors for stable-rendering process,
+    splitted from numerous frameDatas.
+    '''
+    
+    frame_count: int = attrib()
+    '''how many frames are packed in this baking session'''
+    
     
     @classmethod
     def GetHiddenValue(cls, context):

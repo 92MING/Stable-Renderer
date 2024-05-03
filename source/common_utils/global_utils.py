@@ -94,7 +94,7 @@ def GetEnv(key: str, default: Optional[T] = None, type: Type[T] = str)->Optional
 
 def is_engine_looping()->bool:
     '''Indicates whether the engine is within rendering loop.'''
-    if not (engine := GetGlobalValue('_ENGINE_SINGLETON', None)):
+    if not (engine := GetGlobalValue('__ENGINE_INSTANCE__', None)):
         return False
     return engine.IsLooping
     

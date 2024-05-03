@@ -10,15 +10,15 @@ if __name__ == '__main__':
     __package__ = 'utils.data_struct'   
 
 import heapq, functools
+
 from types import FunctionType, MethodType
-from typing import ForwardRef, get_origin, get_args, Union, Iterable, Literal, Callable, ParamSpecArgs
 from inspect import getfullargspec, signature, getmro
 from enum import Enum
 from functools import partial
 from collections.abc import Callable
 from PyQt6.QtCore import QObject, pyqtSignal as Signal
+from typing import ForwardRef, get_origin, get_args, Union, Iterable, Literal, Callable
 
-from common_utils.base_clses.cross_module_enum import CrossModuleEnum
 from common_utils.type_utils import valueTypeCheck, subClassCheck
 from common_utils.debug_utils import DefaultLogger
 
@@ -115,7 +115,7 @@ class Event:
     def _init_pyqt_signal(self, *args, acceptNone:bool=False):
         signalArgs = []
         for arg in args:
-            if subClassCheck(arg, CrossModuleEnum):
+            if subClassCheck(arg, Enum):
                 signalArgs.append(Enum)
             elif isinstance(arg, type):
                 signalArgs.append(arg)
@@ -502,7 +502,7 @@ class Tasks(Event):
         signalArgs = []
         
         for arg in args:
-            if subClassCheck(arg, CrossModuleEnum):
+            if subClassCheck(arg, Enum):
                 signalArgs.append(Enum)
             elif isinstance(arg, type):
                 signalArgs.append(arg)
@@ -609,7 +609,7 @@ class AutoSortTask(Tasks):
     def _init_pyqt_signal(self, *args, acceptNone=False):
         signalArgs = []
         for arg in args:
-            if subClassCheck(arg, CrossModuleEnum):
+            if subClassCheck(arg, Enum):
                 signalArgs.append(Enum)
             elif isinstance(arg, type):
                 signalArgs.append(arg)

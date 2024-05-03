@@ -7,7 +7,7 @@ import numpy as np
 
 from torch import Tensor
 from functools import partial
-from typing import Union, Optional, Callable
+from typing import Union, Optional, Callable, TYPE_CHECKING
 from common_utils.cuda_utils import *
 from common_utils.global_utils import is_dev_mode
 from common_utils.debug_utils import EngineLogger
@@ -19,13 +19,17 @@ from ..static.texture import Texture
 from ..static.enums import *
 from ..static.mesh import Mesh
 
+if TYPE_CHECKING:
+    from comfyUI.types import FrameData
 
-def _bindGTexture(shader: Shader, slot: int, textureID: int, name: str):
+
+def _bindGTexture(shader: "Shader", slot: int, textureID: int, name: str):
     gl.glActiveTexture(gl.GL_TEXTURE0 + slot)  # type: ignore
     gl.glBindTexture(gl.GL_TEXTURE_2D, textureID)
     shader.setUniform(name, slot)
 
-def _wrapPostProcessTask(render_manager:'RenderManager', shader, task):
+def _wrapPostProcessTask(render_manager:'RenderManager', shader: "Shader", task: Optional[Callable] = None):
+    '''`PostProcess` stage'''
     shader.useProgram()
     gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, 
                               gl.GL_COLOR_ATTACHMENT0, 
@@ -39,26 +43,39 @@ def _wrapPostProcessTask(render_manager:'RenderManager', shader, task):
     task() if task is not None else render_manager._draw_quad()
     render_manager.SwapScreenTexture()
 
-def _wrapDeferRenderTask(render_manager:'RenderManager', shader, task):
+def _wrapDeferRenderTask(render_manager:'RenderManager', shader: "Shader", task: Optional[Callable] = None):
+    '''`DeferRender` stage'''
     shader.useProgram()
     shader.setUniform("usingSD", int(not render_manager.engine.disableComfyUI))
-    _bindGTexture(shader, 0, render_manager.colorFBOTex.textureID, "gColor")  # type: ignore
-    _bindGTexture(shader, 1, render_manager.idFBOTex.textureID, "gID")  # type: ignore
-    _bindGTexture(shader, 2, render_manager.posFBOTex.textureID, "gPos")  # type: ignore
-    _bindGTexture(shader, 3, render_manager.normal_and_depth_FBOTex.textureID, "gNormal")  # type: ignore
-    _bindGTexture(shader, 4, render_manager.noiseFBOTex.textureID, "gNoise")  # type: ignore
+    _bindGTexture(shader, 0, render_manager.colorFBOTex.texID, "gColor")  # type: ignore
+    _bindGTexture(shader, 1, render_manager.idFBOTex.texID, "gID")  # type: ignore
+    _bindGTexture(shader, 2, render_manager.posFBOTex.texID, "gPos")  # type: ignore
+    _bindGTexture(shader, 3, render_manager.normal_and_depth_FBOTex.texID, "gNormalAndDepth")  # type: ignore
+    _bindGTexture(shader, 4, render_manager.noiseFBOTex.texID, "gNoise")  # type: ignore
     task() if task is not None else render_manager._draw_quad()
 
-def _wrapRenderTask(task, shader, mesh):
+def _wrapRenderTask(task: Optional[Callable], shader: "Shader", mesh: Optional["Mesh"]):
+    '''`GBuffer` stage'''
     shader.useProgram()
     if mesh is not None:
         shader.setUniform("objID", mesh.meshID)
-    task() if task is not None else mesh.draw()
+        shader.setUniform("hasVertexID", int(mesh.generate_vertex_ids))
+        if not mesh.cullback:
+            gl.glDisable(gl.GL_CULL_FACE)
+        else:
+            gl.glEnable(gl.GL_CULL_FACE)
+    if task is not None:
+        task()
+    elif mesh is not None:
+        mesh.draw()
 
 class RenderManager(Manager):
     '''Manager of all rendering stuffs'''
 
     FrameRunFuncOrder = RuntimeManager.FrameRunFuncOrder + 1  # always run after runtimeManager
+
+    frameData: Optional['FrameData'] = None
+    '''latest framedata. it could be None.'''
 
     def __init__(self,
                  enableHDR=True,
@@ -104,11 +121,11 @@ class RenderManager(Manager):
                                    t_wrap=TextureWrap.CLAMP_TO_EDGE, 
                                    min_filter=TextureFilter.NEAREST, 
                                    mag_filter=TextureFilter.NEAREST, 
-                                   internalFormat=TextureInternalFormat.RGBA16F, # alpha for masking
+                                   internal_format=TextureInternalFormat.RGBA16F, # alpha for masking
                                    data_type=TextureDataType.HALF,
                                    share_to_torch=True)
         '''texture for saving every pixels' color in each frame'''
-        self.colorFBOTex.sendToGPU()
+        self.colorFBOTex.load()
         
         self.idFBOTex = Texture(name='__ID_FBO__',
                                 width=winWidth,
@@ -118,11 +135,11 @@ class RenderManager(Manager):
                                 t_wrap=TextureWrap.CLAMP_TO_EDGE,
                                 min_filter=TextureFilter.NEAREST,
                                 mag_filter=TextureFilter.NEAREST,
-                                internalFormat=TextureInternalFormat.RGBA_16I,  # (objID, material id, uv_Xcoord, uv_Ycoord)
+                                internal_format=TextureInternalFormat.RGBA_16I,  # (objID, material id, uv_Xcoord, uv_Ycoord)
                                 data_type=TextureDataType.SHORT,
                                 share_to_torch=True)
         '''texture for saving every pixels' vertex ID in each frame'''
-        self.idFBOTex.sendToGPU()
+        self.idFBOTex.load()
         
         self.posFBOTex = Texture(name='__POS_FBO__',
                                 width=winWidth,
@@ -132,11 +149,11 @@ class RenderManager(Manager):
                                 t_wrap=TextureWrap.CLAMP_TO_EDGE,
                                 min_filter=TextureFilter.NEAREST,
                                 mag_filter=TextureFilter.NEAREST,
-                                internalFormat=TextureInternalFormat.RGB32F,    # use 32 here since cudaGraphicsGLRegisterImage doesn't support RGB16F
+                                internal_format=TextureInternalFormat.RGB32F,    # use 32 here since cudaGraphicsGLRegisterImage doesn't support RGB16F
                                 data_type=TextureDataType.FLOAT,
                                 share_to_torch=True)
         '''texture for saving every frame's position in each pixel'''
-        self.posFBOTex.sendToGPU()
+        self.posFBOTex.load()
         
         self.normal_and_depth_FBOTex = Texture(name='__NORMAL_FBO__',
                                     width=winWidth,
@@ -146,11 +163,11 @@ class RenderManager(Manager):
                                     t_wrap=TextureWrap.CLAMP_TO_EDGE,
                                     min_filter=TextureFilter.NEAREST,
                                     mag_filter=TextureFilter.NEAREST,
-                                    internalFormat=TextureInternalFormat.RGBA16F,    # alpha channel for saving depth
+                                    internal_format=TextureInternalFormat.RGBA16F,    # alpha channel for saving depth
                                     data_type=TextureDataType.HALF,
                                     share_to_torch=True)
         '''texture for saving every pixel's normal in each frame'''
-        self.normal_and_depth_FBOTex.sendToGPU()
+        self.normal_and_depth_FBOTex.load()
         
         self.noiseFBOTex = Texture(name='__NOISE_FBO__',
                                    width=winWidth,
@@ -160,27 +177,27 @@ class RenderManager(Manager):
                                    t_wrap=TextureWrap.REPEAT,
                                    min_filter=TextureFilter.NEAREST,
                                    mag_filter=TextureFilter.NEAREST,
-                                   internalFormat=TextureInternalFormat.RGBA16F,    # 4 channel to make the shape same as a random latent
+                                   internal_format=TextureInternalFormat.RGBA16F,    # 4 channel to make the shape same as a random latent
                                    data_type=TextureDataType.HALF,
                                    share_to_torch=True)
         '''Noise texture(which has the same size of model's latent) for further use in AI rendering'''
-        self.noiseFBOTex.sendToGPU()
+        self.noiseFBOTex.load()
         
         self.depthFBOTex = Texture(name='__DEPTH_FBO__',
                                     width=winWidth,
                                     height=winHeight,
                                     format=TextureFormat.DEPTH,
                                     share_to_torch=False)   # depth tex is just for depth test
-        self.depthFBOTex.sendToGPU()
+        self.depthFBOTex.load()
         
         self._gBuffer = gl.glGenFramebuffers(1)
         self.BindFrameBuffer(self._gBuffer)
-        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self.colorFBOTex.textureID, 0)
-        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT1, gl.GL_TEXTURE_2D, self.idFBOTex.textureID, 0)
-        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT2, gl.GL_TEXTURE_2D, self.posFBOTex.textureID, 0)
-        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT3, gl.GL_TEXTURE_2D, self.normal_and_depth_FBOTex.textureID, 0)
-        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT4, gl.GL_TEXTURE_2D, self.noiseFBOTex.textureID, 0)
-        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_DEPTH_ATTACHMENT, gl.GL_TEXTURE_2D, self.depthFBOTex.textureID, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self.colorFBOTex.texID, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT1, gl.GL_TEXTURE_2D, self.idFBOTex.texID, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT2, gl.GL_TEXTURE_2D, self.posFBOTex.texID, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT3, gl.GL_TEXTURE_2D, self.normal_and_depth_FBOTex.texID, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT4, gl.GL_TEXTURE_2D, self.noiseFBOTex.texID, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_DEPTH_ATTACHMENT, gl.GL_TEXTURE_2D, self.depthFBOTex.texID, 0)
         gl.glDrawBuffers(5, [gl.GL_COLOR_ATTACHMENT0, gl.GL_COLOR_ATTACHMENT1, gl.GL_COLOR_ATTACHMENT2, gl.GL_COLOR_ATTACHMENT3, gl.GL_COLOR_ATTACHMENT4])
         
         if (gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER) != gl.GL_FRAMEBUFFER_COMPLETE):
@@ -302,11 +319,7 @@ class RenderManager(Manager):
         '''
         This wrapper help to bind the gBuffer textures to the shader(color, pos, normal, etc.).
         if task is not given, it will draw the screen quad.
-        Defer renderer could texture the following textures::
-            gColor_and_depth (r,g,b,depth), depth is in [0,1]
-            gPos (x,y,z)
-            gNormal (x,y,z)
-            g_UV_and_ID (u,v, meshID)
+        Defer renderer's input is the gBuffer textures. Check `default_GBuffer_shader` for more details.
         '''
         shader = shader or self._default_defer_render_shader
         return partial(_wrapDeferRenderTask, self, shader, task)
@@ -566,13 +579,13 @@ class RenderManager(Manager):
         # get data back from SD
         if not self.engine.disableComfyUI:
             from comfyUI.types import FrameData
-            frameData = FrameData(frame_index = self.engine.RuntimeManager.FrameCount,
+            self.frameData = FrameData(frame_index = self.engine.RuntimeManager.FrameCount,
                                   color_map = self.colorFBOTex,
                                   id_map=self.idFBOTex,
                                   pos_map=self.posFBOTex,
                                   normal_and_depth_map=self.normal_and_depth_FBOTex,
                                   noise_map=self.noiseFBOTex)
-            context = self.engine.DiffusionManager.SubmitPrompt(frameData)
+            context = self.engine.DiffusionManager.SubmitPrompt(self.frameData)
             if not context:
                 raise ValueError("DiffusionManager.SubmitPrompt() returns None. Skip rendering process.")
             inference_result = context.final_output
@@ -591,7 +604,7 @@ class RenderManager(Manager):
         self.BindFrameBuffer(self._postProcessFBO)  # output to post process FBO
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self.CurrentScreenTexture, 0)
         if len(self._deferRenderTasks) > 0:
-            self._deferRenderTasks.execute(ignoreErr=True)  # apply light effect here
+            self._deferRenderTasks.execute(ignoreErr=True)  # TODO: apply light strength effect here?
         else:
             self._default_defer_render_task()
 

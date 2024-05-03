@@ -5,8 +5,8 @@ import OpenGL.GL as gl
 from typing import Final
 
 from .manager import Manager
-from ..runtime.gameObj import GameObject
-from ..static import Color
+
+from engine.static.color import Color
 
 RuntimeUBOName = "Runtime"
 EngineUBOName = "Engine"
@@ -306,6 +306,7 @@ class RuntimeManager(Manager):
         self._startTime = glfw.get_time()
 
     def on_frame_run(self):
+        from engine.runtime.gameObj import GameObject
         if self._firstFrame or self.DeltaTime >= self._minFixedUpdateDeltaTime:
             GameObject._RunFixedUpdate()
         GameObject._RunUpdate()

@@ -23,12 +23,11 @@ layout (std140, binding=RUNTIME_UBO_BINDING) uniform Runtime {
 layout (location = 0) out vec4 outColor; // rgba
 layout (location = 1) out ivec4 outID;
 // `outID` has various usages:
-//		when normal render mode: outID = (objID, material id, uv_Xcoord, uv_Ycoord)
-//		when baking mode: outID = (3D pixel index, material id, uv_Xcoord, uv_Ycoord)
-
+//		when normal render mode:  (objID, material id, vertexID, 0.0)
+//		when baking mode: 		  (objID, material id, vertexID, 3D pixel index)
 layout (location = 2) out vec3 outPos; // global pos, output alpha for mask
 layout (location = 3) out vec4 out_normal_and_depth;	//normal (in view space). depth is also outputed here.
-layout (location = 4) out vec4 outNoise; // noise, in latent shape 
+layout (location = 4) out vec4 outNoise; // latent noise 
 
 // textures
 uniform sampler2D diffuseTex;	// 0
@@ -49,16 +48,17 @@ uniform sampler2D displacementTex;	// 7
 uniform int hasDisplacementTex;	
 uniform sampler2D alphaTex;	// 8
 uniform int hasAlphaTex;
-uniform sampler2D noiseTex;	// 9 (currently only support 1 channel noise texture)
+uniform sampler2D noiseTex;
 uniform int hasNoiseTex;
 
 // material
 uniform int objID;
 uniform int materialID;
 
-//AI
+//Stable-Rendering
 uniform int isBaking;	// whether in baking mode
 uniform int baking_k;	// constant k, 3D-pixel baking count = k^2
+uniform int hasVertexID; // it not, use texcoord(v*width+u) as ID
 
 // from VS
 in vec3 modelPos;
@@ -68,7 +68,8 @@ in vec3 worldNormal;	// not normal from normal map, is from 3D mesh data
 in vec3 viewNormal;		// not normal from normal map, is from 3D mesh data
 in vec2 uv;
 in vec3 modelTangent;
-
+in vec3 modelBitangent;
+flat in int vertexID;	// interpolation is not needed, so use flat
 
 void main() {
 
@@ -95,19 +96,27 @@ void main() {
 		out_normal_and_depth = vec4(normalize(viewNormal) * 0.5 + 0.5, depth);
 	}
 	else{
-		vec3 bitangent = cross(modelNormal, modelTangent);
-		mat3 TBN = mat3(modelTangent, bitangent, modelNormal); // TBN converts normal from tangent space to model space
+		mat3 TBN = mat3(modelTangent, modelBitangent, modelNormal); // TBN converts normal from tangent space to model space
 		vec3 real_model_normal = normalize(TBN * normalize(texture(normalTex, uv).rgb * 2.0 - 1.0));
 		vec3 real_view_normal = normalize(vec3(MV_IT * vec4(real_model_normal, 0.0)));
 		out_normal_and_depth = vec4(real_view_normal, depth);
 	}
 
 	// get id
-	ivec2 uvi = ivec2(uv * ivec2(textureSize(diffuseTex, 0)));
+	int real_vertex_id;
+	ivec2 diffuseTexSize = textureSize(diffuseTex, 0);
+	if (hasVertexID == 1){
+		real_vertex_id = vertexID;
+	}
+	else{ // use v * width + u as ID
+		ivec2 uvi = ivec2(uv * ivec2(textureSize(diffuseTex, 0)));
+		real_vertex_id = uvi.y * diffuseTexSize.x + uvi.x;
+	}
+	
+	int bake_pixel_index = 0;
 	if (isBaking == 1){
 		// baking mode
-		vec3 bitangent = cross(modelNormal, modelTangent);
-		mat3 TBN_inverse = transpose(mat3(modelTangent, bitangent, modelNormal)); // transpose(TBN) = inverse(TBN)
+		mat3 TBN_inverse = transpose(mat3(modelTangent, modelBitangent, modelNormal)); // transpose(TBN) = inverse(TBN)
 		mat3 M_inverse = transpose(mat3(model));
 		
 		vec3 posToCamDirInWorldSpace = normalize(worldPos - cameraPos);
@@ -128,11 +137,7 @@ void main() {
 		float angle_step = PI / float(baking_k);
 		int x_index = clamp(int(horizontal_angle / angle_step), 0, baking_k-1);		// from left to right
 		int y_index = clamp(int(vertical_angle / angle_step), 0, baking_k-1);		// from top to bottom
-		int pixel_index = x_index + y_index * baking_k;
-
-		outID = ivec4(pixel_index, materialID, uvi.x, uvi.y);
+		bake_pixel_index = x_index + y_index * baking_k;
 	}
-	else{
-		outID = ivec4(objID, materialID, uvi.x, uvi.y);
-	}
+	outID = ivec4(objID, materialID, real_vertex_id, bake_pixel_index);
 }

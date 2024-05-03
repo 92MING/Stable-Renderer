@@ -3,7 +3,7 @@ import os.path
 import numpy as np
 import multiprocessing
 
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 from pathlib import Path
@@ -49,17 +49,20 @@ class DiffusionManager(Manager):
         self._threadPool = ThreadPoolExecutor(max_workers=threadPoolSize) # for saving maps asynchronously
         self._outputPath = get_new_map_output_dir(create_if_not_exists=False)
         
-        if not workflow:
-            if self.engine.Mode == EngineMode.GAME:
-                workflow = Workflow.DefaultGameWorkflow()
-            elif self.engine.Mode == EngineMode.BAKE:
-                workflow = Workflow.DefaultBakeWorkflow()
+        if not self.engine.disableComfyUI:
+            if not workflow:
+                if self.engine.Mode == EngineMode.GAME:
+                    workflow = Workflow.DefaultGameWorkflow()
+                elif self.engine.Mode == EngineMode.BAKE:
+                    workflow = Workflow.DefaultBakeWorkflow()
+            else:
+                if isinstance(workflow, (str, Path)):
+                    workflow = Workflow.Load(workflow)
+            if is_dev_mode() and is_verbose_mode():
+                EngineLogger.debug(f'Workflow is set to: {workflow}')
+            self._workflow = workflow
         else:
-            if isinstance(workflow, (str, Path)):
-                workflow = Workflow.Load(workflow)
-        if is_dev_mode() and is_verbose_mode():
-            EngineLogger.debug(f'Workflow is set to: {workflow}')
-        self._workflow = workflow
+            self._workflow = None
         
     # region properties
     @property
@@ -220,8 +223,11 @@ class DiffusionManager(Manager):
     # endregion
 
     # region diffusion
-    def SubmitPrompt(self, frameData: "FrameData", workflow: Optional[Workflow]=None):
+    def SubmitPrompt(self, frameData: Optional["FrameData"]=None, workflow: Optional[Workflow]=None, extra_data: Optional[Dict[str, Any]]=None):
         '''submit prompt to comfyUI's prompt executor'''
+        if frameData is None:
+            frameData = self.engine.RenderManager.frameData # it can still be None if the first frame is not rendered
+            
         if not self.engine.PromptExecutor:
             if is_dev_mode():
                 raise ValueError('No prompt executor is create(It maybe due to engine running with `startComfyUI=False`).')
@@ -241,9 +247,11 @@ class DiffusionManager(Manager):
             EngineLogger.error('Engine is not looping. FrameData is not available. Cannot submit prompt to prompt executor.')
             return
         
-        prompt, node_ids_to_be_ran, extra_data = workflow.build_prompt()
+        prompt, node_ids_to_be_ran, prompt_extra_data = workflow.build_prompt()
+        if extra_data is not None:
+            prompt_extra_data.update(extra_data)
         context = self.engine.PromptExecutor.execute(prompt=prompt, 
-                                                     extra_data=extra_data,
+                                                     extra_data=prompt_extra_data,
                                                      node_ids_to_be_ran=node_ids_to_be_ran, 
                                                      frame_data=frameData)
         if self.SaveSDColorOutput:

@@ -124,7 +124,7 @@ class Manager(metaclass=_ManagerMeta):
     @property
     def engine(self)->'Engine':
         if not hasattr(self, '_engine') or self._Engine is None:
-            self.__class__._Engine = GetGlobalValue('_ENGINE_SINGLETON')    # type: ignore
+            self.__class__._Engine = GetGlobalValue('__ENGINE_INSTANCE__')    # type: ignore
         return self._Engine
 
     # region internal functions

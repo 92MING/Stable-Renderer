@@ -114,7 +114,7 @@ def cuda_register_gl_image(image: Union[int, 'Texture'],
     if isinstance(flags, Sequence):
         flags = sum(flags)
     if hasattr(image, '_BaseName') and image._BaseName == 'Texture':  # type: ignore
-        image = image.textureID  # type: ignore
+        image = image.texID  # type: ignore
         
     return cudart.cudaGraphicsGLRegisterImage(image, target, flags)
     

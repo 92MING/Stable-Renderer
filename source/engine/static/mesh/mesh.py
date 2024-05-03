@@ -3,359 +3,501 @@ import OpenGL.GL as gl
 import numpy as np
 import ctypes
 import math
-from typing import List, Final, Union, Type, Optional
+import assimp_py
 
-from common_utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
-from engine.static.resourcesObj import ResourcesObj
+from pathlib import Path
+from attr import attrs, attrib
+from typing import List, Final, Union, Type, Tuple, Optional
+from common_utils.global_utils import GetOrAddGlobalValue, SetGlobalValue, is_dev_mode
+from engine.static.resources_obj import ResourcesObj
 from engine.static.enums import PrimitiveDrawingType
 
-
+def _get_mesh_id():
+    mesh_id = GetOrAddGlobalValue('__ENGINE_MESH_COUNT_ID__', 0)
+    SetGlobalValue('__ENGINE_MESH_COUNT_ID__', mesh_id + 1) # type: ignore
+    return mesh_id
+    
+@attrs(eq=False, repr=False)
+class InnerMesh:
+    '''the inner target inside a loaded mesh data.'''
+    
+    from_vertex: int = attrib(default=0)
+    '''from which vertex inside the whole vertex data list (<x,y,z> as 1 vertex, not <x>, <y>, <z>)'''
+    vertex_count: int = attrib(default=0)
+    '''how many vertex does this inner target has, (x,y,z) as 1 vertex. If `indices_count` is specified, this could be ignore.'''
+    
+    from_index: int = attrib(default=0)
+    '''from which index inside the whole index data list. If no indices, this field will be ignored.'''
+    indices_count: int = attrib(default=0)
+    '''how many indices does this inner target has. If this is specified, `vertex_count` will be ignored.'''
+    
+    material_index: Optional[int] = attrib(default=None)
+    '''which material does this inner target use. If None, use the default material.'''
+    material_name: Optional[str] = attrib(default=None)
+    '''name of this inner target's material. Not all formats have this field.'''
+    
+    @property
+    def to_vertex(self):
+        return self.from_vertex + self.vertex_count
+    @property
+    def to_index(self):
+        return self.from_index + self.indices_count
+    
+@attrs(eq=False, repr=False)
 class Mesh(ResourcesObj):
-    '''Mesh class. It is used to store the vertices, normals, uvs, etc. of a mesh. It also provides functions to load and draw the mesh.'''
+    '''
+    Mesh class. It is used to store the vertices, normals, uvs, etc. of a mesh. It also provides functions to load and draw the mesh.
+    Note that mesh can have several inner objs, if you have given the inner data, you have to specify the drawing target on `draw`.
+    '''
 
-    # region class properties
-    _BaseName: Final[str] = 'Mesh'
+    BaseClsName = 'Mesh'
     '''Basename is for internal use only. All subclass of Mesh will have the same basename. Do not change it.'''
-    # endregion
 
-    # region instance properties
-    _meshID: int
-    '''MeshID is a unique ID for each mesh. It is used to identify the mesh. It is automatically generated when the mesh is created.'''
-
-    # AI stuff
-    _generateVertexID: bool = False
-    '''If True, vertex IDs will be generated when loading the mesh. This is a technique for AI rendering.'''
-    _vertexBoundingBoxLength: float = 0.0
-    '''
-    The length of the bounding box when generating vertex IDs. This is a technique for AI rendering.
-    This will only be used when `generateVertexID` = True. 
-    When:    
-        * `vertexBoundingBoxLength` = 0: means every vertex has its own ID.
-        * `vertexBoundingBoxLength` > 0: means vertices within the same bounding box will have the same ID. This is a technique for AI rendering.
-    '''
-
-    # mesh data
-    _vertices: List[float]
-    '''
-    vertices data.
-    Format:
-        * has normal & uv: [x, y, z, nx, ny, nz, u, v, ...]
-        * has normal only: [x, y, z, nx, ny, nz, ...]
-        * has uv only: [x, y, z, u, v, ...]
-        * has neither normal nor uv: [x, y, z, ...]
-    '''
-    _vertexCountPerFace: int = 0
-    '''number of vertices per face'''
-    _totalFaceCount: int = 0
-    '''total number of faces'''
-    _has_normals: Union[bool, None] = None
-    '''If the mesh has normals. `None` means unknown'''
-    _has_uvs: Union[bool, None] = None
-    '''If the mesh has uvs. `None` means unknown'''
-
-    # opengl stuff
-    _vao: Union[int, None] = None
+    positions: List[Tuple[float, float, float]] = attrib(factory=list, kw_only=True)
+    '''position data, [(x1, y1, z1), ...]'''
+    normals: List[Tuple[float, float, float]] = attrib(factory=list, kw_only=True)
+    '''normals data, [(x1, y1, z1), ...]'''
+    uvs: List[List[Tuple[float, float]]] = attrib(factory=list, kw_only=True)
+    '''uvs data, [[(u1, v1), ...], ...]. By default, only will the first uvs data be sent to shader. 
+    You can modify this in other mesh classes.'''
+    tangents: List[Tuple[float, float, float]] = attrib(factory=list, kw_only=True)
+    '''tangents data, [(x1, y1, z1), ...]'''
+    bitangents: List[Tuple[float, float, float]] = attrib(factory=list, kw_only=True)
+    '''bitangents data, [(x1, y1, z1), ...]'''
+    colors: List[Tuple[float, float, float, float]] = attrib(factory=list, kw_only=True)
+    '''colors data, [(r1, g1, b1, a1), ...]'''
+    indices: Union[List[List[int]], List[int]] = attrib(factory=list, kw_only=True)
+    '''indices data, [index1, index2, ...]. If not empty, the mesh will be drawn with indices. Otherwise, it will be drawn with vertices.'''
+    
+    materials: List[dict] = attrib(factory=list, kw_only=True)
+    '''materials data, [material1, material2, ...]. Note that this material data is just dict type, not class `Material`'''
+    vertex_count: int = attrib(default=0, kw_only=True)
+    '''number of vertices in this mesh'''
+    indices_count: int = attrib(default=0, kw_only=True)
+    '''number of indices in this mesh'''
+    uv_components_counts: Union[int, List[int]] = attrib(default=2, kw_only=True)
+    '''number of uv components. Default is 2. If you have more than 2 uv components, you have to specify this field.'''
+    inner_meshes: List[InnerMesh] = attrib(factory=list, kw_only=True)
+    '''inner meshes. Specify this field when there are more than 1 targets inside this mesh data.'''
+    
+    vao: Optional[int] = attrib(default=None, kw_only=True)
     '''Vertex Array Object. `None` means not sent to GPU. Otherwise, it is the buffer ID.'''
-    _vbo: Union[int, None] = None
+    ebo: Optional[int] = attrib(default=None, kw_only=True)
+    '''Element Buffer Object. `None` means not sent to GPU. Otherwise, it is the buffer ID. You may ignore this if you are not using indices.'''
+    vbos: List[int] = attrib(factory=list, kw_only=True)
     '''Vertex Buffer Object. `None` means not sent to GPU. Otherwise, it is the buffer ID.'''
-    _drawMode: Union[PrimitiveDrawingType, None] = None
+    draw_mode: Optional[PrimitiveDrawingType] = PrimitiveDrawingType.TRIANGLES
     '''The OpenGL drawing mode of the mesh. `None` means unknown. It should be set when `load` is called'''
-    _keep_vertices: bool = False
-    '''If keep vertices, the vertices data will be kept in memory(after send to GPU). Otherwise, they will be cleared.'''
-    # endregion
-
-    @staticmethod
-    def _GenerateMeshID()->int:
-        currentID = GetOrAddGlobalValue('_MeshCount', 1) # 0 is reserved
-        SetGlobalValue('_MeshCount', currentID+1)
-        return currentID
-
-    def __init__(self,
-                 name: str,
-                 keep_vertices:bool=False,
-                 generateVertexID:bool=False,
-                 vertexBoundingBoxLength:float=0.0):
+    only_keep_gpu_data: bool = attrib(default=True, kw_only=True)
+    '''If True, all vertices data(including normals, ...) will be cleared after sent to GPU. Otherwise, the vertices data will be kept in memory.'''
+    generate_vertex_ids: bool = attrib(default=True, kw_only=True)
+    '''For Stable-Rendering to do latent tracing(could also be done by texture UV.)
+    If indices exists, ID values will not be generated, because the indices can be used as ID values.'''
+    cullback: bool = attrib(default=False, kw_only=True)
+    '''If True, the mesh will be culled backface. Default is False.'''
+    
+    # internal use
+    meshID: Final[int] = attrib(factory=_get_mesh_id, init=False)
+    '''internal integer id of the mesh. This is for passing to shader to build the id.'''
+    
+    def __attrs_post_init__(self):
+        super().__attrs_post_init__()
+        if self.vertex_count == 0 and len(self.positions) > 0:
+            self.vertex_count = len(self.positions)
+        if self.indices_count == 0 and len(self.indices) > 0:
+            if isinstance(self.indices[0], list):
+                self.indices_count = len(self.indices) * len(self.indices[0])
+            else:
+                self.indices_count = len(self.indices)
+    
+    @property
+    def loaded(self):
         '''
-        Args:
-            * name: name is used to identify the mesh. If not specified, the name will be the path/ auto-generated.
-            * keep_vertices: if True, vertex data will still be kept after sent to GPU.
-            * generateVertexID: if True, vertex IDs will be generated when loading the mesh. This is a technique for AI rendering.
-            * vertexBoundingBoxLength: The length of the bounding box when generating vertex IDs. This is a technique for AI rendering.
-                                        This will only be used when `generateVertexID` = True.
-                                        When:
-                                            * `vertexBoundingBoxLength` = 0: means every vertex has its own ID.
-                                            * `vertexBoundingBoxLength` > 0: means vertices within the same bounding box will have the same ID. This is a technique for AI rendering.
+        Check if the mesh data is sent to GPU.
+        You can override this method in child class.
         '''
-        super().__init__(name)
-        self._meshID = self._GenerateMeshID()
-        self._vertices = []
-        self._keep_vertices = keep_vertices
-        self._generateVertexID = generateVertexID
-        if vertexBoundingBoxLength < 0:
-            raise ValueError('vertexBoundingBoxLength must be non-negative')
-        self._vertexBoundingBoxLength = vertexBoundingBoxLength
-
-    # region properties
-    @property
-    def meshID(self):
-        '''MeshID is a unique ID for each mesh. It is used to identify the mesh. It is automatically generated when the mesh is created.'''
-        return self._meshID
-    
-    @property
-    def vertexCountPerFace(self):
-        '''number of vertices per face'''
-        return self._vertexCountPerFace
-    
-    @property
-    def totalFaceCount(self):
-        return self._totalFaceCount
-    
-    @property
-    def vao(self):
-        return self._vao
-    
-    @property
-    def vbo(self):
-        return self._vbo
-
-    @property
-    def sentToGPU(self):
-        '''Check if the mesh data is sent to GPU.'''
         return self.vao is not None
     
     @property
-    def keep_vertices(self):
-        '''If keep vertices, the vertices data will be kept in memory(after send to GPU). Otherwise, they will be cleared.'''
-        return self._keep_vertices
-
-    @property
-    def generateVertexID(self):
-        '''If True, vertex IDs will be generated when loading the mesh. This is a technique for AI rendering.'''
-        return self._generateVertexID
-
-    @generateVertexID.setter
-    def generateVertexID(self, value:bool):
-        if self.sentToGPU:
-            raise Exception('Cannot change generateVertexID after data is sent to GPU')
-        self._generateVertexID = value
-
-    @property
-    def vertexBoundingBoxLength(self):
-        '''
-        The length of the bounding box when generating vertex IDs. This is a technique for AI rendering.
-        This will only be used when `generateVertexID` = True.
-        When:
-            * `vertexBoundingBoxLength` = 0: means every vertex has its own ID.
-            * `vertexBoundingBoxLength` > 0: means vertices within the same bounding box will have the same ID. This is a technique for AI rendering.
-        '''
-        return self._vertexBoundingBoxLength
-
-    @vertexBoundingBoxLength.setter
-    def vertexBoundingBoxLength(self, value:float):
-        if self.sentToGPU:
-            raise Exception('Cannot change vertexBoundingBoxLength after data is sent to GPU')
-        if value < 0:
-            raise ValueError('vertexBoundingBoxLength must be non-negative')
-        self._vertexBoundingBoxLength = value
-
+    def has_indices(self):
+        return len(self.indices)>0 or self.indices_count>0
     @property
     def has_normals(self):
-        if self._has_normals is None:
-            raise Exception('has_normals is unknown. Please load the mesh first.')
-        return self._has_normals
-    
+        return len(self.normals) > 0
     @property
     def has_uvs(self):
-        if self._has_uvs is None:
-            raise Exception('has_uvs is unknown. Please load the mesh first.')
-        return self._has_uvs
-    
+        return len(self.uvs) > 0
     @property
-    def vertices(self):
-        return self._vertices
-    
+    def has_tangents(self):
+        return len(self.tangents) > 0
     @property
-    def drawMode(self):
-        return self._drawMode
-    # endregion
+    def has_bitangents(self):
+        return len(self.bitangents) > 0
+    @property
+    def has_colors(self):
+        return len(self.colors) > 0
 
-    # region methods
-    def load(self, path:str):
-        '''Load data from file. Override this function to implement loading data from file'''
-        raise NotImplementedError
-
-    def draw(self, group:Optional[int]=None):
+    def draw(self, target:Optional[int]=None):
         '''
         Draw the mesh. Override this function to implement drawing the mesh.
         Make sure you have called Material.use() before calling this function. (So that textures & shaders are ready)
-        :param group: the group of the mesh. Groups can have different materials.
+        
+        Args:
+            - target: Only for those objs having multiple inner meshes. If None, draw the whole mesh. Otherwise, draw the specified target.
         '''
-        # default implementation
-        if self.vao is None:
+        if not self.loaded:
             raise Exception('Data is not sent to GPU')
+        if self.draw_mode is None:
+            raise Exception('drawMode is not set')
+        
         gl.glBindVertexArray(self.vao)
-        gl.glDrawArrays(self.drawMode.value, 0, self.totalFaceCount * self.vertexCountPerFace)
 
-    # endregion
+        if target is None: # no material
+            if len(self.inner_meshes) == 0: 
+                if self.has_indices:
+                    gl.glDrawElements(self.draw_mode.value, self.indices_count, gl.GL_UNSIGNED_INT, None)
+                else:
+                    gl.glDrawArrays(self.draw_mode.value, 0, self.vertex_count)
+            else:
+                for i in range(len(self.inner_meshes)):
+                    self.draw(i)
+        else:
+            if target >= len(self.inner_meshes):
+                if target == 0 and len(self.inner_meshes) == 0:
+                    return self.draw(None) # no inner mesh, draw the whole mesh
+                if is_dev_mode():
+                    raise Exception(f'incorrect material slot: {target}')
+                return # incorrect material slot. skip this mesh in release mode
+            inner = self.inner_meshes[target]
+            if self.has_indices:
+                gl.glDrawElements(self.draw_mode.value, inner.indices_count, gl.GL_UNSIGNED_INT, ctypes.c_void_p(inner.from_index * 4))
+            else:
+                gl.glDrawArrays(self.draw_mode.value, inner.from_vertex, inner.vertex_count)
+    
+    def load(self):
+        '''send mesh to OpenGL'''
+        if self.loaded:
+            return
+        
+        super().load()  # just for printing debug info
 
+        if len(self.positions) == 0:
+            raise Exception(f'Mesh `{self.name}` has no data to send to GPU')
+        
+        self.vao = gl.glGenVertexArrays(1)
+        gl.glBindVertexArray(self.vao)
+        
+        if self.has_indices:
+            indices_data = np.array(self.indices, dtype=np.uint32).flatten()
+            if self.indices_count == 0:
+                self.indices_count = indices_data.shape[0]   # prevent from being cleared which makes indices_count to be 0
+
+            self.ebo = gl.glGenBuffers(1)
+            gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.ebo)
+            gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indices_data.nbytes, indices_data.data, gl.GL_STATIC_DRAW)
+        
+        # position (0)
+        if self.vertex_count == 0 and not self.has_indices:
+            self.vertex_count = len(self.positions)
+        vertices_data = np.array(self.positions, dtype=np.float32).flatten()
+        vertex_vbo = gl.glGenBuffers(1)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, vertex_vbo)
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, vertices_data.nbytes, vertices_data.data, gl.GL_STATIC_DRAW)
+        
+        gl.glEnableVertexAttribArray(0)
+        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, 3 * 4, None)
+        self.vbos.append(vertex_vbo)
+        
+        # normal (1)
+        if self.has_normals:
+            normals_data = np.array(self.normals, dtype=np.float32).flatten()
+            normal_vbo = gl.glGenBuffers(1)
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, normal_vbo)
+            gl.glBufferData(gl.GL_ARRAY_BUFFER, normals_data.nbytes, normals_data.data, gl.GL_STATIC_DRAW)
+            
+            gl.glEnableVertexAttribArray(1)
+            gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, gl.GL_FALSE, 3 * 4, None)
+            self.vbos.append(normal_vbo)
+            
+        # tangent (2)
+        if self.has_tangents:
+            tangent_data = np.array(self.tangents, dtype=np.float32).flatten()
+            tangent_vbo = gl.glGenBuffers(1)
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, tangent_vbo)
+            gl.glBufferData(gl.GL_ARRAY_BUFFER, tangent_data.nbytes, tangent_data.data, gl.GL_STATIC_DRAW)
+            
+            gl.glEnableVertexAttribArray(2)
+            gl.glVertexAttribPointer(2, 3, gl.GL_FLOAT, gl.GL_FALSE, 3 * 4, None)
+            self.vbos.append(tangent_vbo)
+        
+        # bitangent (3)
+        if self.has_bitangents:
+            bitangent_data = np.array(self.bitangents, dtype=np.float32).flatten()
+            bitangent_vbo = gl.glGenBuffers(1)
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, bitangent_vbo)
+            gl.glBufferData(gl.GL_ARRAY_BUFFER, bitangent_data.nbytes, bitangent_data.data, gl.GL_STATIC_DRAW)
+            
+            gl.glEnableVertexAttribArray(3)
+            gl.glVertexAttribPointer(3, 3, gl.GL_FLOAT, gl.GL_FALSE, 3 * 4, None)
+            self.vbos.append(bitangent_vbo)
+        
+        # color (4)
+        if self.has_colors:
+            color_data = np.array(self.colors, dtype=np.float32).flatten()
+            color_vbo = gl.glGenBuffers(1)
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, color_vbo)
+            gl.glBufferData(gl.GL_ARRAY_BUFFER, color_data.nbytes, color_data.data, gl.GL_STATIC_DRAW)
+            
+            gl.glEnableVertexAttribArray(4)
+            channel_count = len(self.colors[0])
+            gl.glVertexAttribPointer(4, channel_count, gl.GL_FLOAT, gl.GL_FALSE, channel_count * 4, None)
+            self.vbos.append(color_vbo)
+                    
+        # id (5)
+        if self.generate_vertex_ids:
+            if self.has_indices:
+                vertex_ids = indices_data
+            else:
+                vertex_ids = np.array([i for i in range(self.vertex_count)], dtype=np.int32).flatten()
+            
+            id_vbo = gl.glGenBuffers(1)
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, id_vbo)
+            gl.glBufferData(gl.GL_ARRAY_BUFFER, vertex_ids.nbytes, vertex_ids.data, gl.GL_STATIC_DRAW)
+            
+            gl.glEnableVertexAttribArray(5)
+            gl.glVertexAttribPointer(5, 1, gl.GL_INT, gl.GL_FALSE, 1 * 4, None)
+            self.vbos.append(id_vbo)
+        
+        # uv (start from 8)
+        point_offset = 8
+        if self.has_uvs:
+            for i in range(len(self.uvs)): 
+                uv_data = np.array(self.uvs[i], dtype=np.float32).flatten()
+                component_count = self.uv_components_counts if isinstance(self.uv_components_counts, int) else self.uv_components_counts[i]
+                uv_vbo = gl.glGenBuffers(1)
+                gl.glBindBuffer(gl.GL_ARRAY_BUFFER, uv_vbo)
+                gl.glBufferData(gl.GL_ARRAY_BUFFER, uv_data.nbytes, uv_data.data, gl.GL_STATIC_DRAW)
+                
+                gl.glEnableVertexAttribArray(point_offset + i)
+                gl.glVertexAttribPointer(point_offset + i, component_count, gl.GL_FLOAT, gl.GL_FALSE, component_count * 4, None)
+                self.vbos.append(uv_vbo)
+            
+        if self.only_keep_gpu_data:
+            self.positions.clear()
+            self.normals.clear()
+            self.uvs.clear()
+            self.tangents.clear()
+            self.bitangents.clear()
+            self.colors.clear()
+            self.indices.clear()
+    
     @classmethod
     def Load(cls,
-             path: str,
-             name: Union[str, None]=None,
-             keep_vertices:bool=False,
-             generateVertexID:bool=False,
-             vertexBoundingBoxLength:float=0.0,
-             )->'Mesh':
+             path: Union[str, Path],
+             name: Optional[str]=None,
+             only_keep_gpu_data:bool=False,
+             generate_vertex_ids:bool=False,
+             **kwargs,
+             ):
         '''
-        load a mesh from file
+        load a mesh from file by default method(assimp_py).
 
         Args:
             * path: path of the mesh file
             * name: name is used to identify the mesh. If not specified, the name will be the path of the mesh file
-            * keep_vertices: if True, the vertices data will be kept in memory(after send to GPU). Otherwise, they will be cleared.
-            * generateVertexID: if True, vertex IDs will be generated when loading the mesh. This is a technique for AI rendering.
-            * vertexBoundingBoxLength: The length of the bounding box when generating vertex IDs. This is a technique for AI rendering.
-                                        This will only be used when `generateVertexID` = True.
-                                        When:
-                                            * `vertexBoundingBoxLength` = 0: means every vertex has its own ID.
-                                            * `vertexBoundingBoxLength` > 0: means vertices within the same bounding box will have the same ID. This is a technique for AI rendering.
+            * only_keep_gpu_data: if True, the vertices data will be cleared after sent to GPU. Otherwise, the vertices data will be kept in memory.
+            * generate_vertex_ids: if True, the mesh will generate vertex id for each vertex. This is for stable-renderer to do latent tracing.
         '''
-        path, name = cls._GetPathAndName(path, name)
-        if '.' not in os.path.basename(path):
-            raise ValueError('path must contain file extension')
-        ext = path.split('.')[-1]
-        formatCls:Type['Mesh'] = cls.FindFormat(ext)
-        if formatCls is None:
-            raise ValueError(f'unsupported mesh format: {ext}')
-        mesh = formatCls(name=name,
-                         keep_vertices=keep_vertices,
-                         generateVertexID=generateVertexID,
-                         vertexBoundingBoxLength=vertexBoundingBoxLength)
-        mesh.load(path)
-        return mesh
+        process_flags = (assimp_py.Process_Triangulate | assimp_py.Process_CalcTangentSpace | assimp_py.Process_JoinIdenticalVertices)
+        scene = assimp_py.ImportFile(str(path), process_flags)
+        
+        all_positions = [] # list[tuple[x,y,z],...] (positions)
+        all_normals = []
+        all_uvs = []    # list[list[tuple[u,v],..],...]
+        all_tangents = []
+        all_bitangents = []
+        all_colors = []
+        all_materials = []  # list[dict, ...]
+        all_indices = []    # list[tuple[index1, index2, ...], ...]
+        inner_meshes = []   # list[InnerMesh, ...]
+        uv_components_counts: Union[int, List[int]] = []
+        for mesh in scene.meshes:
+            if not uv_components_counts:
+                counts = [num_component for num_component in mesh.num_uv_components]    # currently only support same num of texcoords among all meshes
+                if len(counts) == 0:
+                    uv_components_counts = 2
+                else:
+                    uv_components_counts = counts
+                
+            vertices = mesh.vertices    # positions must be present
+            normals = getattr(mesh, 'normals', [])
+            texcoords = getattr(mesh, 'texcoords', [])
+            tangents = getattr(mesh, 'tangents', [])
+            bitangent = getattr(mesh, 'bitangents', [])
+            color = getattr(mesh, 'colors', [])
+            indices = getattr(mesh, 'indices', [])
+            mat = scene.materials[mesh.material_index] if len(scene.materials) > 0 else None
+            
+            inner_mesh = InnerMesh(material_name=mat['NAME'] if mat else None,
+                                   from_vertex=len(all_positions), 
+                                   vertex_count=len(vertices),
+                                   from_index=len(all_indices) * 3,
+                                   indices_count=len(indices) * 3,
+                                   material_index=mesh.material_index)
+            inner_meshes.append(inner_mesh)
+            
+            all_positions.extend(vertices)
+            all_normals.extend(normals)
+            all_tangents.extend(tangents)
+            all_bitangents.extend(bitangent)
+            all_colors.extend(color)
+            all_indices.extend([[ind + inner_mesh.from_vertex for ind in face] for face in indices])
+            all_materials.append(mat) if mat else None
+            
+            for j, texcoord in enumerate(texcoords):
+                uv_components_count = mesh.num_uv_components[j] if isinstance(mesh.num_uv_components, list) else mesh.num_uv_components
+                if len(all_uvs) <= j:
+                    all_uvs.append([])
+                all_uvs[j].extend([tuple(uv[:uv_components_count]) for uv in texcoord])
+        
+        data = {
+            'name': name,
+            'positions': all_positions,
+            'normals': all_normals,
+            'uvs': all_uvs,
+            'tangents': all_tangents,
+            'bitangents': all_bitangents,
+            'colors': all_colors,
+            'indices':all_indices,
+            'vertex_count': len(all_positions),
+            'indices_count': len(all_indices) * 3,
+            'materials': all_materials,
+            'inner_meshes': inner_meshes,
+            'uv_components_counts': uv_components_counts,
+            'only_keep_gpu_data': only_keep_gpu_data,
+            'generate_vertex_ids': generate_vertex_ids,
+        }
+        data.update(kwargs)
+        mesh_obj = cls(**data)
+        return mesh_obj
 
+    def clear(self):
+        super().clear() # just for printing debug info
+        for vbo in self.vbos:
+            buffer = np.array([vbo], dtype=np.uint32)
+            gl.glDeleteBuffers(1, buffer)
+        self.vbos.clear()
+        
+        if self.ebo is not None:
+            buffer = np.array([self.ebo], dtype=np.uint32)
+            gl.glDeleteBuffers(1, buffer)
+            self.ebo = None
+        
+        if self.vao is not None:
+            buffer = np.array([self.vao], dtype=np.uint32)
+            gl.glDeleteVertexArrays(1, buffer)
+            self.vao = None
+        
+        self.positions.clear()
+        self.normals.clear()
+        self.uvs.clear()
+        self.tangents.clear()
+        self.bitangents.clear()
+        self.colors.clear()
+        self.indices.clear()
+        self.materials.clear()
+        self.inner_meshes.clear()
+        self.vertex_count = 0
+        self.indices_count = 0
+        self.uv_components_counts = 0
+        
     # region default meshes
-    _Plane_Mesh = None
-    @classmethod
-    def Plane(cls)->'Mesh':
-        '''
-        get a plane mesh
-        '''
-        if cls._Plane_Mesh is None:
-            cls._Plane_Mesh = _Mesh_Plane()
-        return cls._Plane_Mesh
-    _Sphere_Meshes = {}
+    @staticmethod
+    def Plane(edge:int = 1)->'Mesh':
+        '''get a plane mesh. Vertex per edge = edge+1'''
+        name = f'__PLANE_MESH_EDGE_{edge}__'
+        if plane_mesh := Mesh.Find(name=name):
+            return plane_mesh
+        else:
+            return _PlaneMesh(name=name, edge=edge)
 
-    @classmethod
-    def Sphere(cls, segment=32)->'Mesh':
+    @staticmethod
+    def Sphere(segment=32)->'Mesh':
         '''
         get a sphere mesh with specified segment
         :param segment: the segment of the sphere. More segments means more smooth sphere.
         :return: Mesh object
         '''
-        if segment not in cls._Sphere_Meshes:
-            cls._Sphere_Meshes[segment] = _Mesh_Sphere(segment)
-        return cls._Sphere_Meshes[segment]
-    _Cube_Mesh = None
-
-    @classmethod
-    def Cube(cls)->'Mesh':
-        '''
-        get a cube mesh with edge length 1
-        '''
-        if cls._Cube_Mesh is None:
-            cls._Cube_Mesh = _Mesh_Cube()
-        return cls._Cube_Mesh
+        name = f'__SPHERE_MESH_SEGMENT_{segment}__'
+        if sphere_mesh := Mesh.Find(name=name):
+            return sphere_mesh
+        else:
+            return _SphereMesh(name=name, segment=segment)
     # endregion
 
 # region basic shapes
-class _Mesh_Plane(Mesh):
+@attrs(eq=False, repr=False)
+class _PlaneMesh(Mesh):
 
-    _plane_vertices = None
-    '''For plane mesh, the vertices data is the same. So we can use the same data for all plane meshes.'''
+    edge: int = attrib(default=1)
+    '''edge of the plane. Vertex per edge = edge+1'''
+    generate_vertex_ids: bool = attrib(default=True)
+    '''plane is default to generate vertex ids for latent tracing'''
+    
+    def __attrs_post_init__(self):
+        xcoords = np.linspace(-0.5, 0.5, self.edge+1)
+        zcoords = np.linspace(-0.5, 0.5, self.edge+1)
+        positions = []
+        normals = []
+        uvs = []
+        tangents = []
+        bitangents = []
+        for z in zcoords:
+            for x in xcoords:
+                positions.append((x, 0, z))
+                normals.append((0, 1, 0))
+                uvs.append((x+0.5, z+0.5))
+                tangents.append((1, 0, 0))
+                bitangents.append((0, 0, 1))
+        
+        self.positions = positions
+        self.normals = normals
+        self.uvs = [uvs]
+        self.tangents = tangents
+        self.bitangents = bitangents
+        self.vertex_count = len(positions)
+        self.indices = []
+        
+        for i in range(self.edge):
+            for j in range(self.edge):
+                self.indices.append(i*(self.edge+1)+j)
+                self.indices.append((i+1)*(self.edge+1)+j)
+                self.indices.append((i+1)*(self.edge+1)+j+1)
+                
+                self.indices.append(i*(self.edge+1)+j)
+                self.indices.append((i+1)*(self.edge+1)+j+1)
+                self.indices.append(i*(self.edge+1)+j+1)
 
-    @classmethod
-    def _GetPlaneVertices(cls):
-        if cls._plane_vertices is None:
-            cls._plane_vertices = [
-                -1, 0, -1, 0, 1, 0, 0, 0,
-                -1, 0, 1, 0, 1, 0, 0, 1,
-                1, 0, 1, 0, 1, 0, 1, 1,
-                1, 0, -1, 0, 1, 0, 1, 0
-            ]
-        return cls._plane_vertices
+        self.draw_mode = PrimitiveDrawingType.TRIANGLES
+        
+        super().__attrs_post_init__()
 
-    def __new__(cls):
-        return super().__new__(cls, '_Default_Plane_Mesh')
+@attrs(eq=False, repr=False)
+class _SphereMesh(Mesh):
 
-    def __init__(self):
-        super().__init__(self.name, keep_vertices=True)
-        self._vao = None
-        self._vbo = None
-        self._drawMode = PrimitiveDrawingType.TRIANGLE_FAN
-        self._vertexCountPerFace = 4
-        self._totalFaceCount = 1
-        self._has_normals = True
-        self._has_uvs = True
-
-    @property
-    def vertices(self):
-        return self._GetPlaneVertices()
-
-    def sendToGPU(self):
-        if self.vao is not None:
-            return  # already sent to GPU
-        super().sendToGPU()
-        self._vao = gl.glGenVertexArrays(1)
-        gl.glBindVertexArray(self.vao)
-
-        self._vbo = gl.glGenBuffers(1)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
-        vertices_data = np.array(self.vertices, dtype=np.float32)
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, vertices_data.nbytes, vertices_data.data, gl.GL_STATIC_DRAW)
-
-        stride = 8 * 4
-        # pos
-        gl.glEnableVertexAttribArray(0)
-        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, stride, None)
-        # normal
-        gl.glEnableVertexAttribArray(1)
-        gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(3 * 4))
-        # uv
-        gl.glEnableVertexAttribArray(2)
-        gl.glVertexAttribPointer(2, 2, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(6 * 4))
-
-    def draw(self, group:int=None):
-        if self.vao is None:
-            raise Exception('Data is not sent to GPU')
-        gl.glBindVertexArray(self.vao)
-        gl.glDrawArrays(gl.GL_TRIANGLE_FAN, 0, 4)
-
-    def clear(self):
-        if self.vao is not None:
-            gl.glDeleteVertexArrays(1, [self.vao])
-            gl.glDeleteBuffers(1, [self.vbo])
-            self._vao = None
-            self._vbo = None
-
-class _Mesh_Sphere(Mesh):
-
-    def __new__(cls, segment:int):
-        return super().__new__(cls, f'_Default_Sphere_Mesh_{segment}')
-
-    def __init__(self, segment:int):
-        super().__init__(self.name)
-        self.segment = segment
-        self._ebo = None
-        self._vertexCountPerFace = 3
-        self._drawMode = PrimitiveDrawingType.TRIANGLE_STRIP
-        self._init_vertices(self.segment)
-        self._has_normals = True
-        self._has_uvs = True
-    @property
-    def ebo(self):
-        return self._ebo
-    def _init_vertices(self, segment):
+    segment: int = attrib(default=32)
+    '''segment of the sphere. More segments means more smooth sphere.'''
+    generate_vertex_ids: bool = attrib(default=True)
+    '''plane is default to generate vertex ids for latent tracing'''
+    
+    def __attrs_post_init__(self):
+        segment = self.segment
+        positions = []
+        normals = []
+        uvs = []
+        tangents = []
+        bitangents = []
+        
         for i in range(segment+1):
             for j in range(segment+1):
                 xSegment = j / segment
@@ -363,165 +505,38 @@ class _Mesh_Sphere(Mesh):
                 xPos = math.cos(xSegment * 2 * math.pi) * math.sin(ySegment * math.pi)
                 yPos = math.cos(ySegment * math.pi)
                 zPos = math.sin(xSegment * 2 * math.pi) * math.sin(ySegment * math.pi)
-                self.vertices.extend([
-                    xPos *0.5, yPos*0.5, zPos*0.5,
-                    xPos, yPos, zPos,
-                    xSegment, ySegment
-                ])
+                positions.append((xPos, yPos, zPos))
+                normals.append((xPos, yPos, zPos))
+                uvs.append((xSegment, ySegment))
+                
+                tx = -math.sin(xSegment * 2 * math.pi) * math.sin(ySegment * math.pi)
+                ty = 0
+                tz = math.cos(xSegment * 2 * math.pi) * math.sin(ySegment * math.pi)
+                tangents.append((tx, ty, tz))
 
-        self.indices = []
+                bx = math.cos(xSegment * 2 * math.pi) * math.cos(ySegment * math.pi)
+                by = -math.sin(ySegment * math.pi)
+                bz = math.sin(xSegment * 2 * math.pi) * math.cos(ySegment * math.pi)
+                bitangents.append((bx, by, bz))
+                
+        indices = []
         for i in range(segment):
             for j in range(segment):
-                self.indices.append((i + 1) * (segment + 1) + j)
-                self.indices.append(i * (segment + 1) + j)
-        self._totalFaceCount = len(self.indices) - 2
+                indices.append((i + 1) * (segment + 1) + j)
+                indices.append(i * (segment + 1) + j)
+        
+        self.positions = positions
+        self.normals = normals
+        self.uvs = [uvs]
+        self.tangents = tangents
+        self.bitangents = bitangents
+        self.vertex_count = len(positions)
+        self.indices = indices
+        self.draw_mode = PrimitiveDrawingType.TRIANGLE_STRIP
+        
+        super().__attrs_post_init__()
 
-    def sendToGPU(self):
-        if self.vao is not None:
-            return
-        super().sendToGPU()
-        self._vao = gl.glGenVertexArrays(1)
-        gl.glBindVertexArray(self.vao)
-
-        self._vbo = gl.glGenBuffers(1)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
-
-        vertices_data = np.array(self.vertices, dtype=np.float32)
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, vertices_data.nbytes, vertices_data.data, gl.GL_STATIC_DRAW)
-
-        stride = 8 * 4
-        # pos
-        gl.glEnableVertexAttribArray(0)
-        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, stride, None)
-        # normal
-        gl.glEnableVertexAttribArray(1)
-        gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(3 * 4))
-        # uv
-        gl.glEnableVertexAttribArray(2)
-        gl.glVertexAttribPointer(2, 2, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(6 * 4))
-
-        self._ebo = gl.glGenBuffers(1)
-        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.ebo)
-        indices_data = np.array(self.indices, dtype=np.uint32)
-        gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indices_data.nbytes, indices_data.data, gl.GL_STATIC_DRAW)
-
-    def draw(self, group:int=None):
-        if self.vao is None:
-            raise Exception('Data is not sent to GPU')
-        gl.glBindVertexArray(self.vao)
-        gl.glDrawElements(gl.GL_TRIANGLE_STRIP, len(self.indices), gl.GL_UNSIGNED_INT, None)
-    def clear(self):
-        if self.vao is not None:
-            gl.glDeleteVertexArrays(1, [self.vao])
-            gl.glDeleteBuffers(1, [self.vbo])
-            gl.glDeleteBuffers(1, [self.ebo])
-            self._vao = None
-            self._vbo = None
-            self._ebo = None
-
-class _Mesh_Cube(Mesh):
-
-    _cube_vertices:List[float] = None
-    _cube_indices:List[int] = None
-
-    @classmethod
-    def _GetCubeVertices(cls)->List[float]:
-        if cls._cube_vertices is None:
-            cls._cube_vertices = [
-                # x, y, z,         nx, ny, nz,   u, v
-                -0.5, -0.5, -0.5,  0, 0, -1,    0, 0,
-                0.5, -0.5, -0.5,   0, 0,  1,    1, 0,
-                0.5, 0.5, -0.5,    0, 0, -1,    1, 1,
-                -0.5, 0.5, -0.5,   0, 0, -1,    0, 1,
-
-                -0.5, -0.5, 0.5,   0, 0, 1,     1, 0,
-                0.5, -0.5, 0.5,    0, 0, 1,     0, 0,
-                0.5, 0.5, 0.5,     0, 0, 1,     0, 1,
-                -0.5, 0.5, 0.5,    0, 0, 1,     1, 1,
-            ]
-        return cls._cube_vertices
-
-    @classmethod
-    def _GetCubeIndices(cls)->List[int]:
-        if cls._cube_indices is None:
-            cls._cube_indices = [
-                0, 2, 1, 2, 0, 3,
-                1, 6, 5, 6, 1, 2,
-                7, 5, 6, 5, 7, 4,
-                4, 3, 0, 3, 4, 7,
-                4, 1, 5, 1, 4, 0,
-                3, 6, 2, 6, 3, 7,
-            ]
-        return cls._cube_indices
-
-    def __new__(cls):
-        return super().__new__(cls, '_Default_Cube_Mesh')
-
-    def __init__(self):
-        super().__init__(self.name, keep_vertices=True)
-        self._drawMode = PrimitiveDrawingType.TRIANGLES
-        self._totalFaceCount = 12
-        self._vertexCountPerFace = 3
-        self._ebo = None
-        self._has_normals = True
-        self._has_uvs = True
-
-    @property
-    def vertices(self)->List[float]:
-        return self._GetCubeVertices()
-
-    @property
-    def indices(self)->List[int]:
-        return self._GetCubeIndices()
-
-    @property
-    def ebo(self):
-        return self._ebo
-
-    def sendToGPU(self):
-        if self.vao is not None:
-            return
-        super().sendToGPU()
-        self._vao = gl.glGenVertexArrays(1)
-        gl.glBindVertexArray(self.vao)
-
-        self._vbo = gl.glGenBuffers(1)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
-
-        vertices_data = np.array(self.vertices, dtype=np.float32)
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, vertices_data.nbytes, vertices_data.data, gl.GL_STATIC_DRAW)
-
-        stride = 8 * 4
-        # pos
-        gl.glEnableVertexAttribArray(0)
-        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, stride, None)
-        # normal
-        gl.glEnableVertexAttribArray(1)
-        gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(3 * 4))
-        # uv
-        gl.glEnableVertexAttribArray(2)
-        gl.glVertexAttribPointer(2, 2, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(6 * 4))
-
-        self._ebo = gl.glGenBuffers(1)
-        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self._ebo)
-        indices_data = np.array(self.indices, dtype=np.uint32)
-        gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indices_data.nbytes, indices_data.data, gl.GL_STATIC_DRAW)
-
-    def draw(self, group:int=None):
-        if self.vao is None:
-            raise Exception('Data is not sent to GPU')
-        gl.glBindVertexArray(self.vao)
-        gl.glDrawElements(gl.GL_TRIANGLES, len(self.indices), gl.GL_UNSIGNED_INT, None)
-
-    def clear(self):
-        if self.vao is not None:
-            gl.glDeleteVertexArrays(1, [self.vao])
-            gl.glDeleteBuffers(1, [self.vbo])
-            gl.glDeleteBuffers(1, [self.ebo])
-            self._vao = None
-            self._vbo = None
-            self._ebo = None
-
+# TODO: Cube Mesh & other common shapes
 # endregion
 
 __all__ = ['Mesh']

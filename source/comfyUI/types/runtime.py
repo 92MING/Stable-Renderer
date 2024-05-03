@@ -685,7 +685,11 @@ class SamplingCallbackContext:
     '''the denoised latent'''
     total_steps: int = attrib()
     '''The total steps of sampling.'''
-    
+    timesteps: List[int] = attrib()
+    '''all time steps of the sampling.'''
+    sigmas: List[float] = attrib()
+    '''all sigma values. It is actually a list-like float tensor.'''
+        
     # region deprecated
     @property
     @deprecated(reason='use `noise` instead.')
@@ -696,8 +700,29 @@ class SamplingCallbackContext:
     @property
     @deprecated(reason='use `step_index` instead')
     def i(self)->int:
+        '''step index of the sampling.'''
         return self.step_index
     # endregion
+    
+    @property
+    def sampling_progress(self)->float:
+        '''The progress ratio of the sampling, i.e. step_index/total_steps.'''
+        return self.step_index / self.total_steps
+    
+    @property
+    def sigma(self)->float:
+        '''The sigma value of current step.'''
+        return self.sigmas[self.step_index]
+    
+    @property
+    def timestep(self):
+        '''return current timestep'''
+        return self.timesteps[self.step_index]
+    
+    @property
+    def timestep_ratio(self):
+        '''return the ratio of current progress regarding to the initial timestep=1000, i.e. self.timestep/1000.'''
+        return self.timestep / 1000
     
     def __getitem__(self, item):
         return getattr(self, item)

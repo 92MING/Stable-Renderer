@@ -1,11 +1,11 @@
-from engine.runtime.engineObj import EngineObj
+from engine.runtime.base_clses import EngineObj
 from common_utils.global_utils import GetOrAddGlobalValue
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .gameObj import GameObject
     from .components.transform import Transform
 
-_COMPONENT_CLSES = GetOrAddGlobalValue("_COMPONENT_CLSES", {})
+__ENGINE_COMPONENT_CLSES__ = GetOrAddGlobalValue("__ENGINE_COMPONENT_CLSES__", {})
 
 class ComponentMeta(type):
     '''
@@ -13,11 +13,11 @@ class ComponentMeta(type):
     '''
     def __new__(cls, *args, **kwargs):
         clsname = args[0]
-        if clsname in _COMPONENT_CLSES:
-            return _COMPONENT_CLSES[clsname]
+        if clsname in __ENGINE_COMPONENT_CLSES__:
+            return __ENGINE_COMPONENT_CLSES__[clsname]      # type: ignore
         else:
             cls = super().__new__(cls, *args, **kwargs)
-            _COMPONENT_CLSES[clsname] = cls
+            __ENGINE_COMPONENT_CLSES__[clsname] = cls   # type: ignore
             return cls
 
 
@@ -51,7 +51,7 @@ class Component(EngineObj, metaclass=ComponentMeta):
     @classmethod
     def FindComponentCls(cls, cls_name):
         try:
-            return _COMPONENT_CLSES[cls_name]
+            return __ENGINE_COMPONENT_CLSES__[cls_name]     # type: ignore
         except KeyError:
             raise KeyError(f'Component with class name: {cls_name} not found.')
 

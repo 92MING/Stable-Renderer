@@ -16,9 +16,9 @@ from PIL import Image, ImageOps, ImageSequence
 from PIL.PngImagePlugin import PngInfo
 from typing import (Dict, Tuple, List, Literal, Any, Optional, Callable, Type, TYPE_CHECKING)
 
-from common_utils.global_utils import GetGlobalValue, is_dev_verbose, SetGlobalValue, GetOrAddGlobalValue, is_dev_mode, should_run_web_server
+from common_utils.global_utils import GetGlobalValue, is_dev_verbose, SetGlobalValue, GetOrAddGlobalValue, is_dev_mode, should_run_web_server, is_engine_looping
 from common_utils.debug_utils import ComfyUILogger
-
+from common_utils.system_utils import is_windows
 sys.path.insert(2, os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy"))
 
 import comfy.diffusers_load
@@ -1390,7 +1390,10 @@ def common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, 
 
     callbacks = []
     callbacks.append(latent_preview.prepare_callback(model, steps))
-    disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
+    if is_engine_looping():
+        disable_pbar = True
+    else:
+        disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
                                   denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step, # type: ignore
                                   force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed) # type: ignore
@@ -1430,7 +1433,10 @@ def custom_ksampler(model: "ModelPatcher",
         noise_mask = latent["noise_mask"]
 
     callbacks.append(latent_preview.prepare_callback(model, steps))
-    disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
+    if is_engine_looping():
+        disable_pbar = True
+    else:
+        disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
                                   denoise=denoise, disable_noise=(noise_option == 'disable'), start_step=start_step, last_step=last_step, # type: ignore
                                   force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)
@@ -1579,6 +1585,8 @@ class LoadImage:
     FUNCTION = "load_image"
     def load_image(self, image):
         image_path = folder_paths.get_annotated_filepath(image)
+        if is_windows():
+            image_path = image_path.replace("/", "\\")
         img = Image.open(image_path)
         output_images = []
         output_masks = []
@@ -2096,12 +2104,12 @@ def load_custom_nodes(raise_err=False):
                 import_message = " (IMPORT FAILED)"
             ComfyUILogger.debug("{:6.1f} seconds{}:".format(n[0], import_message) + n[1])
     
-    stable_renderer_nodes_path = os.path.join(folder_paths.base_path, 'stable_renderer', '_nodes')
-    success = _load_custom_node(stable_renderer_nodes_path, regist_name='stable-renderer', raise_err=raise_err)
+    stable_renderer_nodes_path = os.path.join(folder_paths.base_path, 'stable_rendering', '_nodes')
+    success = _load_custom_node(stable_renderer_nodes_path, regist_name='stable_rendering', raise_err=raise_err)
     if not success:
-        ComfyUILogger.warning('failed to load stable-renderer nodes.')
+        ComfyUILogger.warning('failed to load stable_rendering nodes.')
     else:
-        ComfyUILogger.debug('successfully loaded stable-renderer nodes.')
+        ComfyUILogger.debug('successfully loaded stable_rendering nodes.')
         
     # advance node registration
     from comfyUI.types import AdvancedNodeBase

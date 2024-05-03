@@ -671,10 +671,5 @@ __all__.extend(['NameCheckMetaCls', 'GetableFunc', 'DynamicLiteral'])
 
 
 if __name__=='__main__':
-    class A:
-        def __hash__(self):
-            return super().__hash__()
-        
-    d = {A():A(), 'b': {'123': torch.Tensor()}}
-    data = brute_dump_json(d)
-    print(data, type(data['b']['123']))
+    x = Union[int, str]
+    print(valueTypeCheck(3.14, (x, float)))

@@ -7,9 +7,9 @@ import re
 from inspect import isabstract, signature, Parameter, Signature
 from typing import (Type, _ProtocolMeta, ClassVar, Optional, Any, Tuple, Union, Dict, get_args, List, runtime_checkable, Protocol)
 from collections import OrderedDict
+from abc import ABC
 
 from common_utils.global_utils import should_run_web_server, is_verbose_mode, is_dev_mode
-from common_utils.base_clses import CrossModuleABC
 from common_utils.debug_utils import ComfyUILogger
 from common_utils.type_utils import get_origin, is_empty_method, format_data_for_console_log
 
@@ -173,7 +173,7 @@ def _pack_param(sig: Signature, args, kwargs)-> OrderedDict[str, Any]:
         
     return packed_params
 
-class AdvancedNodeBase(CrossModuleABC):
+class AdvancedNodeBase(ABC):
     '''
     This is an advance base class for customizing nodes.
     As ComfyUI is lack of documents on customization, inheritance from this class helps you to define nodes easily and correctly.
@@ -658,13 +658,13 @@ class AdvancedNodeBase(CrossModuleABC):
 
 
 
-class StableRendererNodeBase(AdvancedNodeBase):
-    '''For inheritance category of stable-renderer nodes.'''
+class StableRenderingNode(AdvancedNodeBase):
+    '''For inheritance category of stable-rendering nodes.'''
     
-    Category = 'stable-renderer'
+    Category = 'stable-rendering'
     
-    NameSpace = "StableRenderer"
+    NameSpace = "StableRendering"
     
 
 
-__all__.extend(['AdvancedNodeBase', 'StableRendererNodeBase'])
+__all__.extend(['AdvancedNodeBase', 'StableRenderingNode'])

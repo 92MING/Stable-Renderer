@@ -10,13 +10,14 @@ from types import MethodType
 from functools import partial
 
 from common_utils.debug_utils import ComfyUILogger
-from common_utils.global_utils import GetOrCreateGlobalValue
+from common_utils.global_utils import GetOrCreateGlobalValue, is_engine_looping
 from .k_diffusion import sampling as k_diffusion_sampling
 from .extra_samplers import uni_pc
 from comfy import model_management, model_base
 
 if TYPE_CHECKING:
     from comfyUI.types import ConvertedConditioning, SamplerCallback
+    from comfy.model_sampling import ModelSamplingProtocol
 
 
 def get_area_and_mult(conds, x_in, timestep_in):
@@ -624,17 +625,23 @@ def _call_no_arg_callback(c, data_form_upper):
     '''calling no-arg callback'''
     return c()
 
-def _call_1_arg_callback(callback, total_steps, dict_data_from_upper: dict):
+def _call_1_arg_callback(callback, total_steps, timesteps, sigmas: torch.Tensor, dict_data_from_upper: dict):
+    '''when callbacks with only 1 arg accepted is given, the `SamplingCallbackContext` is passed as the only arg.'''
     from comfyUI.types import SamplingCallbackContext
+    if isinstance(sigmas, torch.Tensor):
+        sigmas = sigmas.squeeze().tolist()  # type: ignore
     context = SamplingCallbackContext(step_index=dict_data_from_upper.pop("i"), 
                                       denoised=dict_data_from_upper.pop("denoised"), 
                                       noise=dict_data_from_upper.pop("x"), 
-                                      total_steps=total_steps)
+                                      total_steps=total_steps,
+                                      timesteps=timesteps,
+                                      sigmas=sigmas)    # type: ignore
     for key, val in dict_data_from_upper.items():
         setattr(context, key, val)
     return callback(context)
 
 def _call_4_arg_callback(callback, total_steps, dict_data_from_upper: dict):
+    '''This is the origin callback format for sampling methods: (i, denoised, x, total_steps)'''
     return callback(dict_data_from_upper["i"], dict_data_from_upper["denoised"], dict_data_from_upper["x"], total_steps)
 
 class KSAMPLER_METHOD(Sampler):
@@ -655,7 +662,8 @@ class KSAMPLER_METHOD(Sampler):
                callbacks: Union["SamplerCallback", Sequence["SamplerCallback"], None]=None,
                latent_image: Optional[torch.Tensor] = None,
                denoise_mask: Optional[torch.Tensor] = None,
-               disable_pbar: bool = False):
+               disable_pbar: bool = False,
+               timesteps: Optional[List[int]] = None):
         extra_args["denoise_mask"] = denoise_mask
         model_k = KSamplerX0Inpaint(model_wrap, sigmas)
         model_k.latent_image = latent_image # type: ignore
@@ -679,7 +687,7 @@ class KSAMPLER_METHOD(Sampler):
                 if callback_arg_count == 0: # no arguments
                     k_callbacks.append(partial(_call_no_arg_callback, callback))
                 elif callback_arg_count == 1: # pass context
-                    k_callbacks.append(partial(_call_1_arg_callback, callback, total_steps))
+                    k_callbacks.append(partial(_call_1_arg_callback, callback, total_steps, timesteps, sigmas))
                 elif callback_arg_count == 4:   # pass (i, denoised, x, total_steps)
                     k_callbacks.append(partial(_call_4_arg_callback, callback, total_steps))
                 else:
@@ -690,7 +698,7 @@ class KSAMPLER_METHOD(Sampler):
                                         sigmas, 
                                         extra_args=extra_args, 
                                         callbacks=k_callbacks, 
-                                        disable=disable_pbar, 
+                                        disable=disable_pbar,
                                         **self.extra_options)
         return samples
 
@@ -711,7 +719,7 @@ def get_ksampler_method(sampler_name, extra_options={}, inpaint_options={})->KSA
     elif sampler_name == "ddim":
         return get_ksampler_method("euler", extra_options=extra_options, inpaint_options={"random": True})
     elif sampler_name == "dpm_fast":
-        def dpm_fast_function(model, noise, sigmas, extra_args, callbacks, disable, **kwargs):
+        def dpm_fast_function(model, noise, sigmas, extra_args, callbacks, disable, timesteps, **kwargs):
             sigma_min = sigmas[-1]
             if sigma_min == 0:
                 sigma_min = sigmas[-2]
@@ -770,6 +778,7 @@ def sample(model: model_base.BaseModel,
            callbacks: Union["SamplerCallback", Sequence["SamplerCallback"], None] = None,
            disable_pbar: Optional[bool] = False,
            seed: Optional[int] = None,
+           timesteps: List[int]=None,
            **kwargs):
     positive = positive[:]
     negative = negative[:]
@@ -802,6 +811,8 @@ def sample(model: model_base.BaseModel,
 
     extra_args = {"cond":positive, "uncond":negative, "cond_scale": cfg, "model_options": model_options, "seed":seed}
 
+    if is_engine_looping():
+        disable_pbar = True
     samples = sampler.sample(model_wrap=model_wrap, 
                              sigmas=sigmas, 
                              extra_args=extra_args, 
@@ -809,7 +820,8 @@ def sample(model: model_base.BaseModel,
                              callbacks=callbacks, 
                              latent_image=latent_image, 
                              denoise_mask=denoise_mask, 
-                             disable_pbar=disable_pbar)
+                             disable_pbar=disable_pbar,
+                             timesteps=timesteps)
     return model.process_latent_out(samples.to(torch.float32))
 
 
@@ -830,7 +842,6 @@ def calculate_sigmas_scheduler(model, scheduler_name, steps):
     else:
         ComfyUILogger.error("error invalid scheduler" + scheduler_name)
     return sigmas
-
 
 class KSampler:
     SCHEDULERS = SCHEDULER_NAMES
@@ -857,7 +868,7 @@ class KSampler:
         self.denoise = denoise
         self.model_options = model_options
 
-    def calculate_sigmas(self, steps: int) -> torch.Tensor:
+    def calculate_sigmas(self, steps: int) -> Tuple[torch.Tensor, List[int]]:
         sigmas = None
 
         discard_penultimate_sigma = False
@@ -866,18 +877,21 @@ class KSampler:
             discard_penultimate_sigma = True
 
         sigmas = calculate_sigmas_scheduler(self.model, self.scheduler, steps)
-
+        s: "ModelSamplingProtocol" = self.model.model_sampling
+        timesteps = [s.timestep(sigma) for sigma in sigmas]
         if discard_penultimate_sigma:
             sigmas = torch.cat([sigmas[:-2], sigmas[-1:]])
-        return sigmas
+        return sigmas, timesteps    # type: ignore
 
     def set_steps(self, steps: int, denoise: float = None) -> None:
         self.steps = steps
         if denoise is None or denoise > 0.9999:
-            self.sigmas = self.calculate_sigmas(steps).to(self.device)
+            self.sigmas, self.timesteps = self.calculate_sigmas(steps)
+            self.sigmas = self.sigmas.to(self.device)
         else:
             new_steps = int(steps/denoise)
-            sigmas = self.calculate_sigmas(new_steps).to(self.device)
+            sigmas, self.timesteps = self.calculate_sigmas(new_steps)
+            sigmas = sigmas.to(self.device)
             self.sigmas = sigmas[-(steps + 1):]
 
     def sample(self,
@@ -947,4 +961,5 @@ class KSampler:
                       denoise_mask=denoise_mask, 
                       callbacks=callbacks, 
                       disable_pbar=disable_pbar, 
-                      seed=seed)
+                      seed=seed,
+                      timesteps=self.timesteps,)

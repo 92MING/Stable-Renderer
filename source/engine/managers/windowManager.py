@@ -120,5 +120,14 @@ class WindowManager(Manager):
         return self._size[0] / self._size[1]
     # endregion
 
+    # region public methods
+    def SetWindowVisible(self, visible:bool):
+        if visible:
+            glfw.show_window(self._window)
+        else:
+            glfw.hide_window(self._window)
+    
+    # endregion
+
 
 __all__ = ['WindowManager']

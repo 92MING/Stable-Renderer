@@ -6,8 +6,7 @@ from OpenGL.GL import Constant as GL_Const
 
 from dataclasses import dataclass
 from io import IOBase
-from common_utils.base_clses import NamedObj
-from ..runtime.engineObj import EngineObj
+from engine.runtime.base_clses import EngineObj, NamedObj
 from glm import vec1, vec2, vec3, vec4, mat2, mat3, mat4, mat2x3, mat2x4, mat3x2, mat3x4, mat4x2, mat4x3
 from typing import (get_args, Optional, Union, Dict, Any, ClassVar, TypeAlias, TypeVar, List, Type, Generic, ValuesView, 
                     get_origin, Annotated, Sequence, Tuple, TYPE_CHECKING)
@@ -372,7 +371,7 @@ class ShaderBufferStruct(ShaderStruct):
         Update the value in shader buffer.
         Override ShaderStruct.update
         '''
-        raise NotImplementedError
+        raise NotImplementedError   # TODO: implement this method
         self.bind()
         gl.glBindBufferBase(self._GL_BUFFER_TYPE, self._BindingPoint, self.gl_id)
 
@@ -384,7 +383,7 @@ class ShaderBufferStruct(ShaderStruct):
     
     def bind(self):
         gl.glBindBuffer(self._GL_BUFFER_TYPE, self.gl_id)
-# endregion
+
 
 
 class Shader(NamedObj, EngineObj):

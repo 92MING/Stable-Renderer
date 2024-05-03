@@ -60,7 +60,6 @@ class CameraController(Component):
         self.reset()
 
     def update(self):
-
         inputManager = self.engine.InputManager
         if inputManager.GetKeyDown(GLFW_Key.R):
             self.reset()

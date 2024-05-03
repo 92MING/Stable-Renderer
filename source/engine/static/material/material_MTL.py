@@ -1,131 +1,154 @@
-import os.path
-from .material import Material, DefaultTextureType
-from typing import Tuple, Dict, TYPE_CHECKING, Optional
-from ..texture import Texture
+import os
+
+from attr import attrib, attrs
+from typing import Tuple, Dict, TYPE_CHECKING, Optional, List, Union
 from common_utils.global_utils import GetGlobalValue
+from .material import Material, DefaultTextureType
+from ..texture import Texture
+
 if TYPE_CHECKING:
     from engine.engine import Engine
 
+@attrs(eq=False, repr=False)
 class Material_MTL(Material):
     '''Special Material class for loading mtl file. It is used for loading mtl file only.'''
 
-    _Format = 'mtl'
+    Format = 'mtl'
 
-    _realName: Optional[str] = None
+    real_name: Optional[str] = attrib(default=None)
     '''Real name in .mtl file'''
+    ka: Tuple[float, float, float] = attrib(default=(0.0, 0.0, 0.0))
+    '''Ambient color'''
+    kd: Tuple[float, float, float] = attrib(default=(0.0, 0.0, 0.0))
+    '''Diffuse color'''
+    ks: Tuple[float, float, float] = attrib(default=(0.0, 0.0, 0.0))
+    '''Specular color'''
+    ns: float = attrib(default=0.0)
+    '''Specular exponent'''
+    ni: float = attrib(default=0.0)
+    '''Optical density'''
+    d: float = attrib(default=1.0)
+    '''Dissolve'''
+    illum: int = attrib(default=0)
+    '''Illumination method'''
 
-    @property
-    def realName(self):
-        '''the name specified in "newmtl" line in mtl file'''
-        return self._realName
-
-    def _getTex(self, path, name):
-        tex = Texture.Find(name.split('.')[0])
-        if tex is None:
-            tex = Texture.Load(path=path)
-        return tex
-
-    def load(self, dirPath:str, dataLines:Tuple[str,...]):
-        '''
-        Different to super().load(self, path), this Material_MTL will load the data from a list of strings(lines) directly.
-        The "dirPath" is the folder path of the mtl file. It is for searching the texture files.
-        This function should be used as internal method only.
-        '''
+    @classmethod
+    def _Parse(cls, 
+               dataLines: Union[Tuple[str, ...], List[str]],
+               data_paths: List[str], 
+               real_name: Optional[str] = None,
+               add_textures=True,
+               is_debug_mode=False):
+        data = {}
+        textures = []   # [(tex, type), ...]
+        
+        def _search_tex(filename):
+            alias = filename.split('.')[0]
+            for path in data_paths:
+                if os.path.exists(os.path.join(path, filename)):
+                    return Texture.Load(os.path.join(path, filename), alias=alias)
+            return None
+        
         for line in dataLines:
             if line.startswith('#'): continue
             elif line.startswith('Ns'):
-                # TODO: specular exponent
-                pass
+                data['ns'] = float(line.split(' ')[1])
             elif line.startswith('Ka'):
-                # TODO: ambient color
-                pass
+                data['ka'] = tuple(map(float, line.split(' ')[1:]))
             elif line.startswith('Kd'):
-                # TODO: diffuse color
-                pass
+                data['kd'] = tuple(map(float, line.split(' ')[1:]))
             elif line.startswith('Ks'):
-                # TODO: specular color
-                pass
+                data['ks'] = tuple(map(float, line.split(' ')[1:]))
             elif line.startswith('Ni'):
-                # TODO: optical density
-                pass
+                data['ni'] = float(line.split(' ')[1])
             elif line.startswith('d'):
-                # TODO: dissolve
-                pass
+                data['d'] = float(line.split(' ')[1])
             elif line.startswith('illum'):
-                # TODO: illumination method
-                pass
-            elif line.startswith('map_Kd'):
+                data['illum'] = int(line.split(' ')[1])
+            elif add_textures and line.startswith('map_Kd'):
                 name = line.split(' ')[1] # texture file name, e.g. "texture.png"
-                path = os.path.join(dirPath, name)
-                if os.path.exists(path):
-                    self.addDefaultTexture(self._getTex(path, name), DefaultTextureType.DiffuseTex)
-            elif line.startswith('map_Ks'):
+                if tex:=_search_tex(name):
+                    textures.append((tex, DefaultTextureType.DiffuseTex))
+            elif add_textures and line.startswith('map_Ks'):
                 name = line.split(' ')[1]
-                path = os.path.join(dirPath, name)
-                if os.path.exists(path):
-                    self.addDefaultTexture(self._getTex(path, name), DefaultTextureType.SpecularTex)
-            elif line.startswith('map_Ns'):
-                # TODO: specular highlight
-                pass
-            elif line.startswith('map_d'):
+                if tex:=_search_tex(name):
+                    textures.append((tex, DefaultTextureType.SpecularTex))
+            elif add_textures and line.startswith('map_d'):
                 name = line.split(' ')[1]
-                path = os.path.join(dirPath, name)
-                if os.path.exists(path):
-                    self.addDefaultTexture(self._getTex(path, name), DefaultTextureType.AlphaTex)
-            elif line.startswith('map_bump'):
+                if tex:=_search_tex(name):
+                    textures.append((tex, DefaultTextureType.AlphaTex))
+            elif add_textures and line.startswith('map_bump'):
                 name = line.split(' ')[1]
-                path = os.path.join(dirPath, name)
-                if os.path.exists(path):
-                    self.addDefaultTexture(self._getTex(path, name), DefaultTextureType.NormalTex)
+                if tex:=_search_tex(name):
+                    textures.append((tex, DefaultTextureType.NormalTex))
+        if is_debug_mode:
+            mat = cls.DefaultDebugMaterial(**data, real_name=real_name)
+        else:
+            mat = cls.DefaultOpaqueMaterial(**data, real_name=real_name)
+        for tex, texType in textures:
+            mat.addDefaultTexture(tex, texType)
+        return mat
 
     @classmethod
-    def Load(cls, path) -> Tuple['Material_MTL']:
+    def Load(cls, 
+             path: str, 
+             extra_paths: Union[List[str], Tuple[str, ...], str, None] = None,
+             add_textures = True) -> Tuple['Material_MTL']:
         '''
         Load a .mtl file and return a tuple of Material_MTL objects.
 
         Args:
-            path: path of the .mtl file
-
+            - path: path of the .mtl file
+            - extra_paths: extra paths for searching textures (in case `add_textures` is True)
+            - add_textures: whether to add textures to the material
         Returns:
             tuple of Material_MTL objects(since a .mtl file has multiple materials)
         '''
-        path, _ = cls._GetPathAndName(path)
+        
+        if isinstance(extra_paths, str):
+            extra_paths = [extra_paths]
+        extra_paths = extra_paths or []
+        
         dirPath = os.path.dirname(path)
-
+        
         with open(path, 'r') as f:
             lines = [line.strip('\n') for line in f.readlines()]
             materials = []
-            currMatDataLines = []
-            currMat: Optional[Material_MTL] = None
-            engine: 'Engine' = GetGlobalValue('_ENGINE_SINGLETON')
+            current_data_lines = []
+            all_paths = [dirPath] + list(extra_paths)
+            real_name: str = None
+            
+            engine: 'Engine' = GetGlobalValue('__ENGINE_INSTANCE__', None)  # type: ignore
+            if not engine:
+                debug_mode = False
+            else:
+                debug_mode = engine.IsDebugMode
 
             for line in lines:
-                if line.startswith('#') or line in ("\n", ""): continue
+                if line.startswith('#') or line in ("\n", ""): 
+                    continue
                 elif line.startswith('newmtl'):
-
                     # save the previous material
-                    if currMat is not None:
-                        currMat.load(dirPath, tuple(currMatDataLines))
-                        currMatDataLines.clear()
+                    if current_data_lines:
+                        materials.append(cls._Parse(dataLines=current_data_lines, 
+                                                    data_paths=all_paths, 
+                                                    real_name=real_name, 
+                                                    add_textures=add_textures,
+                                                    is_debug_mode=debug_mode))
+                        current_data_lines.clear()
 
-                    # find a proper name for the new material
-                    realMatName = line.split(' ')[1]
-                    matName = realMatName
-                    count = 0
-                    while matName in Material.AllInstances():
-                        count += 1
-                        matName = f'{matName}_{count}'
-
-                    currMat = cls.Default_Opaque_Material(name=matName) if not engine.IsDebugMode else cls.Debug_Material(name=matName)
-                    currMat._realName = realMatName
-                    materials.append(currMat)
-
-                elif currMat is not None:
-                    currMatDataLines.append(line)
+                    # new name for the next new material
+                    real_name = line.split(' ')[1]
+                else:
+                    current_data_lines.append(line)
 
             # save the last material
-            if currMat is not None:
-                currMat.load(dirPath, tuple(currMatDataLines))
+            if current_data_lines:
+                materials.append(cls._Parse(dataLines=current_data_lines, 
+                                            data_paths=all_paths, 
+                                            real_name=real_name, 
+                                            add_textures=add_textures,
+                                            is_debug_mode=debug_mode))
 
             return tuple(materials)
 
