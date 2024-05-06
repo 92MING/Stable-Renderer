@@ -1373,7 +1373,21 @@ class SetLatentNoiseMask:
         s["noise_mask"] = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1]))
         return (s,)
 
-def common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent, denoise=1.0, disable_noise=False, start_step=None, last_step=None, force_full_denoise=False):
+def common_ksampler(model: "ModelPatcher",
+                    seed: int, 
+                    steps: int, 
+                    cfg: float, 
+                    sampler_name: str, 
+                    scheduler: "Schedulers", 
+                    positive: "Conditioning", 
+                    negative: "Conditioning", 
+                    latent: Dict[str, Any], 
+                    denoise=1.0, 
+                    disable_noise=False, 
+                    start_step=None, 
+                    last_step=None, 
+                    force_full_denoise=False,
+                    **kwargs):
     latent_image: torch.Tensor = latent["samples"]
     if latent.get('noise'):
         noise = latent['noise']
@@ -1396,7 +1410,7 @@ def common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, 
         disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
                                   denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step, # type: ignore
-                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed) # type: ignore
+                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed, **kwargs) # type: ignore
     out = latent.copy()
     out["samples"] = samples
     return (out, )
@@ -1415,7 +1429,8 @@ def custom_ksampler(model: "ModelPatcher",
                     start_step: Optional[int] = None,
                     last_step: Optional[int] = None,
                     force_full_denoise: bool = False,
-                    callbacks: List[Callable] = []) -> Tuple[Dict[str, Any]]:
+                    callbacks: List[Callable] = [],
+                    **kwargs) -> Tuple[Dict[str, Any]]:
     latent_image = latent["samples"]
     match noise_option:
         case 'disable':
@@ -1439,7 +1454,8 @@ def custom_ksampler(model: "ModelPatcher",
         disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
                                   denoise=denoise, disable_noise=(noise_option == 'disable'), start_step=start_step, last_step=last_step, # type: ignore
-                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar, seed=seed)
+                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callbacks=callbacks, disable_pbar=disable_pbar,  # type: ignore
+                                  seed=seed, **kwargs)
     out = latent.copy()
     out["samples"] = samples
     return (out, )

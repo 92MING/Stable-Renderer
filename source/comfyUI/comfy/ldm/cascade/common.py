@@ -39,7 +39,7 @@ class OptimizedAttention(nn.Module):
 
         self.out_proj = operations.Linear(c, c, bias=True, dtype=dtype, device=device)
 
-    def forward(self, q, k, v):
+    def forward(self, q, k, v, **kwargs):
         q = self.to_q(q)
         k = self.to_k(k)
         v = self.to_v(v)
@@ -54,7 +54,7 @@ class Attention2D(nn.Module):
         self.attn = OptimizedAttention(c, nhead, dtype=dtype, device=device, operations=operations)
         # self.attn = nn.MultiheadAttention(c, nhead, dropout=dropout, bias=True, batch_first=True, dtype=dtype, device=device)
 
-    def forward(self, x, kv, self_attn=False):
+    def forward(self, x, kv, self_attn=False, **kwargs):
         orig_shape = x.shape
         x = x.view(x.size(0), x.size(1), -1).permute(0, 2, 1)  # Bx4xHxW -> Bx(HxW)x4
         if self_attn:
@@ -70,7 +70,7 @@ def LayerNorm2d_op(operations):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
 
-        def forward(self, x):
+        def forward(self, x, **kwargs):
             return super().forward(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
     return LayerNorm2d
 
@@ -81,7 +81,7 @@ class GlobalResponseNorm(nn.Module):
         self.gamma = nn.Parameter(torch.zeros(1, 1, 1, dim, dtype=dtype, device=device))
         self.beta = nn.Parameter(torch.zeros(1, 1, 1, dim, dtype=dtype, device=device))
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         Gx = torch.norm(x, p=2, dim=(1, 2), keepdim=True)
         Nx = Gx / (Gx.mean(dim=-1, keepdim=True) + 1e-6)
         return self.gamma.to(device=x.device, dtype=x.dtype) * (x * Nx) + self.beta.to(device=x.device, dtype=x.dtype) + x
@@ -101,7 +101,7 @@ class ResBlock(nn.Module):
             operations.Linear(c * 4, c, dtype=dtype, device=device)
         )
 
-    def forward(self, x, x_skip=None):
+    def forward(self, x, x_skip=None, **kwargs):
         x_res = x
         x = self.norm(self.depthwise(x))
         if x_skip is not None:
@@ -121,7 +121,7 @@ class AttnBlock(nn.Module):
             operations.Linear(c_cond, c, dtype=dtype, device=device)
         )
 
-    def forward(self, x, kv):
+    def forward(self, x, kv, **kwargs):
         kv = self.kv_mapper(kv)
         x = x + self.attention(self.norm(x), kv, self_attn=self.self_attn)
         return x
@@ -139,7 +139,7 @@ class FeedForwardBlock(nn.Module):
             operations.Linear(c * 4, c, dtype=dtype, device=device)
         )
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x = x + self.channelwise(self.norm(x).permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
         return x
 
@@ -152,7 +152,7 @@ class TimestepBlock(nn.Module):
         for cname in conds:
             setattr(self, f"mapper_{cname}", operations.Linear(c_timestep, c * 2, dtype=dtype, device=device))
 
-    def forward(self, x, t):
+    def forward(self, x, t, **kwargs):
         t = t.chunk(len(self.conds) + 1, dim=1)
         a, b = self.mapper(t[0])[:, :, None, None].chunk(2, dim=1)
         for i, c in enumerate(self.conds):

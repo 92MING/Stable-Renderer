@@ -1,12 +1,18 @@
 import glfw
 import OpenGL.GL as gl
 
+from typing import Tuple, TYPE_CHECKING
+
 from .manager import Manager
 from .renderManager import RenderManager
 from common_utils.data_struct import DelayEvent, Event
-from typing import Tuple
-from ..static import Color
+from common_utils.constants import NAME, VERSION
+from common_utils.global_utils import is_editor_mode
+from engine.static import Color
 
+if TYPE_CHECKING:
+    from ui.components import GamePreview
+    from ui.main import MainWindow
 
 
 class WindowManager(Manager):
@@ -14,18 +20,31 @@ class WindowManager(Manager):
     FrameEndFuncOrder = RenderManager.FrameEndFuncOrder + 1 # swap buffer should be called after render
     ReleaseFuncOrder = 999 # terminate glfw should be called at the end
 
-    def __init__(self, title, size, windowResizable = False, bgColor=Color.CLEAR):
+    _glfw_window: int
+    _pyqt_window: 'GamePreview'
+    _pyqt_main_window: 'MainWindow'
+
+    def __init__(self, 
+                 title: str|None, 
+                 size: tuple[int, int], 
+                 windowResizable: bool = False, 
+                 bgColor=Color.CLEAR):
         super().__init__()
+        
         self._bgColor = bgColor
-        self._init_glfw(title, size, windowResizable)
+        self._title = title or f"{NAME} v{VERSION}"
+        self._size = size
+        self._resizable = windowResizable
+        
+        if is_editor_mode():
+            self._init_pyqt()
+        else:
+            self._init_glfw()
         self._onWindowResize = DelayEvent(int, int)
         self._onWindowResize.addListener(lambda width, height: gl.glViewport(0, 0, width, height))
         gl.glClearColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a)
 
-    def _init_glfw(self, winTitle, winSize, winResizable):
-        self._title = winTitle
-        self._size = winSize
-        self._resizable = winResizable
+    def _init_glfw(self):
         glfw.init()
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
@@ -36,14 +55,25 @@ class WindowManager(Manager):
         glfw.window_hint(glfw.DEPTH_BITS, 24)
         glfw.window_hint(glfw.SAMPLES, 4)  # MSAA
         glfw.window_hint(glfw.STENCIL_BITS, 8)
-        self._window = glfw.create_window(winSize[0], winSize[1], winTitle, None, None)
-        if not self._window:
+        self._glfw_window = glfw.create_window(self._size[0], self._size[1], self._title, None, None)
+        if not self._glfw_window:
             glfw.terminate()
             exit()
-        glfw.make_context_current(self._window)
-        glfw.set_window_attrib(self._window, glfw.RESIZABLE, winResizable)
-        glfw.set_window_size_callback(self._window, self._resizeCallback)
+        glfw.make_context_current(self._glfw_window)
+        glfw.set_window_attrib(self._glfw_window, glfw.RESIZABLE, self._resizable)
+        glfw.set_window_size_callback(self._glfw_window, self._resizeCallback)
     
+    def _init_pyqt(self):
+        from ui.components import GamePreview
+        from ui.main import MainWindow
+        if not hasattr(MainWindow, '__instance__') or not MainWindow.__instance__:    # type: ignore
+            raise ValueError("Editor UI is not yet initialized. For running editor mode, please run engine through ui's entry point.")
+        if not hasattr(GamePreview, '__instance__') or not GamePreview.__instance__:    # type: ignore
+            raise ValueError("Editor UI is not yet initialized. For running editor mode, please run engine through ui's entry point.")
+        self._pyqt_window: GamePreview = GamePreview.__instance__ # type: ignore
+        self._pyqt_main_window: MainWindow = MainWindow.__instance__     # type: ignore
+        self._title = self._pyqt_main_window.title_bar.title.text()
+        
     def _resizeCallback(self, window, width, height):
         self._onWindowResize.invoke(width, height)
 
@@ -70,7 +100,7 @@ class WindowManager(Manager):
     @WindowResizable.setter
     def WindowResizable(self, value):
         self._resizable = value
-        glfw.set_window_attrib(self._window, glfw.RESIZABLE, value)
+        glfw.set_window_attrib(self._glfw_window, glfw.RESIZABLE, value)
     
     @property
     def OnWindowResize(self)->Event:
@@ -78,7 +108,7 @@ class WindowManager(Manager):
     
     @property
     def Window(self):
-        return self._window
+        return self._glfw_window
     
     @property
     def Title(self):
@@ -90,7 +120,7 @@ class WindowManager(Manager):
     
     def SetWindowTitle(self, title):
         self._title = title
-        glfw.set_window_title(self._window, title)
+        glfw.set_window_title(self._glfw_window, title)
     
     @property
     def WindowSize(self):
@@ -104,7 +134,7 @@ class WindowManager(Manager):
     
     def SetWindowSize(self, width: int, height: int):
         self._size = (width, height)
-        glfw.set_window_size(self._window, *self._size)
+        glfw.set_window_size(self._glfw_window, *self._size)
         self.engine.RuntimeManager.Update_UBO_ScreenSize() # update UBO data
     
     @property
@@ -123,9 +153,9 @@ class WindowManager(Manager):
     # region public methods
     def SetWindowVisible(self, visible:bool):
         if visible:
-            glfw.show_window(self._window)
+            glfw.show_window(self._glfw_window)
         else:
-            glfw.hide_window(self._window)
+            glfw.hide_window(self._glfw_window)
     
     # endregion
 

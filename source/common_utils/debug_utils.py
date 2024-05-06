@@ -4,7 +4,7 @@ import logging
 import colorama
 import warnings
 
-from typing import ClassVar, Union
+from typing import ClassVar, Union, Any
 from functools import partial
 from concurrent_log_handler import ConcurrentTimedRotatingFileHandler as _RotatingFileHandler
 
@@ -14,8 +14,8 @@ if __name__ == '__main__':  # for debugging
     sys.path.append(_proj_path)
     __package__ = 'common_utils'
 
-from .global_utils import GetEnv, is_dev_mode, is_editor_mode
-
+from .global_utils import GetEnv, is_dev_mode, is_editor_mode, GetOrCreateGlobalValue
+from .data_struct import Event
 
 # region internal
 if os.name == "nt":
@@ -35,10 +35,13 @@ _default_formatter = logging.Formatter(fmt=_default_log_format, datefmt=_default
 
 _root_logger = logging.getLogger()
 
+
+LogEvent: Event = GetOrCreateGlobalValue('__LOGGING_EVENT__', Event, logging.LogRecord)
+'''Event(LogRecord), invoke when logs created.'''
+
 class _PassToRootLogger(logging.Logger):
     '''
     Logger that do nothing when calling, and pass a formatted record to root logger.
-    
     No matter it is propagated or not, its formatted msg will always pass to root logger.
     '''
     
@@ -115,6 +118,11 @@ class _ConcurrentTimedRotatingFileHandler(_RotatingFileHandler, _RootHandler):
         record.msg = self._format(record)
         super().emit(record)
 
+class _LogEventHandler(logging.Handler):
+    '''in charge to invoke callback when log created.'''
+    def emit(self, record: logging.LogRecord):
+        LogEvent.invoke(record)
+
 if is_dev_mode():
     if is_editor_mode():
         _root_handler = _ColorStreamRootHandler()    # TODO: logs should print on UI directly
@@ -136,7 +144,7 @@ else:
 _log_level: str = GetEnv('LOG_LEVEL', 'DEBUG' if is_dev_mode() else 'INFO')  # type: ignore
 _root_handler.setLevel(_log_level)
 
-_root_logger.handlers = [_root_handler, ]
+_root_logger.handlers = [_LogEventHandler(), _root_handler]
 
 class _ModifiedLogger(logging.Logger):
     '''just a type hint for logger with success method.'''
@@ -181,4 +189,43 @@ DefaultLogger: _ModifiedLogger = _logger_modify(_root_logger)
 '''Default logger. You can use it for any purpose.'''
 
 
-__all__ = ['get_log_level_by_name', 'EditorLogger', 'EngineLogger', 'ComfyUILogger', 'DefaultLogger']
+def format_data_for_console_log(data: Any, detail_mode:bool=False)->str:
+    '''
+    Since sometimes printing data is too long for review,
+    this method will format the data to a more readable format.
+    
+    Args:
+        - data: the data to be formatted. It can be any type.
+        - detail_mode: if True, the inner data of the origin data will be shown. Otherwise the formatted data will be more short.
+    '''
+    data_str = ""
+    if isinstance(data, dict):
+        data_str += "{"
+        for k, v in data.items():
+            data_str += f"{k}: "
+            formatted = format_data_for_console_log(v, detail_mode=detail_mode)
+            if not detail_mode and len(formatted) > 100:
+                formatted = f'`{formatted[:95]}...`'
+            data_str += f"{formatted}, "
+        data_str += "}"
+    elif isinstance(data, (list, tuple)):
+        data_str += "["
+        for v in data:
+            formatted = format_data_for_console_log(v, detail_mode=detail_mode)
+            if not detail_mode and len(formatted) > 100:
+                formatted = f'`{formatted[:95]}...`'
+            data_str += f"{formatted}, "
+        data_str += "]"
+    else:
+        data_str = str(data)
+        if len(data_str) > 100 and not detail_mode:
+            data_str = f'`{data_str[:95]}...`'
+    
+    return data_str.replace('\n', ' ')
+
+
+__all__ = ['get_log_level_by_name', 'EditorLogger', 'EngineLogger', 'ComfyUILogger', 'DefaultLogger', 'format_data_for_console_log', 'LogEvent']
+
+
+
+

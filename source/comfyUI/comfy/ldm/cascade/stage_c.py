@@ -32,7 +32,7 @@ class UpDownBlock2d(nn.Module):
         mapping = operations.Conv2d(c_in, c_out, kernel_size=1, dtype=dtype, device=device)
         self.blocks = nn.ModuleList([interpolation, mapping] if mode == 'up' else [mapping, interpolation])
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         for block in self.blocks:
             x = block(x)
         return x

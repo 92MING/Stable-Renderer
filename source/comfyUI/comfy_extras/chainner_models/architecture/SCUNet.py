@@ -81,7 +81,7 @@ class WMSA(nn.Module):
         )
         return attn_mask
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         """Forward pass of Window Multi-head Self-attention module.
         Args:
             x: input tensor with shape of [b h w c];
@@ -194,7 +194,7 @@ class Block(nn.Module):
             nn.Linear(4 * input_dim, output_dim),
         )
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x = x + self.drop_path(self.msa(self.ln1(x)))
         x = x + self.drop_path(self.mlp(self.ln2(x)))
         return x
@@ -257,7 +257,7 @@ class ConvTransBlock(nn.Module):
             nn.Conv2d(self.conv_dim, self.conv_dim, 3, 1, 1, bias=False),
         )
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         conv_x, trans_x = torch.split(
             self.conv1_1(x), (self.conv_dim, self.trans_dim), dim=1
         )
@@ -428,7 +428,7 @@ class SCUNet(nn.Module):
         x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h), "reflect")
         return x
 
-    def forward(self, x0):
+    def forward(self, x0, **kwargs):
         h, w = x0.size()[-2:]
         x0 = self.check_image_size(x0)
 

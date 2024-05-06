@@ -234,7 +234,7 @@ class ControlLoraOps:
             self.down = None
             self.bias = None
 
-        def forward(self, input):
+        def forward(self, input, **kwargs):
             weight, bias = comfy.ops.cast_bias_weight(self, input)
             if self.up is not None:
                 return torch.nn.functional.linear(input, 
@@ -275,7 +275,7 @@ class ControlLoraOps:
             self.down = None
 
 
-        def forward(self, input):
+        def forward(self, input, **kwargs):
             weight, bias = comfy.ops.cast_bias_weight(self, input)
             if self.up is not None:
                 return torch.nn.functional.conv2d(input, 

@@ -569,8 +569,11 @@ globals()['MODEL'] = Annotated["ModelPatcher", AnnotatedParam(origin="ModelPatch
 # since Annotated cannot read forward type, we need to firstly define it(so as to make IDE know the real type), and override it in `globals()`
 
 IMAGE: TypeAlias = Annotated[Tensor, AnnotatedParam(origin=Tensor, comfy_name='IMAGE')]
-'''Type hint for ComfyUI's built-in type `IMAGE`.
-When multiple imgs are given, they will be concatenated as 1 tensor by ComfyUI.'''
+'''
+Type hint for ComfyUI's built-in type `IMAGE`.
+shape=(Batch index, channel count, width, height). For single image, batch index=1
+When multiple imgs are given, they will be concatenated as 1 tensor by ComfyUI.
+'''
 
 MASK: TypeAlias = Annotated[Tensor, AnnotatedParam(origin=Tensor, comfy_name='MASK')]
 '''Type hint for ComfyUI's built-in type `MASK`.

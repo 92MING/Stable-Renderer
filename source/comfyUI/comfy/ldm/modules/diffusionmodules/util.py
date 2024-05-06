@@ -15,6 +15,7 @@ import torch.nn as nn
 import numpy as np
 from einops import repeat, rearrange
 from common_utils.debug_utils import ComfyUILogger
+from common_utils.type_utils import check_func_has_kwarg
 from comfy.ldm.util import instantiate_from_config
 
 class AlphaBlender(nn.Module):
@@ -77,6 +78,7 @@ class AlphaBlender(nn.Module):
         x_spatial,
         x_temporal,
         image_only_indicator=None,
+        **kwargs
     ) -> torch.Tensor:
         alpha = self.get_alpha(image_only_indicator, x_spatial.device)
         x = (
@@ -173,8 +175,7 @@ def extract_into_tensor(a, t, x_shape):
     out = a.gather(-1, t)
     return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
-
-def checkpoint(func, inputs, params, flag):
+def checkpoint(func, inputs, params, flag, extra_args={}):
     """
     Evaluate a function without caching intermediate activations, allowing for
     reduced memory at the expense of extra compute in the backward pass.
@@ -186,10 +187,21 @@ def checkpoint(func, inputs, params, flag):
     """
     if flag:
         args = tuple(inputs) + tuple(params)
-        return CheckpointFunction.apply(func, len(inputs), *args)
+        sig, has_kwargs = check_func_has_kwarg(func, return_sig=True)
+        if has_kwargs:
+            return CheckpointFunction.apply(func, len(inputs), *args, **extra_args)
+        else:
+            remaining_keys = list(sig.parameters.keys())[len(args):]
+            extra_args = {k: extra_args[k] for k in remaining_keys if k in extra_args}
+            return CheckpointFunction.apply(func, len(inputs), *args, **extra_args)
     else:
-        return func(*inputs)
-
+        sig, has_kwargs = check_func_has_kwarg(func, return_sig=True)
+        if has_kwargs:
+            return func(*inputs, **extra_args)
+        else:
+            remaining_keys = list(sig.parameters.keys())[len(inputs):]
+            extra_args = {k: extra_args[k] for k in remaining_keys if k in extra_args}
+            return func(*inputs, **extra_args)
 
 class CheckpointFunction(torch.autograd.Function):
     @staticmethod
@@ -294,7 +306,7 @@ class HybridConditioner(nn.Module):
         self.concat_conditioner = instantiate_from_config(c_concat_config)
         self.crossattn_conditioner = instantiate_from_config(c_crossattn_config)
 
-    def forward(self, c_concat, c_crossattn):
+    def forward(self, c_concat, c_crossattn, **kwargs):
         c_concat = self.concat_conditioner(c_concat)
         c_crossattn = self.crossattn_conditioner(c_crossattn)
         return {'c_concat': [c_concat], 'c_crossattn': [c_crossattn]}

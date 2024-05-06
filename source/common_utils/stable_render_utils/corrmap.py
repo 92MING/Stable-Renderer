@@ -10,7 +10,7 @@ from attr import attrs, attrib
 from torch import Tensor
 from typing import Literal, TypeAlias
 from ..global_utils import GetOrAddGlobalValue, SetGlobalValue
-from .trace import IDMap
+from .corresponder import IDMap
 
 
 if not GetOrAddGlobalValue('__TAICHI_INITED__', False):
@@ -20,7 +20,7 @@ if not GetOrAddGlobalValue('__TAICHI_INITED__', False):
 @ti.kernel
 def _taichi_find_dup_id_and_treat(id_map: ti.template(), value_map: ti.template(), mode: int):
     '''
-    id_map: shape = (height * width, 2), cell = (map_index, vertex_id)
+    id_map: flattened id_map. shape = (height * width, 2), cell = (map_index, vertex_id)
     value_map: shape = (height * width, channel_count), cell = rgba(or rgb)
     
     - replace(mode == 0): 
@@ -29,12 +29,12 @@ def _taichi_find_dup_id_and_treat(id_map: ti.template(), value_map: ti.template(
         average all values that have the same id
     '''
     if mode == 0:
-            for i in range(id_map.shape[0]):
-                if id_map[i][0] == -1:
-                    continue
-                for j in range(i+1, id_map.shape[0]):
-                    if id_map[i][0] == id_map[j][0] and id_map[i][1] == id_map[j][1]:   # same id
-                        id_map[j][0] = -1
+        for i in range(id_map.shape[0]):
+            if id_map[i][0] == -1:
+                continue
+            for j in range(i+1, id_map.shape[0]):
+                if id_map[i][0] == id_map[j][0] and id_map[i][1] == id_map[j][1]:   # same id
+                    id_map[j][0] = -1
     else:
         for i in range(id_map.shape[0]):
             if id_map[i][0] == -1:
@@ -52,7 +52,7 @@ def _find_dup_index_and_treat(id_map: Tensor, color_frame: Tensor, mode: Literal
     '''
     remove the cells that have the same id(since the second appearance) or average them.
     
-    id_map: shape = (height * width, 3), cell = (i, map_index, vertex_id)
+    id_map: flattened. shape = (height * width, 3), cell = (i, map_index, vertex_id)
     color_frame: shape = (height * width, channel_count + 1), cell = (i, ...rgba(or rgb))
     '''
     mode_int = 0 if mode == 'replace' else 1
@@ -93,7 +93,7 @@ Mode to update the value in the map.
 
 
 @attrs
-class CorrespondenceMap:
+class CorrespondMap:
     
     k: int = attrib(default=3, kw_only=True)
     '''cache size. View directions are split into k*k parts.'''
@@ -103,39 +103,48 @@ class CorrespondenceMap:
     materialID: int|None = attrib(default=None, kw_only=True)
     '''for matching the cells belonging to this map. If None, it means all cells are matched.'''
     
-    width: int = attrib(default=512, kw_only=True)
-    '''default width of the map. This is only for load/dump, it has no relationship with the size of the screen/window.'''
     height: int = attrib(default=512, kw_only=True)
     '''default height of the map. This is only for load/dump, it has no relationship with the size of the screen/window.'''
+    width: int = attrib(default=512, kw_only=True)
+    '''default width of the map. This is only for load/dump, it has no relationship with the size of the screen/window.'''
     channel_count: int = attrib(default=4, kw_only=True)
     '''rgba, rgb, etc.'''
     
     _values: Tensor = attrib(init=False)
-    ''' shape = (k^2(map_index), width * height(vertex id), channel_count(color)), vertexID = self.height * y + x'''
+    ''' shape = (k^2(map_index), height*width(vertex id), channel_count(color)), vertexID = self.width * y + x'''
     _writtens: Tensor = attrib(init=False)
     '''
-    shape = (k^2(map_index), width * height(vertex id), 1(bool)), vertexID = self.height * y + x.
+    shape = (k^2(map_index), height*width(vertex id), 1(bool)), vertexID = self.width * y + x.
     This represents whether a blob has values or not (since the real value can also be all zeros)
     '''
+    _post_attention_values: dict[int, Tensor] = attrib(init=False, factory=dict)
+    _post_attention_written: dict[int, Tensor] = attrib(init=False, factory=dict)
     
     def __attrs_post_init__(self):
-        self._values = torch.zeros(self.k*self.k, self.width * self.height, self.channel_count, dtype=torch.float32)
-        self._writtens = torch.zeros(self.k*self.k, self.width * self.height, dtype=torch.bool)
+        self._values = torch.zeros(self.k*self.k, self.height * self.width, self.channel_count, dtype=torch.float32)
+        self._writtens = torch.zeros(self.k*self.k, self.height * self.width, dtype=torch.bool)
         
     def __getitem__(self, index):
+        '''
+        You can directly access the color value of the index-th view direction. (height, width, channel_count).
+        This is an alias of `self._values[index]`.
+        '''
         return self._values[index]
     
-    def get_map(self, index: int, width:int|None=None, height:int|None=None):
-        '''return the color map of the index-th view direction. (height, width, channel_count)'''
-        if width is None:
-            width = self.width
+    def get_map(self, index: int, height:int|None=None, width:int|None=None, ):
+        '''
+        Return the color map of the index-th view direction. (height, width, channel_count).
+        The returning map will reshape to the given width and height if they are not None, otherwise, it will keep the original size.
+        '''
         if height is None:
             height = self.height
-        if width * height < self.width * self.height:   # means only the first part of the map is used
+        if width is None:
+            width = self.width
+        if height*width < self.height * self.width:   # means only the first part of the map is used
             return self._values[index, :width*height].view(height, width, self.channel_count)
         return self._values[index].view(height, width, self.channel_count)
     
-    def get_maps(self, width:int|None=None, height:int|None=None):
+    def get_maps(self, height:int|None=None, width:int|None=None):
         '''return (k*k, height, width, channel_count)'''
         if width is None:
             width = self.width
@@ -153,8 +162,8 @@ class CorrespondenceMap:
                ignore_obj_mat_id: bool=False):
         '''
         Args:
-            - color_frames: shape = (width, height, channel_count)
-            - id_maps: shape = (width, height, 4), cell = (objID, materialID, map_index, vertexID), where vertexID = self.height * y + x
+            - color_frames: shape = (height, width, channel_count)
+            - id_maps: shape = (height, width, 4), cell = (objID, materialID, map_index, vertexID), where vertexID = self.width * y + x
             - mode:
                 - replace: 
                     replace the old value with the new value
@@ -180,9 +189,9 @@ class CorrespondenceMap:
                 id_maps[i] = m.tensor
                 
         for color_frame, id_map in zip(color_frames, id_maps):
-            self._update(color_frame, id_map, mode, ignore_obj_mat_id)
+            self._update(color_frame, id_map, mode, ignore_obj_mat_id)  # type: ignore
     
-    def _update(self: "CorrespondenceMap", 
+    def _update(self: "CorrespondMap", 
                 color_frame: Tensor, 
                 id_map: Tensor, 
                 mode: UpdateMode,
@@ -196,12 +205,12 @@ class CorrespondenceMap:
         indices = torch.arange(id_map.shape[0], device=id_map.device).view(-1, 1)
         id_map = id_map.view(-1, id_map.shape[-1])
         id_map = torch.cat([indices, id_map], dim=-1)  
-        # shape = (width * height, 5)
+        # shape = (height * width, 5)
         # cell = (i, objID, materialID, map_index, vertexID)
         
         color_frame = color_frame.view(-1, color_frame.shape[-1])
         color_frame = torch.cat([indices, color_frame], dim=-1)
-        # shape = (width * height, channel_count + 1)
+        # shape = (height * width, channel_count + 1)
         # cell = (i, r, g, b, a)
         
         if not ignore_obj_mat_id:
@@ -222,15 +231,14 @@ class CorrespondenceMap:
         
         elif mode in ['replace', 'replace_avg']:
             id_map, color_frame = _find_dup_index_and_treat(id_map, color_frame, mode)  # type: ignore
-            
+
         # update the values
         self._values[id_map[..., 1], id_map[..., 2]] = color_frame[..., 1:]
         self._writtens[id_map[..., 1], id_map[..., 2]] = True
-
     
 
 
-__all__ = ['CorrespondenceMap']
+__all__ = ['CorrespondMap']
 
 
 if __name__ == '__main__':  # for debug

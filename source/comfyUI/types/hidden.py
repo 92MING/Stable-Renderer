@@ -15,11 +15,12 @@ if TYPE_CHECKING:
     from engine.static.texture import Texture
     from .runtime import InferenceContext, NodeInputs
     from .node_base import ComfyUINode
-    from comfyUI.stable_rendering import IDMap
+    from common_utils.stable_render_utils import IDMap, CorrespondMap
 
 
 _hidden_meta = NameCheckMetaCls(ABCMeta)
 _HT = TypeVar('_HT', bound='HIDDEN')
+
 class HIDDEN(ABC, metaclass=_hidden_meta):
     '''
     The base class for all special hidden types. Class inherited from this class will must be treated as hidden type in node system.
@@ -213,6 +214,10 @@ class UNIQUE_ID(str, HIDDEN):
             return cur_node.ID  # type: ignore
         return None
 
+__all__ = ['PROMPT', 'EXTRA_PNG_INFO', 'HIDDEN']
+
+
+
 @attrs
 class FrameData(HIDDEN):
     '''The prompt for submitting to ComfyUI during engine's runtime.'''
@@ -243,7 +248,7 @@ class FrameData(HIDDEN):
     @property
     def id_map(self)->"IDMap":
         if self._updated_id_map is None:
-            from comfyUI.stable_rendering import IDMap
+            from common_utils.stable_render_utils import IDMap
             self._updated_id_map = IDMap(origin_tex=self._id_map, frame_index=self.frame_index)
         return self._updated_id_map
     
@@ -322,15 +327,43 @@ class FrameData(HIDDEN):
 @attrs
 class BakingData(HIDDEN):
     '''
-    Extra runtime data during baking. Its basically a pack of necessary tensors for stable-rendering process,
+    Extra runtime data during baking an object. Its basically a pack of necessary tensors for stable-rendering process,
     splitted from numerous frameDatas.
     '''
     
     frame_count: int = attrib()
     '''how many frames are packed in this baking session'''
     
+    color_maps: IMAGE
+    '''
+    color maps of all frames. 
+    Note: this is not a single image. Shape = (B, C, W, H), where B is the frame count.
+    '''
+    id_maps: torch.Tensor
+    '''maps of IDs for tracing.'''
+    pos_maps: IMAGE
+    '''position maps'''
+    depth_maps: IMAGE
+    '''depth maps in each frame. For constraints in diffusion..'''
+    normal_maps: IMAGE
+    '''normal maps in each frame(view space). For constraints in diffusion.'''
+    noise_maps: IMAGE
+    '''noise maps in each frame. You can use this as the initial noise for sampling.'''
+    masks: MASK
+    '''mask in each frame.'''
+    rotation_angles: torch.Tensor
+    '''rotation angles in each frame.'''
+    correspond_map: "CorrespondMap"
+    '''correspond map for this obj.'''
+    
+    @property
+    def frame_size(self)->tuple[int, int]:
+        '''height & width of the frame'''
+        return tuple(self.color_maps.shape[-2:])
     
     @classmethod
     def GetHiddenValue(cls, context):
         return context.baking_data
     
+    
+__all__.extend(['FrameData', 'BakingData'])

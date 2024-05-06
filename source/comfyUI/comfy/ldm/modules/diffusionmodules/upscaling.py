@@ -50,7 +50,7 @@ class AbstractLowScaleModel(nn.Module):
         return (extract_into_tensor(self.sqrt_alphas_cumprod.to(x_start.device), t, x_start.shape) * x_start +
                 extract_into_tensor(self.sqrt_one_minus_alphas_cumprod.to(x_start.device), t, x_start.shape) * noise)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         return x, None
 
     def decode(self, x):
@@ -63,7 +63,7 @@ class SimpleImageConcat(AbstractLowScaleModel):
         super(SimpleImageConcat, self).__init__(noise_schedule_config=None)
         self.max_noise_level = 0
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         # fix to constant noise level
         return x, torch.zeros(x.shape[0], device=x.device).long()
 
@@ -73,7 +73,7 @@ class ImageConcatWithNoiseAugmentation(AbstractLowScaleModel):
         super().__init__(noise_schedule_config=noise_schedule_config)
         self.max_noise_level = max_noise_level
 
-    def forward(self, x, noise_level=None, seed=None):
+    def forward(self, x, noise_level=None, seed=None, **kwargs):
         if noise_level is None:
             noise_level = torch.randint(0, self.max_noise_level, (x.shape[0],), device=x.device).long()
         else:

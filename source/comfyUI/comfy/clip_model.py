@@ -12,7 +12,7 @@ class CLIPAttention(torch.nn.Module):
 
         self.out_proj = operations.Linear(embed_dim, embed_dim, bias=True, dtype=dtype, device=device)
 
-    def forward(self, x, mask=None, optimized_attention=None):
+    def forward(self, x, mask=None, optimized_attention=None, **kwargs):
         q = self.q_proj(x)
         k = self.k_proj(x)
         v = self.v_proj(x)
@@ -31,7 +31,7 @@ class CLIPMLP(torch.nn.Module):
         self.activation = ACTIVATIONS[activation]
         self.fc2 = operations.Linear(intermediate_size, embed_dim, bias=True, dtype=dtype, device=device)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x = self.fc1(x)
         x = self.activation(x)
         x = self.fc2(x)
@@ -45,7 +45,7 @@ class CLIPLayer(torch.nn.Module):
         self.layer_norm2 = operations.LayerNorm(embed_dim, dtype=dtype, device=device)
         self.mlp = CLIPMLP(embed_dim, intermediate_size, intermediate_activation, dtype, device, operations)
 
-    def forward(self, x, mask=None, optimized_attention=None):
+    def forward(self, x, mask=None, optimized_attention=None, **kwargs):
         x += self.self_attn(self.layer_norm1(x), mask, optimized_attention)
         x += self.mlp(self.layer_norm2(x))
         return x
@@ -56,7 +56,7 @@ class CLIPEncoder(torch.nn.Module):
         super().__init__()
         self.layers = torch.nn.ModuleList([CLIPLayer(embed_dim, heads, intermediate_size, intermediate_activation, dtype, device, operations) for i in range(num_layers)])
 
-    def forward(self, x, mask=None, intermediate_output=None):
+    def forward(self, x, mask=None, intermediate_output=None, **kwargs):
         optimized_attention = optimized_attention_for_device(x.device, mask=mask is not None, small_input=True)
 
         if intermediate_output is not None:
@@ -76,7 +76,7 @@ class CLIPEmbeddings(torch.nn.Module):
         self.token_embedding = torch.nn.Embedding(vocab_size, embed_dim, dtype=dtype, device=device)
         self.position_embedding = torch.nn.Embedding(num_positions, embed_dim, dtype=dtype, device=device)
 
-    def forward(self, input_tokens):
+    def forward(self, input_tokens, **kwargs):
         return self.token_embedding(input_tokens) + self.position_embedding.weight
 
 
@@ -93,7 +93,7 @@ class CLIPTextModel_(torch.nn.Module):
         self.encoder = CLIPEncoder(num_layers, embed_dim, heads, intermediate_size, intermediate_activation, dtype, device, operations)
         self.final_layer_norm = operations.LayerNorm(embed_dim, dtype=dtype, device=device)
 
-    def forward(self, input_tokens, attention_mask=None, intermediate_output=None, final_layer_norm_intermediate=True):
+    def forward(self, input_tokens, attention_mask=None, intermediate_output=None, final_layer_norm_intermediate=True, **kwargs):
         x = self.embeddings(input_tokens)
         mask = None
         if attention_mask is not None:
@@ -155,7 +155,7 @@ class CLIPVisionEmbeddings(torch.nn.Module):
         num_positions = num_patches + 1
         self.position_embedding = torch.nn.Embedding(num_positions, embed_dim, dtype=dtype, device=device)
 
-    def forward(self, pixel_values):
+    def forward(self, pixel_values, **kwargs):
         embeds = self.patch_embedding(pixel_values).flatten(2).transpose(1, 2)
         return torch.cat([self.class_embedding.to(embeds.device).expand(pixel_values.shape[0], 1, -1), embeds], dim=1) + self.position_embedding.weight.to(embeds.device)
 
@@ -174,7 +174,7 @@ class CLIPVision(torch.nn.Module):
         self.encoder = CLIPEncoder(num_layers, embed_dim, heads, intermediate_size, intermediate_activation, dtype, device, operations)
         self.post_layernorm = operations.LayerNorm(embed_dim)
 
-    def forward(self, pixel_values, attention_mask=None, intermediate_output=None):
+    def forward(self, pixel_values, attention_mask=None, intermediate_output=None, **kwargs):
         x = self.embeddings(pixel_values)
         x = self.pre_layrnorm(x)
         #TODO: attention_mask?

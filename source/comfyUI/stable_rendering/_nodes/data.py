@@ -3,7 +3,7 @@ from comfyUI.types import *
 from common_utils.debug_utils import ComfyUILogger
 from common_utils.global_utils import is_dev_mode, is_verbose_mode
 if TYPE_CHECKING:
-    from comfyUI.stable_rendering import IDMap
+    from common_utils.stable_render_utils import IDMap
 
 
 class BakingDataNode(StableRenderingNode):

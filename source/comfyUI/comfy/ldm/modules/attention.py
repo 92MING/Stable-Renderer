@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 from einops import rearrange, repeat
-from typing import Optional, Any
+from typing import Optional, TYPE_CHECKING
 
 from .diffusionmodules.util import checkpoint, AlphaBlender, timestep_embedding
 from .sub_quadratic_attention import efficient_dot_product_attention
@@ -14,6 +14,7 @@ if model_management.xformers_enabled():
     import xformers
     import xformers.ops
 from common_utils.debug_utils import ComfyUILogger
+from common_utils.type_utils import check_func_has_kwarg
 from comfy.cli_args import args
 import comfy.ops
 ops = comfy.ops.disable_weight_init
@@ -24,6 +25,10 @@ if args.dont_upcast_attention:
     _ATTN_PRECISION = "fp16"
 else:
     _ATTN_PRECISION = "fp32"
+
+if TYPE_CHECKING:
+    from comfyUI.types import BakingData
+    from common_utils.stable_render_utils.corresponder import Corresponder
 
 
 def exists(val):
@@ -57,7 +62,7 @@ class GEGLU(nn.Module):
         super().__init__()
         self.proj = operations.Linear(dim_in, dim_out * 2, dtype=dtype, device=device)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x, gate = self.proj(x).chunk(2, dim=-1)
         return x * F.gelu(gate)
 
@@ -78,7 +83,7 @@ class FeedForward(nn.Module):
             operations.Linear(inner_dim, dim_out, dtype=dtype, device=device)
         )
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         return self.net(x)
 
 def Normalize(in_channels, dtype=None, device=None):
@@ -397,7 +402,7 @@ class CrossAttention(nn.Module):
 
         self.to_out = nn.Sequential(operations.Linear(inner_dim, query_dim, dtype=dtype, device=device), nn.Dropout(dropout))
 
-    def forward(self, x, context=None, value=None, mask=None):
+    def forward(self, x, context=None, value=None, mask=None, **kwargs):
         q = self.to_q(x)
         context = default(context, x)
         k = self.to_k(context)
@@ -455,10 +460,16 @@ class BasicTransformerBlock(nn.Module):
         self.d_head = d_head
         self.switch_temporal_ca_to_sa = switch_temporal_ca_to_sa
 
-    def forward(self, x, context=None, transformer_options={}):
-        return checkpoint(self._forward, (x, context, transformer_options), self.parameters(), self.checkpoint)
+    def forward(self, x, context=None, transformer_options={}, **kwargs):
+        return checkpoint(self._forward, 
+                          (x, context, transformer_options), 
+                          self.parameters(), 
+                          self.checkpoint, 
+                          **kwargs)
 
-    def _forward(self, x, context=None, transformer_options={}):
+    def _forward(self, x, context: Optional[torch.Tensor]=None, transformer_options={}, **kwargs):
+        # x possible shapes: (2, 4096, 320), (2, 1024, 640), (2, 256, 1280), (2, 64, 1280)...
+        # context: prompt embedding, shape: (2, 77, 768)
         extra_options = {}
         block = transformer_options.get("block", None)
         block_index = transformer_options.get("block_index", 0)
@@ -489,6 +500,18 @@ class BasicTransformerBlock(nn.Module):
             context_attn1 = None
         value_attn1 = None
 
+
+        ##### self-attention #####
+        transformer_index = transformer_options.get("transformer_index", None)
+        baking_data: Optional['BakingData'] = kwargs.get('baking_data', None)
+        corresponder: Optional['Corresponder'] = kwargs.get('corresponder', None)
+        has_uncond: bool = kwargs.get('has_uncond', True)
+        do_stable_rendering = transformer_index is not None and \
+                                baking_data is not None and \
+                                corresponder is not None and \
+                                kwargs.get('do_stable_rendering', True)
+        
+        
         if "attn1_patch" in transformer_patches:
             patch = transformer_patches["attn1_patch"]
             if context_attn1 is None:
@@ -522,6 +545,7 @@ class BasicTransformerBlock(nn.Module):
             patch = transformer_patches["attn1_output_patch"]
             for p in patch:
                 n = p(n, extra_options)
+        ##### self-attention #####
 
         x += n
         if "middle_patch" in transformer_patches:
@@ -615,24 +639,37 @@ class SpatialTransformer(nn.Module):
             self.proj_out = operations.Linear(in_channels, inner_dim, dtype=dtype, device=device)
         self.use_linear = use_linear
 
-    def forward(self, x, context=None, transformer_options={}):
+    def forward(self, x, context=None, transformer_options={}, **extra_args):
+        # extra_args if for you to pass any special arguments easily
         # note: if no context is given, cross-attention defaults to self-attention
         if not isinstance(context, list):
             context = [context] * len(self.transformer_blocks)
         b, c, h, w = x.shape
+
         x_in = x
         x = self.norm(x)
         if not self.use_linear:
             x = self.proj_in(x)
-        x = rearrange(x, 'b c h w -> b (h w) c').contiguous()
+        x = rearrange(x, 'b c h w -> b (h w) c').contiguous()   # flatten
         if self.use_linear:
             x = self.proj_in(x)
+            
         for i, block in enumerate(self.transformer_blocks):
             transformer_options["block_index"] = i
-            x = block(x, context=context[i], transformer_options=transformer_options)
+            forward_sig, has_kwarg = check_func_has_kwarg(block.forward, return_sig=True)
+            if has_kwarg:
+                x = block(x, context=context[i], transformer_options=transformer_options, **extra_args)
+            else:
+                proper_kwargs = {k: v for i, (k, v) in enumerate(extra_args.items()) if i!=0 and k in forward_sig.parameters}
+                proper_kwargs.pop("context", None)
+                proper_kwargs.pop("transformer_options", None)
+                x = block(x, context=context[i], transformer_options=transformer_options, **proper_kwargs)
+       
         if self.use_linear:
             x = self.proj_out(x)
+        
         x = rearrange(x, 'b (h w) c -> b c h w', h=h, w=w).contiguous()
+        
         if not self.use_linear:
             x = self.proj_out(x)
         return x + x_in
@@ -729,7 +766,8 @@ class SpatialVideoTransformer(SpatialTransformer):
         time_context: Optional[torch.Tensor] = None,
         timesteps: Optional[int] = None,
         image_only_indicator: Optional[torch.Tensor] = None,
-        transformer_options={}
+        transformer_options={},
+        **extra_args
     ) -> torch.Tensor:
         _, _, h, w = x.shape
         x_in = x

@@ -13,7 +13,7 @@ def conv(n_in, n_out, **kwargs):
     return comfy.ops.disable_weight_init.Conv2d(n_in, n_out, 3, padding=1, **kwargs)
 
 class Clamp(nn.Module):
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         return torch.tanh(x / 3) * 3
 
 class Block(nn.Module):
@@ -22,7 +22,8 @@ class Block(nn.Module):
         self.conv = nn.Sequential(conv(n_in, n_out), nn.ReLU(), conv(n_out, n_out), nn.ReLU(), conv(n_out, n_out))
         self.skip = comfy.ops.disable_weight_init.Conv2d(n_in, n_out, 1, bias=False) if n_in != n_out else nn.Identity()
         self.fuse = nn.ReLU()
-    def forward(self, x):
+        
+    def forward(self, x, **kwargs):
         return self.fuse(self.conv(x) + self.skip(x))
 
 def Encoder():

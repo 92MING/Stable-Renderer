@@ -7,9 +7,12 @@ if _STABLE_RENDERER_PROJ_PATH not in sys.path:
     sys.path.insert(0, _STABLE_RENDERER_PROJ_PATH)
 
 from common_utils.debug_utils import ComfyUILogger
-from common_utils.global_utils import GetOrCreateGlobalValue, is_game_mode, is_dev_mode, is_verbose_mode
-from common_utils.type_utils import format_data_for_console_log
+from common_utils.global_utils import (GetOrCreateGlobalValue, is_game_mode, is_dev_mode, is_verbose_mode, is_comfy_main, GetGlobalValue,
+                                       SetGlobalValue)
+from common_utils.debug_utils import format_data_for_console_log
 from common_utils.system_utils import get_available_port, check_port_is_using
+from typing import overload, Callable
+from concurrent.futures import ThreadPoolExecutor
 
 import comfy.options
 comfy.options.enable_args_parsing()
@@ -81,9 +84,23 @@ import comfy.model_management
 
 from comfy.cli_args import args
 
-def run()->execution.PromptExecutor:
+@overload
+def run()->execution.PromptExecutor:...
+@overload
+def run(editor_mode: bool=False)->execution.PromptExecutor:...
+@overload
+def run(editor_mode: bool=True)->tuple[execution.PromptExecutor, Callable]:...
+
+def run(editor_mode=False):
     '''Run comfyUI and return the prompt executor.'''
     
+    if GetGlobalValue("__COMFYUI_RUNNING__", False):
+        executor = execution.PromptExecutor.instance
+        if not editor_mode:
+            return executor
+        else:
+            return executor, GetGlobalValue('__COMFYUI_STOPPER__')
+        
     if args.cuda_device is not None:
         os.environ['CUDA_VISIBLE_DEVICES'] = str(args.cuda_device)
         ComfyUILogger.debug("Set cuda device to:", args.cuda_device)
@@ -108,7 +125,7 @@ def run()->execution.PromptExecutor:
         need_gc = False
         gc_collect_interval = 10.0
 
-        while True:
+        while not GetGlobalValue("__COMFYUI_TERMINATE__", False):
             timeout = 1000.0
             if need_gc:
                 timeout = max(gc_collect_interval - (current_time - last_gc_collect), 0.0)
@@ -223,7 +240,7 @@ def run()->execution.PromptExecutor:
     cuda_malloc_warning()
         
     if should_run_web_server:
-        event_loop = GetOrCreateGlobalValue("__COMFYUI_EVENT_LOOP__", lambda: asyncio.new_event_loop())
+        event_loop: asyncio.AbstractEventLoop = GetOrCreateGlobalValue("__COMFYUI_EVENT_LOOP__", lambda: asyncio.new_event_loop())
         asyncio.set_event_loop(event_loop)
         prompt_server = server.PromptServer(event_loop)
         prompt_queue = execution.PromptQueue(prompt_server)
@@ -236,7 +253,9 @@ def run()->execution.PromptExecutor:
     if should_run_web_server:
         prompt_server.add_routes()  # type: ignore
         hijack_progress(prompt_server)   # type: ignore
-        threading.Thread(target=prompt_worker, daemon=True, args=(prompt_executor, prompt_queue, prompt_server,)).start()
+        t = threading.Thread(target=prompt_worker, daemon=True, args=(prompt_executor, prompt_queue, prompt_server,))
+        SetGlobalValue("__COMFYUI_WORKER_THREAD__", t)
+        t.start()
 
     if args.output_directory:
         output_dir = os.path.abspath(args.output_directory)
@@ -253,9 +272,11 @@ def run()->execution.PromptExecutor:
         ComfyUILogger.debug(f"Setting input directory to: {input_dir}")
         folder_paths.set_input_directory(input_dir)
 
+    SetGlobalValue("__COMFYUI_RUNNING__", True)
+    
     if should_run_web_server:
         call_on_start = None
-        if args.auto_launch:
+        if is_comfy_main() and args.auto_launch:    # for editor mode, browser is not required, since it is embedded in the editor
             def startup_server(address, port):
                 import webbrowser
                 if os.name == 'nt' and address == '0.0.0.0':
@@ -264,22 +285,47 @@ def run()->execution.PromptExecutor:
             call_on_start = startup_server
 
         try:
-            event_loop.run_until_complete(
-                run_web_server(
-                    server=prompt_server,  # type: ignore
-                    address=args.listen, 
-                    port=args.port, 
-                    verbose=not args.dont_print_server, 
-                    call_on_start=call_on_start
+            if is_comfy_main(): # blockingly run the web server
+                event_loop.run_until_complete(
+                    run_web_server(
+                        server=prompt_server,  # type: ignore
+                        address=args.listen, 
+                        port=args.port, 
+                        verbose=not args.dont_print_server, 
+                        call_on_start=call_on_start
+                        )
                     )
-                )
+            else:   # run comfy server on background
+                executor = ThreadPoolExecutor()
+                executor.submit(
+                    event_loop.run_until_complete,
+                    run_web_server(
+                        server=prompt_server,  # type: ignore
+                        address=args.listen, 
+                        port=args.port, 
+                        verbose=not args.dont_print_server, 
+                        call_on_start=call_on_start
+                        )
+                    )
+                def stopper():
+                    SetGlobalValue('__COMFYUI_TERMINATE__', True)
+                    event_loop.stop()
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    raise KeyboardInterrupt
+                    
+                SetGlobalValue('__COMFYUI_STOPPER__', stopper)
+                
         except KeyboardInterrupt:
             ComfyUILogger.success("Server Stopped")
             
         cleanup_temp()
-
-    return prompt_executor
-
+    
+    if not editor_mode:
+        return prompt_executor
+    else:
+        return prompt_executor, stopper
+    
+    
 if __name__ == '__main__':
     try:
         run()

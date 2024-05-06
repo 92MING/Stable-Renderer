@@ -32,7 +32,7 @@ class EfficientNetEncoder(nn.Module):
         self.mean = nn.Parameter(torch.tensor([0.485, 0.456, 0.406]))
         self.std = nn.Parameter(torch.tensor([0.229, 0.224, 0.225]))
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x = x * 0.5 + 0.5
         x = (x - self.mean.view([3,1,1])) / self.std.view([3,1,1])
         o = self.mapper(self.backbone(x))
@@ -79,7 +79,7 @@ class Previewer(nn.Module):
             nn.Conv2d(c_hidden // 4, c_out, kernel_size=1),
         )
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         return (self.blocks(x) - 0.5) * 2.0
 
 class StageC_coder(nn.Module):

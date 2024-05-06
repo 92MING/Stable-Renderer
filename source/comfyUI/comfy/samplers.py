@@ -10,7 +10,7 @@ from types import MethodType
 from functools import partial
 
 from common_utils.debug_utils import ComfyUILogger
-from common_utils.global_utils import GetOrCreateGlobalValue, is_engine_looping
+from common_utils.global_utils import GetOrCreateGlobalValue, is_engine_looping, is_dev_mode, is_verbose_mode
 from .k_diffusion import sampling as k_diffusion_sampling
 from .extra_samplers import uni_pc
 from comfy import model_management, model_base
@@ -141,7 +141,17 @@ def cond_cat(c_list):
 
     return out
 
-def calc_cond_uncond_batch(model, cond, uncond, x_in, timestep, model_options):
+def calc_cond_uncond_batch(model: model_base.BaseModel, 
+                           cond, 
+                           uncond, 
+                           x_in, 
+                           timestep, 
+                           model_options, 
+                           **kwargs):
+    '''
+    This method concat the cond & uncond's inference input as a batch, i.e. (2*4*64*64),
+    and return both's result(latent space)
+    '''
     out_cond = torch.zeros_like(x_in)
     out_count = torch.ones_like(x_in) * 1e-37
 
@@ -150,22 +160,23 @@ def calc_cond_uncond_batch(model, cond, uncond, x_in, timestep, model_options):
 
     COND = 0
     UNCOND = 1
+    has_uncond = False
 
     to_run = []
     for x in cond:
         p = get_area_and_mult(x, x_in, timestep)
         if p is None:
             continue
-
         to_run += [(p, COND)]
+        
     if uncond is not None:
         for x in uncond:
             p = get_area_and_mult(x, x_in, timestep)
             if p is None:
                 continue
-
             to_run += [(p, UNCOND)]
-
+            has_uncond = True
+            
     while len(to_run) > 0:
         first = to_run[0]
         first_shape = first[0][0].shape
@@ -231,11 +242,13 @@ def calc_cond_uncond_batch(model, cond, uncond, x_in, timestep, model_options):
         transformer_options["sigmas"] = timestep
 
         c['transformer_options'] = transformer_options
+        c.update(kwargs)    # extra args are passed to the model from here.
+        c['has_uncond'] = has_uncond    # for stable-rendering
 
         if 'model_function_wrapper' in model_options:
             output = model_options['model_function_wrapper'](model.apply_model, {"input": input_x, "timestep": timestep_, "c": c, "cond_or_uncond": cond_or_uncond}).chunk(batch_chunks)
         else:
-            output = model.apply_model(input_x, timestep_, **c).chunk(batch_chunks)
+            output = model.apply_model(input_x, timestep_, **c).chunk(batch_chunks) # basemodel apply_model
         del input_x
 
         for o in range(batch_chunks):
@@ -260,7 +273,8 @@ def sampling_function(model: model_base.BaseModel,
                       cond, 
                       cond_scale, 
                       model_options={}, 
-                      seed=None):
+                      seed=None,
+                      **kwargs):
     '''
     The main sampling function shared by all the samplers.
     Returns denoised image.
@@ -270,7 +284,13 @@ def sampling_function(model: model_base.BaseModel,
     else:
         uncond_ = uncond
 
-    cond_pred, uncond_pred = calc_cond_uncond_batch(model, cond, uncond_, x, timestep, model_options)
+    cond_pred, uncond_pred = calc_cond_uncond_batch(model, 
+                                                    cond, 
+                                                    uncond_, 
+                                                    x, 
+                                                    timestep, 
+                                                    model_options,
+                                                    **kwargs)
     if "sampler_cfg_function" in model_options:
         args = {"cond": x - cond_pred, "uncond": x - uncond_pred, "cond_scale": cond_scale, "timestep": timestep, "input": x, "sigma": timestep,
                 "cond_denoised": cond_pred, "uncond_denoised": uncond_pred, "model": model, "model_options": model_options}
@@ -290,7 +310,9 @@ class CFGNoisePredictor(torch.nn.Module):
         super().__init__()
         self.inner_model = model
         
-    def apply_model(self, x, timestep, cond, uncond, cond_scale, model_options={}, seed=None):
+    def apply_model(self, x, timestep, cond, uncond, cond_scale, model_options={}, seed=None, **kwargs):
+        if is_dev_mode() and is_verbose_mode():
+            ComfyUILogger.debug(f'CFGNoisePredictor.apply_model: x.shape={x.shape}, timestep={timestep}, cond={cond}, uncond={uncond}, cond_scale={cond_scale}, model_options={model_options}, seed={seed}')
         out = sampling_function(self.inner_model, 
                                 x, 
                                 timestep, 
@@ -298,7 +320,8 @@ class CFGNoisePredictor(torch.nn.Module):
                                 cond, 
                                 cond_scale, 
                                 model_options=model_options, 
-                                seed=seed)
+                                seed=seed,
+                                **kwargs)
         return out
     
     def forward(self, *args, **kwargs):
@@ -312,13 +335,15 @@ class KSamplerX0Inpaint(torch.nn.Module):
         self.inner_model = model
         self.sigmas = sigmas
         
-    def forward(self, x, sigma, uncond, cond, cond_scale, denoise_mask, model_options={}, seed=None):
+    def forward(self, x, sigma, uncond, cond, cond_scale, denoise_mask, model_options={}, seed=None, **kwargs):
+        if is_dev_mode() and is_verbose_mode():
+            ComfyUILogger.debug(f'KSamplerX0Inpaint: x.shape={x.shape}, sigma.shape={sigma.shape}, uncond={uncond}, cond={cond}, cond_scale={cond_scale}, denoise_mask={denoise_mask}, model_options={model_options}, seed={seed}')
         if denoise_mask is not None:
             if "denoise_mask_function" in model_options:
                 denoise_mask = model_options["denoise_mask_function"](sigma, denoise_mask, extra_options={"model": self.inner_model, "sigmas": self.sigmas})
             latent_mask = 1. - denoise_mask
             x = x * denoise_mask + self.inner_model.inner_model.model_sampling.noise_scaling(sigma.reshape([sigma.shape[0]] + [1] * (len(self.noise.shape) - 1)), self.noise, self.latent_image) * latent_mask
-        out = self.inner_model(x, sigma, cond=cond, uncond=uncond, cond_scale=cond_scale, model_options=model_options, seed=seed)
+        out = self.inner_model(x, sigma, cond=cond, uncond=uncond, cond_scale=cond_scale, model_options=model_options, seed=seed, **kwargs)
         if denoise_mask is not None:
             out = out * denoise_mask + self.latent_image * latent_mask
         return out
@@ -598,7 +623,7 @@ class Sampler(ABC):
     '''Base class of samplers.'''
     
     @abstractmethod
-    def sample(self):
+    def sample(self, *args, **kwargs):
         raise NotImplementedError
 
     def max_denoise(self, model_wrap, sigmas):
@@ -663,7 +688,8 @@ class KSAMPLER_METHOD(Sampler):
                latent_image: Optional[torch.Tensor] = None,
                denoise_mask: Optional[torch.Tensor] = None,
                disable_pbar: bool = False,
-               timesteps: Optional[List[int]] = None):
+               timesteps: Optional[List[int]] = None,
+               **kwargs):
         extra_args["denoise_mask"] = denoise_mask
         model_k = KSamplerX0Inpaint(model_wrap, sigmas)
         model_k.latent_image = latent_image # type: ignore
@@ -693,13 +719,14 @@ class KSAMPLER_METHOD(Sampler):
                 else:
                     assert False, f"Invalid callback function signature: {callback.__name__}"
 
+        extra_options = {**self.extra_options, **kwargs}
         samples = self.sampler_function(model_k, 
                                         noise, 
                                         sigmas, 
                                         extra_args=extra_args, 
                                         callbacks=k_callbacks, 
                                         disable=disable_pbar,
-                                        **self.extra_options)
+                                        **extra_options)
         return samples
 
 @deprecated # `KSAMPLER` is the old name of `KSAMPLER_METHOD`, now deprecated.
@@ -780,6 +807,7 @@ def sample(model: model_base.BaseModel,
            seed: Optional[int] = None,
            timesteps: List[int]=None,
            **kwargs):
+    
     positive = positive[:]
     negative = negative[:]
 
@@ -821,7 +849,8 @@ def sample(model: model_base.BaseModel,
                              latent_image=latent_image, 
                              denoise_mask=denoise_mask, 
                              disable_pbar=disable_pbar,
-                             timesteps=timesteps)
+                             timesteps=timesteps,
+                             **kwargs)
     return model.process_latent_out(samples.to(torch.float32))
 
 
@@ -907,7 +936,8 @@ class KSampler:
                sigmas: Optional[torch.Tensor] = None,
                callbacks: Union["SamplerCallback", Sequence["SamplerCallback"], None] = None,
                disable_pbar: bool = False,
-               seed: Optional[int] = None) -> torch.Tensor:
+               seed: Optional[int] = None,
+               **kwargs) -> torch.Tensor:
         """
         Samples the model using the provided inputs.
 
@@ -927,6 +957,7 @@ class KSampler:
             disable_pbar (bool, optional): Flag to disable progress bar. Defaults to False.
             seed (Optional[int], optional): The random seed. Defaults to None.
 
+            **kwargs: This args will finally passing through all layers of models (in case it is not being removed by any steps)
         Returns:
             torch.Tensor: The sampled tensor.
         """
@@ -962,4 +993,5 @@ class KSampler:
                       callbacks=callbacks, 
                       disable_pbar=disable_pbar, 
                       seed=seed,
-                      timesteps=self.timesteps,)
+                      timesteps=self.timesteps,
+                      **kwargs)

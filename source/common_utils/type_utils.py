@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from inspect import Parameter, signature, _empty, getmro
 from collections import OrderedDict
 from typing import (Any, Sequence, Union, ForwardRef, get_args as tp_get_args, get_origin as tp_get_origin, Callable, Awaitable, 
-                    List, Iterable, Mapping, Literal, TypeAlias, Tuple, _SpecialForm, Type, Dict, TypeVar)
+                    List, Iterable, Mapping, Literal, TypeAlias, Tuple, _SpecialForm, Type, Dict, TypeVar, overload)
 from types import UnionType
 from inspect import getmro, signature
 from pydantic.v1 import BaseModel as BaseModelV1
@@ -456,7 +456,30 @@ def is_empty_method(method):
     lines = [line for line in lines if not line.startswith(('#', '"""',"'''")) and not line == 'pass']
     return not lines
 
-__all__.extend(['pack_param', 'func_param_type_check', 'is_empty_method'])
+@overload
+def check_func_has_kwarg(func: Callable)->bool:...
+@overload
+def check_func_has_kwarg(func: Callable, return_sig: bool = True)->Tuple[inspect.Signature, bool]:...
+
+def check_func_has_kwarg(func: Callable, return_sig: bool = False):
+    '''
+    Check whether a func includes VAR_KEYWORD(i.e. **kwargs) in its parameters.
+    
+    Args:
+        - func: the function to be checked.
+        - return_sig: whether to return the signature of the function.
+    '''
+    sig = inspect.signature(func)
+    for param in sig.parameters.values():
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            if return_sig:
+                return sig, True
+            return True
+    if return_sig:
+        return sig, False
+    return False
+
+__all__.extend(['pack_param', 'func_param_type_check', 'is_empty_method', 'check_func_has_kwarg'])
 # endregion
 
 # region data dump/formatting/processing
@@ -513,39 +536,6 @@ def brute_dump_json(data):
         else:
             return str(data)
 
-def format_data_for_console_log(data: Any, detail_mode:bool=False)->str:
-    '''
-    Since sometimes printing data is too long for review,
-    this method will format the data to a more readable format.
-    
-    Args:
-        - data: the data to be formatted. It can be any type.
-        - detail_mode: if True, the inner data of the origin data will be shown. Otherwise the formatted data will be more short.
-    '''
-    data_str = ""
-    if isinstance(data, dict):
-        data_str += "{"
-        for k, v in data.items():
-            data_str += f"{k}: "
-            formatted = format_data_for_console_log(v, detail_mode=detail_mode)
-            if not detail_mode and len(formatted) > 100:
-                formatted = f'`{formatted[:95]}...`'
-            data_str += f"{formatted}, "
-        data_str += "}"
-    elif isinstance(data, (list, tuple)):
-        data_str += "["
-        for v in data:
-            formatted = format_data_for_console_log(v, detail_mode=detail_mode)
-            if not detail_mode and len(formatted) > 100:
-                formatted = f'`{formatted[:95]}...`'
-            data_str += f"{formatted}, "
-        data_str += "]"
-    else:
-        data_str = str(data)
-        if len(data_str) > 100 and not detail_mode:
-            data_str = f'`{data_str[:95]}...`'
-    
-    return data_str.replace('\n', ' ')
 
 _T = TypeVar('_T')
 _DefaultCustomCopyMethods = ('__deepcopy__', 'deepcopy', 'deep_copy')
@@ -584,7 +574,7 @@ def custom_deep_copy(val: _T, methods: Union[List[str], Tuple[str, ...], str] = 
                     pass
         return deepcopy(val)
 
-__all__.extend(['brute_dump_json', 'format_data_for_console_log', 'custom_deep_copy'])
+__all__.extend(['brute_dump_json', 'custom_deep_copy'])
 # endregion
 
 # region common used types

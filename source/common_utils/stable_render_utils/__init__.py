@@ -1,3 +1,3 @@
 from .corrmap import *
 
-from .trace import *
+from .corresponder import *

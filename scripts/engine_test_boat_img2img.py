@@ -1,29 +1,22 @@
-import torch
-import math
-torch.cuda.current_device()
-
 import os, sys
 source_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(source_dir)
 
 import glm
 import os.path
+
 from engine.runtime.components import Camera, MeshRenderer
 from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
-from engine.runtime.components import CameraController, HelicalOrbit
-from engine.static import Material, Mesh, Texture, DefaultTextureType, GLFW_Key
-from common_utils.path_utils import EXAMPLE_3D_MODEL_DIR
-from common_utils.spherical_cache import ViewPoint
+from engine.static import (Material, DefaultTextureType, Mesh, Texture, GLFW_Key)
 
-import json
-from pydantic_core import to_jsonable_python
+from common_utils.path_utils import EXAMPLE_3D_MODEL_DIR, EXAMPLE_WORKFLOWS_DIR
 
 
 if __name__ == '__main__':
-    class ControlSword(Component):
-        '''Control the sword with W, A, S, D keys. The boat will move forward, backward, left, right.'''
+    class ControlBoat(Component):
+        '''Control the boat with W, A, S, D keys. The boat will move forward, backward, left, right.'''
         
         deceleration_rate: float = 0.98
         angular_deceleration_rate: float = 0.95
@@ -72,7 +65,7 @@ if __name__ == '__main__':
                 
             if self.inputManager.GetKey(GLFW_Key.A):
                 self.angular_velocity += self.angular_acceleration
-                
+             
             if self.inputManager.GetKey(GLFW_Key.D):
                 self.angular_velocity -= self.angular_acceleration
                 
@@ -80,44 +73,39 @@ if __name__ == '__main__':
             self.angular_velocity = -self.max_angular_spd if self.angular_velocity < -self.max_angular_spd else self.max_angular_spd if self.angular_velocity > self.max_angular_spd else self.angular_velocity
             
             self.update_physics()
-
-    class HelicalOrbitWrapper(HelicalOrbit):
-        historical_pos = []
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-        
+    
+    class AutoRotation(Component):
         def update(self):
-            super().update()
-            view_point = ViewPoint.from_cartesian(*self.transform.position)
-            self.historical_pos.append(view_point)
+            self.transform.rotateLocalY(2.5 * self.engine.RuntimeManager.DeltaTime)
     
     class Sample(Engine):
         def beforePrepare(self):
 
-            self.sofaMesh = Mesh.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'koltuksofa', 'Koltuk.obj'))
-            self.sofaMaterial = Material.DefaultOpaqueMaterial()
+            boatMesh = Mesh.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'boat', 'boat.obj'))
+            boatMaterial = Material.DefaultOpaqueMaterial()
 
-            sofa_diffuse_tex = Texture.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'sword', 'Sting_Base_Color.png'))
-            self.sofaMaterial.addDefaultTexture(sofa_diffuse_tex, DefaultTextureType.DiffuseTex)
-            # self.swordMaterial.addDefaultTexture(Texture.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'sword', 'Sting_Normal.png')), DefaultTextureType.NormalTex)
-            # self.swordMaterial.addDefaultTexture(Texture.CreateNoiseTex(), DefaultTextureType.NoiseTex)
+            boat_diffuse_tex = Texture.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'boat', 'boatColor.png'))
+            boatMaterial.addDefaultTexture(boat_diffuse_tex, DefaultTextureType.DiffuseTex)
+            boatMaterial.addDefaultTexture(Texture.Load(os.path.join(EXAMPLE_3D_MODEL_DIR, 'boat', 'boatNormal.png')), DefaultTextureType.NormalTex)
+            boatMaterial.addDefaultTexture(Texture.CreateNoiseTex(), DefaultTextureType.NoiseTex)
             
-            self.sofa = GameObject('Sofa', position=[0, 0, 0])
-            self.sofa.addComponent(MeshRenderer, mesh=self.sofaMesh, materials=self.sofaMaterial)
+            boat = GameObject('Boat', position=[0, 0, 0])
+            boat.addComponent(MeshRenderer, mesh=boatMesh, materials=boatMaterial)
+            boat.addComponent(AutoRotation)
             
-            initial_position = [0, 0, -6]
-            self.camera = GameObject('Camera', position=initial_position)
-            self.camera.addComponent(Camera)
-            self.camera.addComponent(CameraController, defaultPos=initial_position, defaultLookAt=[0, 0, 0])
-            self.camera.addComponent(HelicalOrbitWrapper, theta_speed=1, phi=45)
+            # uncomment this line to control the boat
+            # boat.addComponent(ControlBoat)
+            
+            initial_position = [0, 3, -3]
+            camera = GameObject('Camera', position=initial_position)
+            camera.addComponent(Camera)
+            camera.transform.lookAt([0, 0, 0])
 
-
-    Sample.Run(enableGammaCorrection=True,
-            debug=False,
-            winSize=(512, 512),
-            mapSavingInternal=1,
-            needOutputMaps=True,
-            startComfyUI=False,
-            fixedUpdateMaxFPS=60,)
-    
-        
+    img2img_boat_path = EXAMPLE_WORKFLOWS_DIR / 'boat-img2img-example.json'
+    Sample.Run(winSize=(512, 512),
+               mapSavingInternal=1,
+               needOutputMaps=False,
+               outputCannyMap=False,
+               saveSDColorOutput=False,
+               disableComfyUI=False,
+               workflow=img2img_boat_path)

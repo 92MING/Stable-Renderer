@@ -154,8 +154,7 @@ def sample(model: comfy.model_patcher.ModelPatcher,
            callbacks: List[callable] = [],
            disable_pbar: bool = False,
            seed: int = None,
-           **kwargs
-) -> torch.Tensor:
+           **kwargs) -> torch.Tensor:
     if "callback" in kwargs:
         ComfyUILogger.warn("Warning: 'callback' is deprecated, use 'callbacks' instead")
         legacy_callback = kwargs.pop("callback")
@@ -186,7 +185,8 @@ def sample(model: comfy.model_patcher.ModelPatcher,
                               sigmas=sigmas, 
                               callbacks=callbacks, 
                               disable_pbar=disable_pbar, 
-                              seed=seed)
+                              seed=seed,
+                              **kwargs)
     samples = samples.to(comfy.model_management.intermediate_device())
 
     cleanup_additional_models(models)

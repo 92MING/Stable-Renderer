@@ -68,7 +68,7 @@ class VideoResBlock(ResnetBlock):
         else:
             raise NotImplementedError()
 
-    def forward(self, x, temb, skip_video=False, timesteps=None):
+    def forward(self, x, temb, skip_video=False, timesteps=None, **kwargs):
         b, c, h, w = x.shape
         if timesteps is None:
             timesteps = b
@@ -104,7 +104,7 @@ class AE3DConv(ops.Conv2d):
             padding=padding,
         )
 
-    def forward(self, input, timesteps=None, skip_video=False):
+    def forward(self, input, timesteps=None, skip_video=False, **kwargs):
         if timesteps is None:
             timesteps = input.shape[0]
         x = super().forward(input)
@@ -146,7 +146,7 @@ class AttnVideoBlock(AttnBlock):
         else:
             raise ValueError(f"unknown merge strategy {self.merge_strategy}")
 
-    def forward(self, x, timesteps=None, skip_time_block=False):
+    def forward(self, x, timesteps=None, skip_time_block=False, **kwargs):
         if skip_time_block:
             return super().forward(x)
 

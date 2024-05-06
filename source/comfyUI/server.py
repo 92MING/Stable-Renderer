@@ -27,7 +27,7 @@ from aiohttp import web
 
 from common_utils.type_utils import brute_dump_json
 from common_utils.decorators import singleton, class_or_ins_property
-from common_utils.global_utils import GetOrCreateGlobalValue, SetGlobalValue, is_verbose_mode, should_run_web_server
+from common_utils.global_utils import GetOrCreateGlobalValue, SetGlobalValue, is_verbose_mode, GetGlobalValue
 from common_utils.debug_utils import ComfyUILogger
 from comfy.cli_args import args
 from app.user_manager import UserManager
@@ -112,9 +112,23 @@ class PromptServer:
     def instance(cls_or_ins)->'PromptServer':
         return PromptServer()   # will get the singleton instance if it's already created
     
+    user_manager: UserManager
+    '''manager for handling user stuff. 
+    There should always only 1 user in Stable-Renderer Editor, so this maybe useless. 
+    It is kept for compatibility with those custom nodes that require user management instance'''
+    port: int
+    '''server running port'''
+    last_prompt_id: str
+    '''last(or latest) prompt's id.'''
+    loop: AbstractEventLoop
+    '''async event loop'''
+    messages: asyncio.Queue
+    number: int
+    '''count of prompt'''
+    
     def __init__(self, loop: Optional[AbstractEventLoop]=None):
         if loop is None:
-            loop = GetOrCreateGlobalValue("__COMFYUI_EVENT_LOOP__", lambda: asyncio.new_event_loop())
+            loop = GetOrCreateGlobalValue("__COMFYUI_EVENT_LOOP__", asyncio.new_event_loop)
             
         mimetypes.init()
         mimetypes.types_map['.js'] = 'application/javascript; charset=utf-8'
@@ -742,11 +756,12 @@ class PromptServer:
         self.send_sync("status", { "status": self.get_queue_info() })
 
     async def publish_loop(self):
-        while True:
+        while not GetGlobalValue("__COMFYUI_TERMINATE__", False):
             msg = await self.messages.get()
             await self.send(*msg)
 
-    async def start(self, address, port, verbose=True, call_on_start=None):
+    async def start(self, address: str, port: int, verbose=True, call_on_start=None):
+        self.port = port
         runner = web.AppRunner(self.app, access_log=None)
         await runner.setup()
         site = web.TCPSite(runner, address, port)

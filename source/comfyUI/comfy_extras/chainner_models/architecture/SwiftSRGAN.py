@@ -20,7 +20,7 @@ class SeperableConv2d(nn.Module):
         )
         self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=bias)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         return self.pointwise(self.depthwise(x))
 
 
@@ -45,7 +45,7 @@ class ConvBlock(nn.Module):
             else nn.PReLU(num_parameters=out_channels)
         )
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         return self.act(self.bn(self.cnn(x))) if self.use_act else self.bn(self.cnn(x))
 
 
@@ -65,7 +65,7 @@ class UpsampleBlock(nn.Module):
         )  # (in_channels * 4, H, W) -> (in_channels, H*2, W*2)
         self.act = nn.PReLU(num_parameters=in_channels)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         return self.act(self.ps(self.conv(x)))
 
 
@@ -80,7 +80,7 @@ class ResidualBlock(nn.Module):
             in_channels, in_channels, kernel_size=3, stride=1, padding=1, use_act=False
         )
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         out = self.block1(x)
         out = self.block2(out)
         return out + x
@@ -153,7 +153,7 @@ class Generator(nn.Module):
 
         self.load_state_dict(self.state, strict=False)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         initial = self.initial(x)
         x = self.residual(initial)
         x = self.convblock(x) + initial

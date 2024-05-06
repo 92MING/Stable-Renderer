@@ -29,7 +29,7 @@ class MLP(nn.Module):
         self.use_residual = use_residual
         self.act_fn = nn.GELU()
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         residual = x
         x = self.layernorm(x)
         x = self.fc1(x)
@@ -59,6 +59,7 @@ class FuseModule(nn.Module):
         prompt_embeds,
         id_embeds,
         class_tokens_mask,
+        **kwargs
     ) -> torch.Tensor:
         # id_embeds shape: [b, max_num_inputs, 1, 2048]
         id_embeds = id_embeds.to(prompt_embeds.dtype)
@@ -98,7 +99,7 @@ class PhotoMakerIDEncoder(comfy.clip_model.CLIPVisionModelProjection):
         self.visual_projection_2 = comfy.ops.manual_cast.Linear(1024, 1280, bias=False)
         self.fuse_module = FuseModule(2048, comfy.ops.manual_cast)
 
-    def forward(self, id_pixel_values, prompt_embeds, class_tokens_mask):
+    def forward(self, id_pixel_values, prompt_embeds, class_tokens_mask, **kwargs):
         b, num_inputs, c, h, w = id_pixel_values.shape
         id_pixel_values = id_pixel_values.view(b * num_inputs, c, h, w)
 

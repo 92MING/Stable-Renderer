@@ -48,14 +48,18 @@ def save_torch_file(sd, ckpt, metadata=None):
     else:
         safetensors.torch.save_file(sd, ckpt)
 
-def calculate_parameters(sd, prefix=""):
+def calculate_parameters(sd, prefix="")->int:
+    '''
+    Calculate the total number of parameters in the state_dict with the given prefix,
+    by calling the nelement() method of each tensor.
+    '''
     params = 0
     for k in sd.keys():
         if k.startswith(prefix):
             params += sd[k].nelement()
     return params
 
-def state_dict_key_replace(state_dict, keys_to_replace):
+def state_dict_key_replace(state_dict: dict, keys_to_replace: dict[str, torch.Tensor]):
     for x in keys_to_replace:
         if x in state_dict:
             state_dict[keys_to_replace[x]] = state_dict.pop(x)

@@ -159,7 +159,7 @@ class SDClipModel(torch.nn.Module, ClipTokenWeightEncoder):
 
         return processed_tokens
 
-    def forward(self, tokens):
+    def forward(self, tokens, **kwargs):
         backup_embeds = self.transformer.get_input_embeddings()
         device = backup_embeds.weight.device
         tokens = self.set_up_textual_embeddings(tokens, backup_embeds)

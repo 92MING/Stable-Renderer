@@ -21,7 +21,7 @@ class Get_gradient_nopadding(nn.Module):
 
         self.weight_v = nn.Parameter(data=kernel_v, requires_grad=False)  # type: ignore
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x_list = []
         for i in range(x.shape[1]):
             x_i = x[:, i]
@@ -313,7 +313,7 @@ class SPSRNet(nn.Module):
                 nb = int(parts[3])
         return nb
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x_grad = self.get_g_nopadding(x)
         x = self.model[0](x)
 

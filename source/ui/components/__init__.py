@@ -7,3 +7,5 @@ from .game_preview import *
 from .pipeline_editor import *
 
 from .inspector import *
+
+from .titlebar import *

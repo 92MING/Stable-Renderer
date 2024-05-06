@@ -37,7 +37,7 @@ class Mlp(nn.Module):
         self.fc2 = nn.Linear(hidden_features, out_features)
         self.drop = nn.Dropout(drop)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x = self.fc1(x)
         x = self.act(x)
         x = self.drop(x)
@@ -175,7 +175,7 @@ class WindowAttention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
         self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask=None, **kwargs):
         """
         Args:
             x: input features with shape of (num_windows*B, N, C)
@@ -360,7 +360,7 @@ class SwinTransformerBlock(nn.Module):
 
         return attn_mask
 
-    def forward(self, x, x_size):
+    def forward(self, x, x_size, **kwargs):
         H, W = x_size
         B, L, C = x.shape
         # assert L == H * W, "input feature has wrong size"
@@ -449,7 +449,7 @@ class PatchMerging(nn.Module):
         self.reduction = nn.Linear(4 * dim, 2 * dim, bias=False)
         self.norm = norm_layer(2 * dim)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         """
         x: B, H*W, C
         """
@@ -555,7 +555,7 @@ class BasicLayer(nn.Module):
         else:
             self.downsample = None
 
-    def forward(self, x, x_size):
+    def forward(self, x, x_size, **kwargs):
         for blk in self.blocks:
             if self.use_checkpoint:
                 x = checkpoint.checkpoint(blk, x, x_size)
@@ -617,7 +617,7 @@ class PatchEmbed(nn.Module):
         else:
             self.norm = None
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         B, C, H, W = x.shape
         # FIXME look at relaxing size constraints
         # assert H == self.img_size[0] and W == self.img_size[1],
@@ -725,7 +725,7 @@ class RSTB(nn.Module):
             norm_layer=None,
         )
 
-    def forward(self, x, x_size):
+    def forward(self, x, x_size, **kwargs):
         return (
             self.patch_embed(
                 self.conv(self.patch_unembed(self.residual_group(x, x_size), x_size))
@@ -770,7 +770,7 @@ class PatchUnEmbed(nn.Module):
         self.in_chans = in_chans
         self.embed_dim = embed_dim
 
-    def forward(self, x, x_size):
+    def forward(self, x, x_size, **kwargs):
         B, HW, C = x.shape
         x = x.transpose(1, 2).view(B, self.embed_dim, x_size[0], x_size[1])  # B Ph*Pw C
         return x
@@ -1280,7 +1280,7 @@ class Swin2SR(nn.Module):
 
         return x
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         H, W = x.shape[2:]
         x = self.check_image_size(x)
 

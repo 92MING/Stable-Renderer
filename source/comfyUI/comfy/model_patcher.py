@@ -8,11 +8,11 @@ from common_utils.debug_utils import ComfyUILogger
 
 from typing import TYPE_CHECKING, Optional, Union, TypeAlias
 if TYPE_CHECKING:
-    from comfyUI.types import ModelPatcherTypes
+    from comfyUI.types import ModelPatcherInnerModelTypes
 
 class ModelPatcher:
     def __init__(self, 
-                 model: "ModelPatcherTypes",
+                 model: "ModelPatcherInnerModelTypes",
                  load_device: torch.device,
                  offload_device, 
                  size=0,

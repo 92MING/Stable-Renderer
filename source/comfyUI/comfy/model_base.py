@@ -20,7 +20,11 @@ from comfy.model_sampling import (
     ModelSamplingDiscrete, ModelSamplingContinuousEDM, StableCascadeSampling
 )
 
-from typing import TypeAlias
+from typing import TypeAlias, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .supported_models_base import BASE
+
 
 class ModelType(Enum):
     EPS = 1
@@ -56,7 +60,11 @@ def model_sampling(model_config, model_type) -> ModelSamplingType:
 
 
 class BaseModel(torch.nn.Module):
-    def __init__(self, model_config, model_type=ModelType.EPS, device=None, unet_model=UNetModel):
+    def __init__(self, 
+                 model_config: "BASE", 
+                 model_type=ModelType.EPS, 
+                 device=None, 
+                 unet_model=UNetModel):
         super().__init__()
 
         unet_config = model_config.unet_config
@@ -83,8 +91,11 @@ class BaseModel(torch.nn.Module):
             ComfyUILogger.print("adm", self.adm_channels)
 
     def apply_model(self, x, t, c_concat=None, c_crossattn=None, control=None, transformer_options={}, **kwargs):
+        # x.shape = ((pos + neg condition count) * batch_size, 4, 64, 64)
+        # this method will be called in `comfy.samplers.calc_cond_uncond_batch`
         sigma = t
         xc = self.model_sampling.calculate_input(sigma, x)
+
         if c_concat is not None:
             xc = torch.cat([xc] + [c_concat], dim=1)
 
@@ -100,12 +111,17 @@ class BaseModel(torch.nn.Module):
         extra_conds = {}
         for o in kwargs:
             extra = kwargs[o]
-            if hasattr(extra, "dtype"):
+            if hasattr(extra, "dtype") and callable(getattr(extra, "to", None)):
                 if extra.dtype != torch.int and extra.dtype != torch.long:
                     extra = extra.to(dtype)
             extra_conds[o] = extra
 
-        model_output = self.diffusion_model(xc, t, context=context, control=control, transformer_options=transformer_options, **extra_conds).float()
+        model_output = self.diffusion_model(xc, 
+                                            t, 
+                                            context=context, 
+                                            control=control, 
+                                            transformer_options=transformer_options, 
+                                            **extra_conds).float()
         return self.model_sampling.calculate_denoised(sigma, model_output, x)
 
     def get_dtype(self):

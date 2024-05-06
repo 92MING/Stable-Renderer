@@ -1,6 +1,7 @@
-from PySide6.QtWidgets import QWidget, QApplication, QMainWindow, QTreeWidget, QTreeWidgetItem\
+from PySide6.QtWidgets import QWidget, QApplication, QMainWindow, QTreeWidget, QTreeWidgetItem
 
 class GameObjListWindow(QTreeWidget):
+    
     def __init__(self, parent):
         super().__init__(parent)
         self.setColumnCount(1)
@@ -12,6 +13,7 @@ class GameObjListWindow(QTreeWidget):
         self.setRootIsDecorated(False)
         self.setExpandsOnDoubleClick(False)
         self.setAllColumnsShowFocus(True)
+
         test_item = self.addItem('test')
         test_item.addChild(QTreeWidgetItem(['test_child']))
         test_item.addChild(QTreeWidgetItem(['test_child2']))

@@ -16,9 +16,10 @@ import nodes
 import comfy.model_management
 
 from common_utils.debug_utils import ComfyUILogger, get_log_level_by_name
-from common_utils.decorators import singleton, class_property, Overload
+from common_utils.decorators import singleton, class_property, class_or_ins_property
 from common_utils.global_utils import is_dev_mode, is_verbose_mode, is_engine_looping
-from common_utils.type_utils import format_data_for_console_log, custom_deep_copy
+from common_utils.type_utils import custom_deep_copy
+from common_utils.debug_utils import format_data_for_console_log
 from comfyUI.types import *
 from comfyUI.adapters import find_adapter
 
@@ -343,6 +344,10 @@ def recursive_execute(server: "PromptServer",
 @singleton(cross_module_singleton=True)
 class PromptExecutor:
     '''The executor for running inference.'''
+    
+    @class_or_ins_property  # type: ignore
+    def instance(cls_or_ins)->'PromptExecutor':
+        return PromptExecutor()   # will get the singleton instance if it's already created
     
     server: Optional['PromptServer']
     '''The server that this executor is associated with. If None, the executor'''

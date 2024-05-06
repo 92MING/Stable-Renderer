@@ -94,7 +94,7 @@ class VectorQuantize(nn.Module):
             q_idx = q_idx.movedim(-1, dim)
         return q_idx
 
-    def forward(self, x, get_losses=True, dim=-1):
+    def forward(self, x, get_losses=True, dim=-1, **kwargs):
         if dim != -1:
             x = x.movedim(dim, -1)
         z_e_x = x.contiguous().view(-1, x.size(-1)) if len(x.shape) > 2 else x
@@ -146,7 +146,7 @@ class ResBlock(nn.Module):
     def _norm(self, x, norm):
         return norm(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         mods = self.gammas
 
         x_temp = self._norm(x, self.norm1) * (1 + mods[0]) + mods[1]
@@ -224,7 +224,7 @@ class StageA(nn.Module):
         x = self.out_block(x)
         return x
 
-    def forward(self, x, quantize=False):
+    def forward(self, x, quantize=False, **kwargs):
         qe, x, _, vq_loss = self.encode(x, quantize)
         x = self.decode(qe)
         return x, vq_loss
@@ -248,7 +248,7 @@ class Discriminator(nn.Module):
         self.shuffle = nn.Conv2d((c_hidden + c_cond) if c_cond > 0 else c_hidden, 1, kernel_size=1)
         self.logits = nn.Sigmoid()
 
-    def forward(self, x, cond=None):
+    def forward(self, x, cond=None, **kwargs):
         x = self.encoder(x)
         if cond is not None:
             cond = cond.view(cond.size(0), cond.size(1), 1, 1, ).expand(-1, -1, x.size(-2), x.size(-1))

@@ -11,8 +11,8 @@ from abc import ABC
 
 from common_utils.global_utils import should_run_web_server, is_verbose_mode, is_dev_mode
 from common_utils.debug_utils import ComfyUILogger
-from common_utils.type_utils import get_origin, is_empty_method, format_data_for_console_log
-
+from common_utils.type_utils import get_origin, is_empty_method
+from common_utils.debug_utils import format_data_for_console_log
 from .basic import *
 
 class _ComfyUINodeMeta(_ProtocolMeta):

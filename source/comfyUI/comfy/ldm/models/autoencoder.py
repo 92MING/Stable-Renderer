@@ -18,7 +18,7 @@ class DiagonalGaussianRegularizer(torch.nn.Module):
     def get_trainable_parameters(self) -> Any:
         yield from ()
 
-    def forward(self, z: torch.Tensor) -> Tuple[torch.Tensor, dict]:
+    def forward(self, z: torch.Tensor, **kwargs) -> Tuple[torch.Tensor, dict]:
         log = dict()
         posterior = DiagonalGaussianDistribution(z)
         if self.sample:
@@ -139,9 +139,7 @@ class AutoencodingEngine(AbstractAutoencoder):
         x = self.decoder(z, **kwargs)
         return x
 
-    def forward(
-        self, x: torch.Tensor, **additional_decode_kwargs
-    ) -> Tuple[torch.Tensor, torch.Tensor, dict]:
+    def forward(self, x: torch.Tensor, **additional_decode_kwargs) -> Tuple[torch.Tensor, torch.Tensor, dict]:
         z, reg_log = self.encode(x, return_reg_log=True)
         dec = self.decode(z, **additional_decode_kwargs)
         return z, dec, reg_log

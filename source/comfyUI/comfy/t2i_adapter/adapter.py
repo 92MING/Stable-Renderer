@@ -56,7 +56,7 @@ class Downsample(nn.Module):
             assert self.channels == self.out_channels
             self.op = avg_pool_nd(dims, kernel_size=stride, stride=stride)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         assert x.shape[1] == self.channels
         if not self.use_conv:
             padding = [x.shape[2] % 2, x.shape[3] % 2]
@@ -87,7 +87,7 @@ class ResnetBlock(nn.Module):
         if self.down == True:
             self.down_opt = Downsample(in_c, use_conv=use_conv)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         if self.down == True:
             x = self.down_opt(x)
         if self.in_conv is not None:  # edit
@@ -133,7 +133,7 @@ class Adapter(nn.Module):
         self.body = nn.ModuleList(self.body)
         self.conv_in = nn.Conv2d(cin, channels[0], 3, 1, 1)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         # unshuffle
         x = self.unshuffle(x)
         # extract features
@@ -161,7 +161,7 @@ class Adapter(nn.Module):
 class LayerNorm(nn.LayerNorm):
     """Subclass torch's LayerNorm to handle fp16."""
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, **kwargs):
         orig_type = x.dtype
         ret = super().forward(x.type(torch.float32))
         return ret.type(orig_type)
@@ -169,7 +169,7 @@ class LayerNorm(nn.LayerNorm):
 
 class QuickGELU(nn.Module):
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, **kwargs):
         return x * torch.sigmoid(1.702 * x)
 
 
@@ -190,7 +190,7 @@ class ResidualAttentionBlock(nn.Module):
         self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, **kwargs):
         x = x + self.attention(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
         return x
@@ -217,7 +217,7 @@ class StyleAdapter(nn.Module):
     def transformer_layes(self):    # type: ignore
         return self.transformer_layers
     
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         # x shape [N, HW+1, C]
         style_embedding = self.style_embedding + torch.zeros(
             (x.shape[0], self.num_token, self.style_embedding.shape[-1]), device=x.device)
@@ -240,7 +240,7 @@ class ResnetBlock_light(nn.Module):
         self.act = nn.ReLU()
         self.block2 = nn.Conv2d(in_c, in_c, 3, 1, 1)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         h = self.block1(x)
         h = self.act(h)
         h = self.block2(h)
@@ -261,7 +261,7 @@ class extractor(nn.Module):
         if self.down == True:
             self.down_opt = Downsample(in_c, use_conv=False)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         if self.down == True:
             x = self.down_opt(x)
         x = self.in_conv(x)
@@ -289,7 +289,7 @@ class Adapter_light(nn.Module):
                 self.body.append(extractor(in_c=channels[i-1], inter_c=channels[i]//4, out_c=channels[i], nums_rb=nums_rb, down=True))
         self.body = nn.ModuleList(self.body)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         # unshuffle
         x = self.unshuffle(x)
         # extract features

@@ -26,7 +26,7 @@ class LitEma(nn.Module):
         del self.num_updates
         self.register_buffer('num_updates', torch.tensor(0, dtype=torch.int))
 
-    def forward(self, model):
+    def forward(self, model, **kwargs):
         decay = self.decay
 
         if self.num_updates >= 0:

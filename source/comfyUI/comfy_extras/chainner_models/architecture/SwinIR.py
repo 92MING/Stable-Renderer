@@ -1159,7 +1159,7 @@ class SwinIR(nn.Module):
 
         return x
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         H, W = x.shape[2:]
         x = self.check_image_size(x)
 

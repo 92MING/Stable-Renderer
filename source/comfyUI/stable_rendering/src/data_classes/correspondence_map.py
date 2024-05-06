@@ -22,66 +22,6 @@ if TYPE_CHECKING:
     from engine.static.texture import Texture
 
 
-@attrs
-class IDMap:
-    '''IDMap represents the ID information of each frame, which is used to build the correspondence map(a packed version of IDMap)'''
-    
-    frame_index: int = attrib()
-    '''the frame index of this map'''
-
-    _origin_tex: Optional["Texture"] = attrib(alias='origin_tex')
-    '''the original texture containing the ID information'''
-    
-    _tensor: Optional[torch.Tensor] = attrib(default=None, alias='_tensor')
-    _ndarray: Optional[numpy.ndarray] = attrib(default=None, alias='_ndarray')
-    
-    @property
-    def tensor(self)->torch.Tensor:
-        '''get the info data in tensor format'''
-        if self._tensor is None:
-            if not self._origin_tex:
-                raise ValueError("origin_tex of IDMap is not set, cannot get tensor data")
-            self._tensor = self._origin_tex.tensor(update=True, flip=True)
-        return self._tensor
-    
-    @property
-    def ndarray(self)->numpy.ndarray:
-        '''get the info data in numpy array format'''
-        if self._ndarray is None:
-            self._ndarray = self.tensor.cpu().numpy()
-        return self._ndarray
-    
-    def __deepcopy__(self):
-        tensor = self.tensor.clone()
-        ndarray = self._ndarray
-        if ndarray is not None:
-            ndarray = ndarray.copy()
-        map = IDMap(frame_index=self.frame_index, origin_tex=None, _tensor=tensor, _ndarray=ndarray)
-        return map
-
-
-T = TypeVar('T', bound='CorrespondenceMap')
-
-class R3Pixel:
-    
-    def __init__(self, 
-                 k:int, 
-                 pivot_color: Optional[Color]=None,
-                 colors: Optional[List[Color]]=None):
-        '''
-        Args:
-            - k: constant for defining 3d pixel's size
-            - pivot_color: the color of the pivot point
-            - colors: the colors of the points viewing from different directions
-        '''
-        self.k = k
-        self.pivot_color = pivot_color
-        self.colors = colors or ([None] * (k ** 2))
-        if len(self.colors) < (k ** 2):
-            raise ValueError(f"Length of colors in R3 pixel should equals to k^2={k ** 2}")
-        
-
-
 class CorrespondenceMap:
     r"""
     CorrespondenceMap instances should have the following structure:
@@ -234,7 +174,7 @@ class CorrespondenceMap:
 
     # TODO: integrate utils.make_corr_map
     @ classmethod
-    def LoadFromCache(cls: Type[T], path: str)->T:
+    def LoadFromCache(cls, path: str)->'CorrespondenceMap':
         '''
         Load the correspondence map from a cache file, if it exists.
         
@@ -247,7 +187,7 @@ class CorrespondenceMap:
             raise FileNotFoundError(f"Correspondence map cache file not found at {path}")
         
         with open(path, 'rb') as f:
-            corr_map: T = pickle.load(f)
+            corr_map = pickle.load(f)
             logu.success(f"Correspondence map loaded from {path}")
             return corr_map
 
@@ -347,4 +287,4 @@ class CorrespondenceMap:
 
 
 
-__all__ = ['IDMap', 'CorrespondenceMap']
+__all__ = ['CorrespondenceMap']

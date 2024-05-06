@@ -16,11 +16,10 @@ from inspect import getfullargspec, signature, getmro
 from enum import Enum
 from functools import partial
 from collections.abc import Callable
-from PyQt6.QtCore import QObject, pyqtSignal as Signal
+from PySide6.QtCore import QObject, Signal
 from typing import ForwardRef, get_origin, get_args, Union, Iterable, Literal, Callable
 
 from common_utils.type_utils import valueTypeCheck, subClassCheck
-from common_utils.debug_utils import DefaultLogger
 
 
 # region helper functions
@@ -375,6 +374,7 @@ class Event:
         except KeyError:
             if throwError:
                 raise ListenerNotFoundError
+    
     def removeTempListener(self, listener:Callable, throwError=True):
         '''remove a temp listener from event'''
         try:
@@ -402,9 +402,7 @@ class Event:
                 else:
                     raise e
             except Exception as e:
-                if ignoreErr:
-                    DefaultLogger.print(f"Exception occurred in event {event}. Msg: {e}. Skipped.")
-                else:
+                if not ignoreErr:
                     raise e
         for event in self.tempEvents:
             try:
@@ -416,11 +414,10 @@ class Event:
                 else:
                     raise e
             except Exception as e:
-                if ignoreErr:
-                    DefaultLogger.print(f"Exception occurred in event {event}. Msg: {e}. Skipped.")
-                else:
+                if not ignoreErr:
                     raise e
         self._tempEvents.clear()
+    
     def _check_invoke_params(self, *args):
         if len(args) < len(self.args):
             argNeeded = self.args[len(args):]
@@ -439,6 +436,7 @@ class Event:
             elif not valueTypeCheck(arg, self.args[i]):
                 if not (arg is None and self._acceptNone):
                     raise Exception(f"Parameter: {arg} is not valid for type'{self.args[i]}'")
+    
     def invoke(self, *args, ignoreErr=False):
         '''invoke all listeners'''
         if not self._noCheck:
@@ -465,6 +463,7 @@ class Event:
     def eventsCount(self):
         '''return the count of normal events'''
         return len(self._events)
+    
     def tempEventsCount(self):
         '''return the count of temp events'''
         return len(self._tempEvents)
@@ -473,6 +472,7 @@ class Event:
         '''clear all events(both temp and normal)'''
         self._events.clear()
         self._tempEvents.clear()
+
 
 class DelayEvent(Event):
     '''
@@ -491,6 +491,7 @@ class DelayEvent(Event):
         if self._last_param is not None:
             super().invoke(*self._last_param)
         self._last_param = None
+
 
 class Tasks(Event):
     '''
@@ -762,9 +763,7 @@ class AutoSortTask(Tasks):
                 else:
                     raise e
             except Exception as e:
-                if ignoreErr:
-                    DefaultLogger.print(f"Exception occurred in event {task}. Msg: {e}. Skipped.")
-                else:
+                if not ignoreErr:
                     raise e
         self._tempEvents.clear()
         

@@ -2,12 +2,11 @@ import numpy
 import torch
 
 from attr import attrs, attrib
-from typing import Optional, TYPE_CHECKING, Callable, TypeAlias, Any
+from typing import Optional, TYPE_CHECKING, Callable, TypeAlias, Literal
 
 if TYPE_CHECKING:
     from engine.static.texture import Texture
-    from .corrmap import CorrespondenceMap
-    from comfyUI.types import InferenceContext, SamplingCallbackContext
+    from comfyUI.types import BakingData
 
 @attrs
 class IDMap:
@@ -46,36 +45,18 @@ class IDMap:
         m = IDMap(frame_index=self.frame_index, origin_tex=None, _tensor=tensor, _ndarray=ndarray)
         return m
 
-class CorrTraceContext:
-    '''
-    Context of correspondence tracing. For finding the latent relation by correspondence map, and edit the result directly.
-    For each timestep in sampling process, the same CorrTraceContext obj will be passed to you(but some fields may change).
-    '''
+
+CorrespondStage:TypeAlias = Literal['unet_downscale', 'unet_middle', 'unet_upscale', 'vae_decode']
+
+Corresponder: TypeAlias = Callable[["BakingData", torch.Tensor, CorrespondStage, int], torch.Tensor]
+
+def equal_contrib_corresponder(baking_data: "BakingData", 
+                               frame_values: torch.Tensor, 
+                               stage: CorrespondStage, 
+                               layer: int)->torch.Tensor:
+    ...
+
+
+
     
-    inference_context: "InferenceContext"
-    '''context of current inference. During the whole tracing, the inference context will not change.'''
-    sampling_context: "SamplingCallbackContext"
-    '''
-    Context of current sampling. Each timestep will have a different sampling context.
-    You should edit the latent image in this context.
-    '''
-    correspondence_map: "CorrespondenceMap"
-    '''the correspondence map that contains each baked pixels's information'''
-    
-    @property
-    def baking_data(self):
-        '''
-        Alias of `inference_context.baking_data`.
-        It is an extra runtime data for baking. For each tracing process, multiple FrameData will be packed together and forms this baking data.
-        
-        Note: as said above, you should not access the `inference_context.frame_data`, since it is not `FrameData` but `BakingData`.
-        '''
-        return self.inference_context.baking_data
-
-
-
-CorrespondingTracer: TypeAlias = Callable[[CorrTraceContext], Any]
-
-
-
-__all__ = ['IDMap']
+__all__ = ['IDMap', 'Corresponder', 'CorrespondStage', 'equal_contrib_corresponder']

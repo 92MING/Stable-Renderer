@@ -122,6 +122,10 @@ def is_game_editor_mode():
     '''indicate whether engine is running within rendering loop under editor mode.'''
     return is_editor_mode() and is_engine_looping()
 
+def is_comfy_main():
+    '''whether it is running comfyUI directly.'''
+    return GetEnv('COMFYUI_DIRECT_RUN', False, bool)
+
 def should_run_web_server()->bool:
     '''Indicates whether the comfyUI's web server should be started.'''
     should_run = GetEnv('COMFYUI_DIRECT_RUN', False, bool)
@@ -176,7 +180,7 @@ def is_dev_verbose()->bool:
     return is_verbose_mode() and is_dev_mode()
 
 __all__ = ['GetEnv', 'is_verbose_mode', 'should_run_web_server', 'is_game_mode', 'is_editor_mode', 'is_release_mode', 'is_dev_mode',
-           'is_engine_looping', 'is_dev_verbose', 'is_game_editor_mode']
+           'is_engine_looping', 'is_dev_verbose', 'is_game_editor_mode', 'is_comfy_main']
 # endregion
 
 # region global values

@@ -55,7 +55,7 @@ class Upsample(nn.Module):
                                         stride=1,
                                         padding=1)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         try:
             x = torch.nn.functional.interpolate(x, scale_factor=2.0, mode="nearest")
         except: #operation not implemented for bf16
@@ -85,7 +85,7 @@ class Downsample(nn.Module):
                                         stride=2,
                                         padding=0)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         if self.with_conv:
             pad = (0,1,0,1)
             x = torch.nn.functional.pad(x, pad, mode="constant", value=0)
@@ -135,7 +135,7 @@ class ResnetBlock(nn.Module):
                                                     stride=1,
                                                     padding=0)
 
-    def forward(self, x, temb):
+    def forward(self, x, temb, **kwargs):
         h = x
         h = self.norm1(h)
         h = self.swish(h)
@@ -277,7 +277,7 @@ class AttnBlock(nn.Module):
             ComfyUILogger.print("Using split attention in VAE")
             self.optimized_attention = normal_attention
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         h_ = x
         h_ = self.norm(h_)
         q = self.q(h_)
@@ -395,7 +395,7 @@ class Model(nn.Module):
                                         stride=1,
                                         padding=1)
 
-    def forward(self, x, t=None, context=None):
+    def forward(self, x, t=None, context=None, **kwargs):
         #assert x.shape[2] == x.shape[3] == self.resolution
         if context is not None:
             # assume aligned context, cat along channel axis
@@ -513,7 +513,7 @@ class Encoder(nn.Module):
                                         stride=1,
                                         padding=1)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         # timestep embedding
         temb = None
         # downsampling

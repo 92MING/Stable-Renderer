@@ -14,7 +14,7 @@ ClipModelType: TypeAlias = Union["SDClipModel", "SD1ClipModel", "SDXLClipModel"]
 '''Base types for ClipModel. '''
 TokenizerType: TypeAlias = Union["SDTokenizer", "SD1Tokenizer", "SDXLTokenizer"] # some other types like SD2Tokenizer are inherited from these types, so no need to include them.
 '''Base types for Tokenizer. '''
-ModelPatcherTypes: TypeAlias = Union['BaseModel', 'SD21UNCLIP', 'SDClipModel', 'SD1ClipModel', 'SDXLClipModel', 'CLIPVisionModelProjection', 'Gligen']
+ModelPatcherInnerModelTypes: TypeAlias = Union['BaseModel', 'SD21UNCLIP', 'SDClipModel', 'SD1ClipModel', 'SDXLClipModel', 'CLIPVisionModelProjection', 'Gligen']
 '''types that acceptable for `ModelPatcher` class's first argument `model`. '''
 
 
@@ -77,4 +77,4 @@ def is_model_type(model):
                                 BaseModel, SD21UNCLIP, SDClipModel, SD1ClipModel))    # type: ignore
 
 
-__all__ = ['ClipModelType', 'TokenizerType', 'ModelPatcherTypes', 'ModelLike', 'ClipTargetProtocol', 'is_model_type']
+__all__ = ['ClipModelType', 'TokenizerType', 'ModelPatcherInnerModelTypes', 'ModelLike', 'ClipTargetProtocol', 'is_model_type']

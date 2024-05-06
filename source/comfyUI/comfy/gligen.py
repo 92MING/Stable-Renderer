@@ -25,7 +25,7 @@ class GEGLU(nn.Module):
         super().__init__()
         self.proj = ops.Linear(dim_in, dim_out * 2)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         x, gate = self.proj(x).chunk(2, dim=-1)
         return x * torch.nn.functional.gelu(gate)
 
@@ -46,7 +46,7 @@ class FeedForward(nn.Module):
             ops.Linear(inner_dim, dim_out)
         )
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         return self.net(x)
 
 
@@ -73,7 +73,7 @@ class GatedCrossAttentionDense(nn.Module):
         # original one
         self.scale = 1
 
-    def forward(self, x, objs):
+    def forward(self, x, objs, **kwargs):
 
         x = x + self.scale * \
             torch.tanh(self.alpha_attn) * self.attn(self.norm1(x), objs, objs)
@@ -110,7 +110,7 @@ class GatedSelfAttentionDense(nn.Module):
         # original one
         self.scale = 1
 
-    def forward(self, x, objs):
+    def forward(self, x, objs, **kwargs):
 
         N_visual = x.shape[1]
         objs = self.linear(objs)
@@ -146,7 +146,7 @@ class GatedSelfAttentionDense2(nn.Module):
         # original one
         self.scale = 1
 
-    def forward(self, x, objs):
+    def forward(self, x, objs, **kwargs):
 
         B, N_visual, _ = x.shape
         B, N_ground, _ = objs.shape
@@ -216,7 +216,7 @@ class PositionNet(nn.Module):
         self.null_position_feature = torch.nn.Parameter(
             torch.zeros([self.position_dim]))
 
-    def forward(self, boxes, masks, positive_embeddings):
+    def forward(self, boxes, masks, positive_embeddings, **kwargs):
         B, N, _ = boxes.shape
         masks = masks.unsqueeze(-1)
         positive_embeddings = positive_embeddings

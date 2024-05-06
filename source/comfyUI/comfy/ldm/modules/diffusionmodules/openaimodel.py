@@ -1,5 +1,5 @@
 from abc import abstractmethod
-
+import inspect
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,28 +24,48 @@ class TimestepBlock(nn.Module):
     """
 
     @abstractmethod
-    def forward(self, x, emb):
+    def forward(self, x, emb, **extra_args):
         """
         Apply the module to `x` given `emb` timestep embeddings.
         """
 
 #This is needed because accelerate makes a copy of transformer_options which breaks "transformer_index"
-def forward_timestep_embed(ts, x, emb, context=None, transformer_options={}, output_shape=None, time_context=None, num_video_frames=None, image_only_indicator=None):
+def forward_timestep_embed(ts,  # the sequential module
+                           x,   # the latent tensor
+                           emb, 
+                           context=None,    # the text embedding by CLIP
+                           transformer_options={}, 
+                           output_shape=None, 
+                           time_context=None, 
+                           num_video_frames=None, 
+                           image_only_indicator=None,
+                           **extra_args):
     for layer in ts:
         if isinstance(layer, VideoResBlock):
-            x = layer(x, emb, num_video_frames, image_only_indicator)
+            x = layer(x, emb, num_video_frames, image_only_indicator, **extra_args)
+        
         elif isinstance(layer, TimestepBlock):
-            x = layer(x, emb)
+            if hasattr(layer, 'forward'):
+                sig = inspect.signature(layer.forward)
+                if 'extra_args' in sig.parameters and sig.parameters['extra_args'].kind == inspect.Parameter.VAR_KEYWORD:
+                    x = layer(x, emb, **extra_args)
+                else:
+                    x = layer(x, emb)
+            else:
+                x = layer(x, emb)
+        
         elif isinstance(layer, SpatialVideoTransformer):
-            x = layer(x, context, time_context, num_video_frames, image_only_indicator, transformer_options)
+            x = layer(x, context, time_context, num_video_frames, image_only_indicator, transformer_options, **extra_args)
             if "transformer_index" in transformer_options:
                 transformer_options["transformer_index"] += 1
+        
         elif isinstance(layer, SpatialTransformer):
-            x = layer(x, context, transformer_options)
+            x = layer(x, context, transformer_options, **extra_args)
             if "transformer_index" in transformer_options:
                 transformer_options["transformer_index"] += 1
+                
         elif isinstance(layer, Upsample):
-            x = layer(x, output_shape=output_shape)
+            x = layer(x, output_shape=output_shape, **extra_args)
         else:
             x = layer(x)
     return x
@@ -77,7 +97,8 @@ class Upsample(nn.Module):
         if use_conv:
             self.conv = operations.conv_nd(dims, self.channels, self.out_channels, 3, padding=padding, dtype=dtype, device=device)
 
-    def forward(self, x, output_shape=None):
+    def forward(self, x, output_shape=None, **extra_args):  
+        # extra_args if for you to pass any special arguments easily
         assert x.shape[1] == self.channels
         if self.dims == 3:
             shape = [x.shape[2], x.shape[3] * 2, x.shape[4] * 2]
@@ -119,7 +140,7 @@ class Downsample(nn.Module):
             assert self.channels == self.out_channels
             self.op = avg_pool_nd(dims, kernel_size=stride, stride=stride)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         assert x.shape[1] == self.channels
         return self.op(x)
 
@@ -220,7 +241,7 @@ class ResBlock(TimestepBlock):
         else:
             self.skip_connection = operations.conv_nd(dims, channels, self.out_channels, 1, dtype=dtype, device=device)
 
-    def forward(self, x, emb):
+    def forward(self, x, emb, **kwargs):
         """
         Apply the block to a Tensor, conditioned on a timestep embedding.
         :param x: an [N x C x ...] Tensor of features.
@@ -329,6 +350,7 @@ class VideoResBlock(ResBlock):
         emb: th.Tensor,
         num_video_frames: int,
         image_only_indicator = None,
+        **extra_args,
     ) -> th.Tensor:
         x = super().forward(x, emb)
 
@@ -350,7 +372,7 @@ class Timestep(nn.Module):
         super().__init__()
         self.dim = dim
 
-    def forward(self, t):
+    def forward(self, t, **kwargs):
         return timestep_embedding(t, self.dim)
 
 def apply_control(h, control, name):
@@ -816,14 +838,27 @@ class UNetModel(nn.Module):
             #nn.LogSoftmax(dim=1)  # change to cross_entropy and produce non-normalized logits
         )
 
-    def forward(self, x, timesteps=None, context=None, y=None, control=None, transformer_options={}, **kwargs):
+    def forward(self, 
+                x, 
+                timesteps=None, 
+                context=None, 
+                y=None, 
+                control=None, 
+                transformer_options={}, 
+                **kwargs):
         """
         Apply the model to an input batch.
-        :param x: an [N x C x ...] Tensor of inputs.
-        :param timesteps: a 1-D batch of timesteps.
-        :param context: conditioning plugged in via crossattn
-        :param y: an [N] Tensor of labels, if class-conditional.
-        :return: an [N x C x ...] Tensor of outputs.
+        
+        Args:
+            - x: an [N x C x ...] Tensor of inputs.
+            - timesteps: a 1-D batch of timesteps.
+            - context: conditioning plugged in via crossattn
+            - y: an [N] Tensor of labels, if class-conditional.
+            
+            - extra_args: Any extra arguments to pass to layers' `forward` method. 
+                          This is only available when your layer accepts `**extra_args`.
+        Return: 
+            an [N x C x ...] Tensor of outputs.
         """
         transformer_options["original_shape"] = list(x.shape)
         transformer_options["transformer_index"] = 0
@@ -832,6 +867,7 @@ class UNetModel(nn.Module):
         num_video_frames = kwargs.get("num_video_frames", self.default_num_video_frames)
         image_only_indicator = kwargs.get("image_only_indicator", None)
         time_context = kwargs.get("time_context", None)
+        extra_args = kwargs.get("extra_args", {})
 
         assert (y is not None) == (
             self.num_classes is not None
@@ -847,7 +883,15 @@ class UNetModel(nn.Module):
         h = x
         for id, module in enumerate(self.input_blocks):
             transformer_options["block"] = ("input", id)
-            h = forward_timestep_embed(module, h, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
+            h = forward_timestep_embed(module, 
+                                       h, 
+                                       emb, 
+                                       context, 
+                                       transformer_options, 
+                                       time_context=time_context, 
+                                       num_video_frames=num_video_frames, 
+                                       image_only_indicator=image_only_indicator,
+                                       **extra_args)
             h = apply_control(h, control, 'input')
             if "input_block_patch" in transformer_patches:
                 patch = transformer_patches["input_block_patch"]
@@ -862,7 +906,15 @@ class UNetModel(nn.Module):
 
         transformer_options["block"] = ("middle", 0)
         if self.middle_block is not None:
-            h = forward_timestep_embed(self.middle_block, h, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
+            h = forward_timestep_embed(self.middle_block, 
+                                       h, 
+                                       emb, 
+                                       context, 
+                                       transformer_options, 
+                                       time_context=time_context, 
+                                       num_video_frames=num_video_frames, 
+                                       image_only_indicator=image_only_indicator,
+                                        **extra_args)
         h = apply_control(h, control, 'middle')
 
 
@@ -882,7 +934,15 @@ class UNetModel(nn.Module):
                 output_shape = hs[-1].shape
             else:
                 output_shape = None
-            h = forward_timestep_embed(module, h, emb, context, transformer_options, output_shape, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
+            h = forward_timestep_embed(module, 
+                                       h, emb, 
+                                       context, 
+                                       transformer_options, 
+                                       output_shape, 
+                                       time_context=time_context,
+                                       num_video_frames=num_video_frames, 
+                                       image_only_indicator=image_only_indicator,
+                                       **extra_args)
         h = h.type(x.dtype)
         if self.predict_codebook_ids:
             return self.id_predictor(h)

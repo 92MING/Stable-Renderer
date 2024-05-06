@@ -280,7 +280,7 @@ class RRDBNet(nn.Module):
                 break
         return max(*nbs) + 1
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         if self.shuffle_factor:
             _, _, h, w = x.size()
             mod_pad_h = (

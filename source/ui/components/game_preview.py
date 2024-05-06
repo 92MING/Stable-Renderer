@@ -1,13 +1,14 @@
+import numpy as np
 import OpenGL.GL as gl
 import OpenGL.GLU as GLU
-import numpy as np
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from OpenGL.arrays import vbo
+from common_utils.decorators import singleton
 
+@singleton(cross_module_singleton=True)
 class GamePreview(QOpenGLWidget):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.setWindowTitle('Stable Renderer')
     
     def initializeGL(self):
         self.cubeVtxArray = np.array(
