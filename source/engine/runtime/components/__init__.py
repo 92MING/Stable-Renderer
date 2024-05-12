@@ -7,3 +7,5 @@ from .control import *
 from .renderer import *
 
 from .light import *
+
+from .ai import *

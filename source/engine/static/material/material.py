@@ -1,7 +1,7 @@
 '''Base class of Game Material.'''
 import glm
 
-from typing import Union, get_args, Dict, Tuple, TypeVar, Type, Optional, Literal
+from typing import Union, get_args, Dict, Tuple, TypeVar, Type, Literal, overload, TYPE_CHECKING
 from enum import Enum
 from dataclasses import dataclass
 from common_utils.type_utils import valueTypeCheck
@@ -13,6 +13,8 @@ from engine.static.resources_obj import ResourcesObj
 from engine.static.texture import Texture
 from engine.static.shader import Shader, SupportedShaderValueTypes
 
+if TYPE_CHECKING:
+    from common_utils.stable_render_utils import CorrespondMap
 
 T = TypeVar('T', bound='Material')
 '''Type var for child class of Material'''
@@ -30,27 +32,28 @@ class DefaultTexture:
 class DefaultTextureType(Enum):
     '''This class is used to store the default texture types. e.g. DiffuseTex, NormalTex, etc.'''
 
-    DiffuseTex = DefaultTexture('diffuseTex', 'hasDiffuseTex', 0)
+    DiffuseTex = DefaultTexture('diffuseTex', 'hasDiffuseTex', 5)
     '''Color texture of the material'''
-    NormalTex = DefaultTexture('normalTex', 'hasNormalTex', 1)
+    NormalTex = DefaultTexture('normalTex', 'hasNormalTex', 6)
     '''Normal texture of the material'''
-    SpecularTex = DefaultTexture('specularTex', 'hasSpecularTex', 2)
+    SpecularTex = DefaultTexture('specularTex', 'hasSpecularTex', 7)
     '''Light reflection texture of the material'''
-    EmissionTex = DefaultTexture('emissionTex', 'hasEmissionTex', 3)
+    EmissionTex = DefaultTexture('emissionTex', 'hasEmissionTex', 8)
     '''Light emission texture of the material'''
-    OcclusionTex = DefaultTexture('occlusionTex', 'hasOcclusionTex', 4)
+    OcclusionTex = DefaultTexture('occlusionTex', 'hasOcclusionTex', 9)
     '''Ambient occlusion texture of the material. Known as `AO` texture.'''
-    MetallicTex = DefaultTexture('metallicTex', 'hasMetallicTex', 5)
+    MetallicTex = DefaultTexture('metallicTex', 'hasMetallicTex', 10)
     '''Metallic texture of the material'''
-    RoughnessTex = DefaultTexture('roughnessTex', 'hasRoughnessTex', 6)
+    RoughnessTex = DefaultTexture('roughnessTex', 'hasRoughnessTex', 11)
     '''Roughness texture of the material'''
-    DisplacementTex = DefaultTexture('displacementTex', 'hasDisplacementTex', 7)
+    DisplacementTex = DefaultTexture('displacementTex', 'hasDisplacementTex', 12)
     '''Displacement texture of the material'''
-    AlphaTex = DefaultTexture('alphaTex', 'hasAlphaTex', 8)
+    AlphaTex = DefaultTexture('alphaTex', 'hasAlphaTex', 13)
     '''Alpha texture of the material'''
-    
-    NoiseTex = DefaultTexture('noiseTex', 'hasNoiseTex', 9)
+    NoiseTex = DefaultTexture('noiseTex', 'hasNoiseTex', 14)
     '''Noise texture, for AI rendering'''
+    CorrespondMap = DefaultTexture('corrMap', 'hasCorrMap', 15)
+    '''correspondence map, for AI baked rendering'''
 
     @classmethod
     def FindDefaultTexture(cls, texName:str):
@@ -96,7 +99,11 @@ class DefaultVariableType(Enum):
     '''Illumination model of the material'''
 
 def _new_mat_id():
-    mat_id = GetOrAddGlobalValue('__ENGINE_MATERIAL_INT_ID__', 0)
+    '''
+    Get new material ID.
+    Please note that id 0 is reserved for representing `no material`.
+    '''
+    mat_id = GetOrAddGlobalValue('__ENGINE_MATERIAL_INT_ID__', 1)
     SetGlobalValue('__ENGINE_MATERIAL_INT_ID__', mat_id+1)  # type: ignore
     return mat_id
 
@@ -107,8 +114,19 @@ class Material(ResourcesObj):
 
     @classmethod
     def DefaultOpaqueMaterial(cls, **kwargs):
-        '''Create a new material with default opaque shader.'''
-        return cls(shader=Shader.Default_GBuffer_Shader(), **kwargs)
+        '''
+        Create a new material with default opaque shader.
+        It will be shaded on GBuffer pass.
+        '''
+        return cls(shader=Shader.DefaultGBufferShader(), **kwargs)
+    
+    @classmethod
+    def DefaultTransparentMaterial(cls, **kwargs):
+        '''
+        Create a new material with default to be shaded in transparent order queue.
+        It will be shaded on GBuffer pass.
+        '''
+        return cls(shader=Shader.DefaultGBufferShader(), render_order=RenderOrder.TRANSPARENT, **kwargs)
 
     @classmethod
     def DefaultDebugMaterial(cls, 
@@ -122,7 +140,7 @@ class Material(ResourcesObj):
             - white: turn missing texture to white
             - grayscale: all pixels are grayscale
         '''
-        mat = cls(shader=Shader.Debug_Shader(), **kwargs)
+        mat = cls(shader=Shader.DebugShader(), **kwargs)
         mode_map = {
             'pink': 0,
             'white': 1,
@@ -141,7 +159,7 @@ class Material(ResourcesObj):
         format = path.split('.')[-1].lower()
         if format == "":
             raise ValueError(f'No format specified for {path}')
-        subcls = Material.FindFormatCls(format)
+        subcls: Type[T] = Material.FindFormatCls(format)   # type: ignore
         if subcls is None:
             raise ValueError(f'No supported class for format `{format}`')
         return subcls.Load(path, *args, **kwargs)
@@ -155,14 +173,14 @@ class Material(ResourcesObj):
     textures: Dict[str, Tuple['Texture', int]] = attrib(factory=dict, kw_only=True)
     '''Textures of the material'''
     _mat_id: int = attrib(factory=_new_mat_id, init=False)
-    '''special material id for corresponding map'''
+    '''special material id for corresponding map. Internal use only.'''
     
     def __attrs_post_init__(self):
         if self.shader is None:
-            self.shader = Shader.Default_GBuffer_Shader() if not self.engine.IsDebugMode else Shader.Debug_Shader()
+            self.shader = Shader.DefaultGBufferShader() if not self.engine.IsDebugMode else Shader.DebugShader()
     
     @property
-    def mat_id(self):
+    def materialID(self):
         '''Return the material id. This is for corresponding map.'''
         return self._mat_id
     
@@ -186,10 +204,13 @@ class Material(ResourcesObj):
 
     def addTexture(self, name:str, texture:Texture, order=None, replace=True):
         '''
-        :param name: the name is the uniform name in shader
-        :param texture: texture object
-        :param order: the uniform order in shader. If None, the order will be the last one
-        :param replace: if True, the texture will replace the existing one with the same order or name
+        Args:
+            - name: the name is the uniform name in shader
+            - texture: texture object
+            - order: the uniform order in shader. If None, the order will be the last one
+            - replace: if True, the texture will replace the existing one with the same order or name
+        
+        Note: for adding correspondence map, please use `addDefaultTexture` instead.
         '''
         if name in self.textures and not replace:
             raise RuntimeError(f'Texture {name} already exists in material {self._name}. Please remove it first.')
@@ -207,11 +228,31 @@ class Material(ResourcesObj):
     def removeTexture(self, name:str):
         self.textures.pop(name)
 
-    def addDefaultTexture(self, texture:Texture, default_type:DefaultTextureType):
+    @overload
+    def addDefaultTexture(self, texture:Texture, default_type:DefaultTextureType):...
+    @overload
+    def addDefaultTexture(self, texture:"CorrespondMap", default_type:DefaultTextureType):...
+    
+    def addDefaultTexture(self, 
+                          texture:Union[Texture, "CorrespondMap"],
+                          default_type:DefaultTextureType):
         '''
-        add default texture with default name and order. Will replace the existing one with the same order & name.
+        Add default texture with default name and order. Will replace the existing one with the same order & name.
+        For cases that u adding the correspondence map as a sampler2DArray, the `default_type` must be `CorrespondMap`.
         '''
-        self.addTexture(default_type.value.name, texture, order=default_type.value.slot, replace=True)
+        from common_utils.stable_render_utils import CorrespondMap
+        if isinstance(texture, CorrespondMap):
+            if default_type != DefaultTextureType.CorrespondMap:
+                raise TypeError(f'Unsupported default type {type(default_type)} for correspondence map. Supported types are {get_args(DefaultVariableType)}')
+            if not texture.loaded:
+                texture.load()
+            self.addTexture(default_type.value.name, texture, order=default_type.value.slot, replace=True)  # type: ignore
+        else:
+            self.addTexture(default_type.value.name, texture, order=default_type.value.slot, replace=True)
+    
+    def hasDefaultTexture(self, textureType:DefaultTextureType):
+        '''Return True if the material has the default texture'''
+        return textureType.value.name in self.textures
     
     def setVariable(self, name:str, value:SupportedShaderValueTypes):
         if not valueTypeCheck(value, SupportedShaderValueTypes):    # type: ignore
@@ -223,20 +264,23 @@ class Material(ResourcesObj):
         self.shader.useProgram()
         textures = [(name, tex, order) for name, (tex, order) in self.textures.items()]
         textures.sort(key=lambda x: x[2])
+        
         for i, (name, tex, _) in enumerate(textures):
             textureType = DefaultTextureType.FindDefaultTexture(name)
             if textureType is not None:
                 # means this is a default texture
-                self.shader.setUniform(textureType.value.shader_check_name, 1)
+                self.shader.setUniform(textureType.value.shader_check_name, 1)  # e.g. hasDiffuseTex=1
             else:
                 if i < len(DefaultTextureType):
                     # means this is not a default texture, but it is in the default texture slot, so we need to set the default texture to None
                     defaultTexType = DefaultTextureType.FindDefaultTextureBySlot(i)
                     self._shader.setUniform(defaultTexType.value.shader_check_name, 0)  # type: ignore
             tex.bind(i, self.shader.getUniformID(name))
+        
         for name, value in self.variables.items():
             self.shader.setUniform(name, value)
-        self.shader.setUniform('materialID', self.mat_id)
+        
+        self.shader.setUniform('materialID', self.materialID)   # for AI rendering to do tracing
 
 
 

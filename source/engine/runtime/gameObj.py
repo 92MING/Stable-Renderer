@@ -353,6 +353,10 @@ class GameObject(EngineObj, NamedObj):
             c = comp(self, enable, *args, **kwargs) # type: ignore
             self._components.append(c)
             c._tryAwake() # call awake if the gameobject is active and the component is enabled
+            
+            for comp in self.components(enableOnly=True):   # trigger onGameObjAddComp
+                comp.onGameObjAddComp(c)
+                
             return c    # type: ignore
         
         else: # comp is a component instance

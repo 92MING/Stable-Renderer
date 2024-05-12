@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 from einops import rearrange, repeat
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Literal
 
 from .diffusionmodules.util import checkpoint, AlphaBlender, timestep_embedding
 from .sub_quadratic_attention import efficient_dot_product_attention
@@ -14,7 +14,8 @@ if model_management.xformers_enabled():
     import xformers
     import xformers.ops
 from common_utils.debug_utils import ComfyUILogger
-from common_utils.type_utils import check_func_has_kwarg
+from common_utils.type_utils import check_func_has_kwarg, is_empty_method
+from common_utils.stable_render_utils import Corresponder
 from comfy.cli_args import args
 import comfy.ops
 ops = comfy.ops.disable_weight_init
@@ -27,8 +28,7 @@ else:
     _ATTN_PRECISION = "fp32"
 
 if TYPE_CHECKING:
-    from comfyUI.types import BakingData
-    from common_utils.stable_render_utils.corresponder import Corresponder
+    from comfyUI.types import EngineData
 
 
 def exists(val):
@@ -397,8 +397,8 @@ class CrossAttention(nn.Module):
         self.dim_head = dim_head
 
         self.to_q = operations.Linear(query_dim, inner_dim, bias=False, dtype=dtype, device=device)
-        self.to_k = operations.Linear(context_dim, inner_dim, bias=False, dtype=dtype, device=device)
-        self.to_v = operations.Linear(context_dim, inner_dim, bias=False, dtype=dtype, device=device)
+        self.to_k = operations.Linear(context_dim, inner_dim, bias=False, dtype=dtype, device=device)   # type: ignore
+        self.to_v = operations.Linear(context_dim, inner_dim, bias=False, dtype=dtype, device=device)   # type: ignore
 
         self.to_out = nn.Sequential(operations.Linear(inner_dim, query_dim, dtype=dtype, device=device), nn.Dropout(dropout))
 
@@ -489,7 +489,7 @@ class BasicTransformerBlock(nn.Module):
 
         if self.ff_in:
             x_skip = x
-            x = self.ff_in(self.norm_in(x))
+            x = self.ff_in(self.norm_in(x))     # type: ignore
             if self.is_res:
                 x += x_skip
 
@@ -502,15 +502,17 @@ class BasicTransformerBlock(nn.Module):
 
 
         ##### self-attention #####
-        transformer_index = transformer_options.get("transformer_index", None)
-        baking_data: Optional['BakingData'] = kwargs.get('baking_data', None)
-        corresponder: Optional['Corresponder'] = kwargs.get('corresponder', None)
-        has_uncond: bool = kwargs.get('has_uncond', True)
-        do_stable_rendering = transformer_index is not None and \
-                                baking_data is not None and \
-                                corresponder is not None and \
-                                kwargs.get('do_stable_rendering', True)
+        COND = 0
         
+        transformer_index: int = transformer_options.get("transformer_index", None)
+        cond_or_uncond: list[int] = transformer_options.get('cond_or_uncond', [])
+        engine_data: 'EngineData' = kwargs.get('engine_data', None)
+        corresponder: 'Corresponder' = kwargs.get('corresponder', None)
+        do_stable_rendering = transformer_index is not None and \
+                                cond_or_uncond and \
+                                engine_data is not None and \
+                                corresponder is not None and \
+                                kwargs.get('do_stable_rendering', True) # can skip stable rendering if needed
         
         if "attn1_patch" in transformer_patches:
             patch = transformer_patches["attn1_patch"]
@@ -536,10 +538,34 @@ class BasicTransformerBlock(nn.Module):
             n = self.attn1.to_q(n)
             context_attn1 = self.attn1.to_k(context_attn1)
             value_attn1 = self.attn1.to_v(value_attn1)
+            if do_stable_rendering:
+                if corresponder is not None and hasattr(corresponder, 'pre_atten_inject') and not is_empty_method(corresponder.pre_atten_inject):
+                    n, context_attn1, value_attn1 = corresponder.pre_atten_inject(self, engine_data, n, context_attn1, value_attn1, transformer_index)
+            
             n = attn1_replace_patch[block_attn1](n, context_attn1, value_attn1, extra_options)
             n = self.attn1.to_out(n)
         else:
-            n = self.attn1(n, context=context_attn1, value=value_attn1)
+            q = self.attn1.to_q(n)
+            context_attn1 = default(context_attn1, n)
+            k = self.attn1.to_k(context_attn1)
+            if value_attn1 is not None:
+                v = self.attn1.to_v(value_attn1)
+                del value_attn1
+            else:
+                v = self.attn1.to_v(context_attn1)
+            
+            if do_stable_rendering:
+                if corresponder is not None and hasattr(corresponder, 'pre_atten_inject') and not is_empty_method(corresponder.pre_atten_inject):
+                    q, k, v = corresponder.pre_atten_inject(self, engine_data, q, k, v, transformer_index)
+
+            out = optimized_attention(q, k, v, self.attn1.heads)
+            n = self.attn1.to_out(out)
+        
+        if do_stable_rendering:
+            if corresponder is not None and hasattr(corresponder, 'post_atten_inject') and not is_empty_method(corresponder.post_atten_inject):
+                positive_batches_attns = [n[i] for i, cond in enumerate(cond_or_uncond) if cond == COND]
+                positive_batches_attns = torch.stack(positive_batches_attns)    # pack into a tensor again
+                n = corresponder.post_atten_inject(self, engine_data, positive_batches_attns, transformer_index)
 
         if "attn1_output_patch" in transformer_patches:
             patch = transformer_patches["attn1_output_patch"]

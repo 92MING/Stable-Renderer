@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from inspect import Parameter, signature, _empty, getmro
 from collections import OrderedDict
 from typing import (Any, Sequence, Union, ForwardRef, get_args as tp_get_args, get_origin as tp_get_origin, Callable, Awaitable, 
-                    List, Iterable, Mapping, Literal, TypeAlias, Tuple, _SpecialForm, Type, Dict, TypeVar, overload)
+                    List, Iterable, Mapping, Literal, TypeAlias, Tuple, _SpecialForm, Type, Dict, TypeVar, overload, NewType)
 from types import UnionType
 from inspect import getmro, signature
 from pydantic.v1 import BaseModel as BaseModelV1
@@ -228,6 +228,8 @@ def get_cls_name(cls_or_ins: Any):
     '''
     if hasattr(cls_or_ins, 'NAME') and hasattr(cls_or_ins, '__IS_COMFYUI_NODE__') and cls_or_ins.__IS_COMFYUI_NODE__:
         return cls_or_ins.NAME
+    if isinstance(cls_or_ins, NewType):
+        return cls_or_ins.__name__.split('.')[-1]   # type: ignore
     if not isinstance(cls_or_ins, type):
         cls = type(cls_or_ins)
     else:

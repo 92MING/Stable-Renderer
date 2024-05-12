@@ -2,7 +2,7 @@ import torch
 import math
 import numpy as np
 
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Callable, Any
 from comfyUI.types import CONDITIONING as Conditioning, ConvertedConditioning
 from common_utils.debug_utils import ComfyUILogger
 import comfy.model_management
@@ -13,11 +13,13 @@ import comfy.utils
 
 SelfDefinedModelPatcher = Any
 
-def prepare_noise(latent_image: torch.Tensor, seed: int, noise_indexes=None):
+def prepare_noise(latent_image: torch.Tensor, seed: int|None, noise_indexes=None):
     """
     creates random noise given a latent image and a seed.
     optional arg skip can be used to skip and discard x number of noise generations for a given seed
     """
+    if seed is None:
+        seed = int(torch.randint(0, 2**32, (1,)).item())
     generator = torch.manual_seed(seed)
     if noise_indexes is None:
         return torch.randn(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, generator=generator, device="cpu")
@@ -146,14 +148,14 @@ def sample(model: comfy.model_patcher.ModelPatcher,
            latent_image: torch.Tensor,
            denoise: float = 1.0,
            disable_noise: bool = False,
-           start_step: int = None,
-           last_step: int = None,
+           start_step: int|None = None,
+           last_step: int|None = None,
            force_full_denoise: bool = False,
-           noise_mask: torch.Tensor = None,
-           sigmas: torch.Tensor = None,
-           callbacks: List[callable] = [],
+           noise_mask: torch.Tensor|None = None,
+           sigmas: torch.Tensor|None = None,
+           callbacks: List[Callable] = [],
            disable_pbar: bool = False,
-           seed: int = None,
+           seed: int|None = None,
            **kwargs) -> torch.Tensor:
     if "callback" in kwargs:
         ComfyUILogger.warn("Warning: 'callback' is deprecated, use 'callbacks' instead")

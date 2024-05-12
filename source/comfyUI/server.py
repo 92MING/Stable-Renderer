@@ -531,7 +531,7 @@ class PromptServer:
                 except Exception as e:
                     ComfyUILogger.warning(f"[ERROR] An error occurred while retrieving information for the '{node_cls_name}' node, err: {e}")
                     traceback.print_exc()
-            return _validate_response(out)
+            return _validate_response(out, headers={'Cache-Control': 'no-cache'})
 
         @routes.get("/object_info/{node_class}")
         async def get_object_info_node(request):

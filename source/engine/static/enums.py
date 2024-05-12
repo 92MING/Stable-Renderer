@@ -73,8 +73,67 @@ class RenderOrder(Enum):
     TRANSPARENT = 2000
     OVERLAY = 3000
     
+    def __lt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value < other.value
+        elif isinstance(other, (int, float)):
+            return self.value < other
+        return NotImplemented
     
-__all__.extend(['RenderOrder', 'DepthFunc'])
+    def __le__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value <= other.value
+        elif isinstance(other, (int, float)):
+            return self.value <= other
+        return NotImplemented
+    
+    def __gt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value > other.value
+        elif isinstance(other, (int, float)):
+            return self.value > other
+        return NotImplemented
+    
+    def __ge__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value >= other.value
+        elif isinstance(other, (int, float)):
+            return self.value >= other
+        return NotImplemented
+    
+    def __eq__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value == other.value
+        elif isinstance(other, (int, float)):
+            return self.value == other
+        return NotImplemented
+    
+    def __ne__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value != other.value
+        elif isinstance(other, (int, float)):
+            return self.value != other
+        return NotImplemented
+    
+    def __add__(self, other):
+        if isinstance(other, (int, float)):
+            return self.value + other
+        return NotImplemented
+    
+    def __sub__(self, other):
+        if isinstance(other, (int, float)):
+            return self.value - other
+        return NotImplemented
+    
+class RenderMode(Enum):
+    NORMAL = 0
+    '''normal object'''
+    BAKED = 1
+    '''baked object getting color from corrmap'''
+    BAKING = 2
+    '''baking object to corrmap'''
+    
+__all__.extend(['RenderOrder', 'RenderMode', 'DepthFunc'])
 # endregion
 
 

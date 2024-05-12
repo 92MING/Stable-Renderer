@@ -1,21 +1,26 @@
 import torch
+from torch import Tensor
 from typing import (Union, Annotated, Literal, Optional, Any, Type, Dict, TYPE_CHECKING, ClassVar,
                     TypeVar, Tuple, List)
 from attr import attrs, attrib
 from abc import ABC, abstractmethod, ABCMeta
 from deprecated import deprecated
-from common_utils.global_utils import GetOrCreateGlobalValue
-from common_utils.type_utils import NameCheckMetaCls, get_cls_name
-from common_utils.decorators import prevent_re_init
+from einops import rearrange
 
+from common_utils.type_utils import NameCheckMetaCls, get_cls_name
+from common_utils.decorators import prevent_re_init, class_or_ins_property
+from common_utils.global_utils import is_dev_mode, is_verbose_mode
+from common_utils.debug_utils import ComfyUILogger
 from ._utils import *
 from .basic import AnnotatedParam, IMAGE, MASK, LATENT
 
 if TYPE_CHECKING:
     from engine.static.texture import Texture
-    from .runtime import InferenceContext, NodeInputs
+    from comfyUI.execution import PromptExecutor
+    from .runtime import NodeInputs
     from .node_base import ComfyUINode
-    from common_utils.stable_render_utils import IDMap, CorrespondMap
+    from .runtime import InferenceOutput, StatusMsgs
+    from common_utils.stable_render_utils import IDMap, SpriteInfos, EnvPrompt, CorrespondMap
 
 
 _hidden_meta = NameCheckMetaCls(ABCMeta)
@@ -190,6 +195,13 @@ class PROMPT(Dict[str, Dict[Literal['inputs', 'class_type', 'is_changed'], Any]]
         if not isinstance(node, str):
             node = node.ID
         return self[node].get('is_changed', None)
+
+class EXTRA_DATA(Dict[str, Any], HIDDEN):
+    '''the dictionary `extra_data` that u pass to PromptExecutor.execution'''
+    
+    @classmethod
+    def GetHiddenValue(cls: type[_HT], context: "InferenceContext"):
+        return context.extra_data
     
 class EXTRA_PNG_INFO(Dict[str, Any], HIDDEN):
     '''Extra information for saving png file.'''
@@ -214,156 +226,388 @@ class UNIQUE_ID(str, HIDDEN):
             return cur_node.ID  # type: ignore
         return None
 
-__all__ = ['PROMPT', 'EXTRA_PNG_INFO', 'HIDDEN']
+class EnvPrompts(list["EnvPrompt"], HIDDEN):
+    '''
+    List of environment prompts for the current frame(s).
+    This type is for being an annotation for node system.
+    '''
+    @classmethod
+    def GetHiddenValue(cls, context: "InferenceContext"):
+        if not context or not context.engine_data:
+            return []
+        return context.engine_data.env_prompts
 
-
+class CorrespondMaps(dict[tuple[int, int], "CorrespondMap"], HIDDEN):
+    '''The correspondence maps for the current frame(s).'''
+    
+    @classmethod
+    def GetHiddenValue(cls, context: "InferenceContext"):
+        if not context or not context.engine_data:
+            return {}
+        return context.engine_data.correspond_maps
 
 @attrs
-class FrameData(HIDDEN):
-    '''The prompt for submitting to ComfyUI during engine's runtime.'''
-    
-    frame_index: int = attrib(default=0, kw_only=True, alias='frame_index')
-    '''The index of the current frame.'''
-
-    _color_map: "Texture" = attrib(default=None, kw_only=True, alias='color_map')
-    '''color of the current frame'''
-    _updated_color_map: Optional[IMAGE] = None
-    @property
-    def color_map(self)->IMAGE:
-        if self._updated_color_map is None:
-             # no need /255, because the color map from opengl is already in 0-1 range
-            rgba_color_map = self._color_map.tensor(update=True, flip=True).to(dtype=torch.float32)
-            self._updated_color_map = rgba_color_map[..., :3] # remove alpha channel
-            self._mask = 1.0 - rgba_color_map[..., 3:]  # mask is the inverse of alpha channel
-        return self._updated_color_map
-    
-    _id_map: "Texture" = attrib(default=None, kw_only=True, alias='id_map')
+class EngineData(HIDDEN):
     '''
-    ID of each pixels in the current frame. If the pixel is not containing any object, the id is 0,0,0,0.
-    ID data has two possible combinations:
-        - (objID, materialID, texX, texY): in rendering mode
-        - (baking pixel index, materialID, texX, texY): in baking mode
+    Most useful data from rendering engine will be passing to ComfyUI through this data class.
+    Note that an engine data may include multiple frames.
     '''
-    _updated_id_map: Optional["IDMap"] = None
-    @property
-    def id_map(self)->"IDMap":
-        if self._updated_id_map is None:
-            from common_utils.stable_render_utils import IDMap
-            self._updated_id_map = IDMap(origin_tex=self._id_map, frame_index=self.frame_index)
-        return self._updated_id_map
     
-    _pos_map: "Texture" = attrib(default=None, kw_only=True, alias='pos_map')
-    '''position of the origin 3d vertex in each pixels in the current frame'''
-    _updated_pos_map: Optional[IMAGE] = None
+    frame_indices: List[int] = attrib(default=0, kw_only=True)
+    '''The indices of the frames in this engine data obj.'''
     @property
-    def pos_map(self)->IMAGE:
-        if self._updated_pos_map is None:
-            self._updated_pos_map = self._pos_map.tensor(update=True, flip=True)    # already RGB32F
-        return self._updated_pos_map
+    def frame_count(self)->int:
+        '''The number of frames in this engine data obj.'''
+        return len(self.frame_indices)
     
-    _normal_and_depth_map: "Texture" = attrib(default=None, kw_only=True, alias='normal_and_depth_map')
+    sprite_infos: "SpriteInfos" = attrib(factory=dict, kw_only=True)
+    '''all sprite infos. This is actually a dictionary with {spriteID: info} pairs'''
+    
+    color_maps: Optional[IMAGE] = attrib(default=None, kw_only=True)
     '''
-    normal and depth of the origin 3d vertex in each pixels in the current frame.
+    Color of the current frame(s).
+    shape=(N, H, W, 3). dtype=float32, range=[0, 1]
+    When engine data is created, the data will be formatted into the correct shape and dtype.
+    Note: You could also directly pass `Texture` or `ndarray` to it.
+    '''
+    
+    id_maps: Optional["IDMap"] = attrib(default=None, kw_only=True)
+    '''
+    ID of each pixels in the current frame(s). If the pixel is not containing any object, the id is 0,0,0,0.
+    Format: (spriteID, materialID, baking map index, vertexID): in baking mode
+    shape = (N, H, W, 4), dtype = int32
+    Note: You could also directly pass `Texture` or `ndarray` to it.
+    '''
+    
+    pos_maps: IMAGE = attrib(default=None, kw_only=True)
+    '''
+    Position of the origin 3d vertex in each pixels in the current frame(s).
+    This can be used for some special algos to trace the movement of a vertex.
+    Note: You could also directly pass `Texture` or `ndarray` to it.
+    '''
+    
+    _normal_and_depth_maps: Optional["Texture"] = attrib(default=None, kw_only=True, alias='normal_and_depth_map')
+    '''
+    normal and depth of the origin 3d vertex in each pixels in the current frame(s).
     Format: (nx, ny, nz, depth)
+    Only pass to this attribute if u want to split normal and depth map.
+    Note: You could also directly pass `Texture` or `ndarray` to it.
     '''
-    _updated_normal_and_depth_map: Optional[IMAGE] = None
-    @property
-    def normal_and_depth_map(self)->IMAGE:
-        if self._updated_normal_and_depth_map is None:
-            self._updated_normal_and_depth_map = self._normal_and_depth_map.tensor(update=True, flip=True)
-            self._normalMap = self._updated_normal_and_depth_map[..., :3]
-            self._depthMap = self._updated_normal_and_depth_map[..., 3:]
-            self._depthMap = torch.cat([self._depthMap, self._depthMap, self._depthMap], dim=-1)
-        return self._updated_normal_and_depth_map
     
-    _noise_map: "Texture" = attrib(default=None, kw_only=True, alias='noise_map')
-    '''noise of each vertex in each pixels in the current frame'''
-    _updated_noise_map: Optional[LATENT] = None
-    @property
-    def noise_map(self)->LATENT:
-        if self._updated_noise_map is None:
-            noise = self._noise_map.tensor(update=True, flip=True).to(dtype=torch.float32)
-            self._updated_noise_map = LATENT(sample=noise, )
-        return self._updated_noise_map
+    noise_maps: Optional[LATENT] = attrib(default=None, kw_only=True)
+    '''
+    Noise of each vertex in each pixels in the current frame
+    The latent for inputting to stable diffusion. Note that each 8*8 is merged into 1*1
+    Note: You could also directly pass `Texture` or `ndarray` to it.
+    '''
     
-    _normalMap: Optional[IMAGE] = None
-    @property
-    def normal_map(self)->IMAGE:
-        if self._normalMap is None:
-            self.normal_and_depth_map   # this will update normal and depth map
-        return self._normalMap  # type: ignore
+    normal_maps: Optional[IMAGE] = attrib(default=None, kw_only=True)
+    '''
+    Normal map of the current frame(s). shape=(N, H, W, 3)
+    This can be used as the input of controlnet.
+    Note: Note: You could also directly pass `Texture` or `ndarray` to it.
+    '''
     
-    _depthMap: Optional[IMAGE] = None
-    @property
-    def depth_map(self)->IMAGE:
-        if self._depthMap is None:
-            self.normal_and_depth_map   # this will update normal and depth map
-        return self._depthMap   # type: ignore
+    depth_maps: Optional[IMAGE] = attrib(default=None, kw_only=True)
+    '''
+    Depth map of the current frame(s). shape=(N, H, W).
+    This can be used as the input of controlnet.
+    Note: Note: You could also directly pass `Texture` or `ndarray` to it.
+    '''
     
-    _mask: Optional[MASK] = None
-    @property
-    def mask(self)->MASK:
-        '''The mask of the current frame.'''
-        if self._mask is None:
-            self.color_map   # this will update mask
-        return self._mask   # type: ignore
+    masks: MASK = attrib(default=None, kw_only=True)
+    '''
+    The mask of the current frame(s). shape=(H, W).
+    Mask is the inverse of alpha channel in color map, i.e. 1-alpha.
+    '''
     
-    def clear_cache(self):
-        '''clear cache for switching to next frame'''
-        self._updated_color_map = None
-        self._updated_id_map = None
-        self._updated_pos_map = None
-        self._updated_normal_and_depth_map = None
-        self._updated_noise_map = None
+    env_prompts: EnvPrompts = attrib(factory=EnvPrompts, kw_only=True)
+    '''
+    This field is actually list[EnvPrompt], which is a list of environment prompts for the current frame(s),
+    i.e. when frame count =1, it is a list of one EnvPrompt.
+    Note: you can init this field with str, single EnvPrompt, or list of str/EnvPrompt.
+    '''
+    
+    correspond_maps: CorrespondMaps = attrib(factory=dict, kw_only=True)
+    '''All correspondence maps for the current frame(s).'''
+
+    def __attrs_post_init__(self):
+        from engine.static import Texture
+        from common_utils.stable_render_utils import IDMap, EnvPrompt
         
-        self._normalMap = None
-        self._depthMap = None
-        self._mask = None
+        if isinstance(self.env_prompts, str):
+            self.env_prompts = [EnvPrompt(prompt=self.env_prompts),]   # type: ignore
+        elif isinstance(self.env_prompts, EnvPrompt):
+            self.env_prompts = [self.env_prompts, ] # type: ignore
+        elif isinstance(self.env_prompts, (list, tuple)):
+            prompts = []
+            for prompt in self.env_prompts:
+                if isinstance(prompt, str):
+                    prompts.append(EnvPrompt(prompt=prompt))
+                elif isinstance(prompt, EnvPrompt):
+                    prompts.append(prompt)
+                else:
+                    raise ValueError(f'Invalid type of env_prompts: {type(prompt)}')
+            self.env_prompts = prompts  # type: ignore
+        
+        if isinstance(self.color_maps, Texture):
+            rgba_color_maps = self.color_maps.tensor(update=True, flip=True).to(dtype=torch.float32)    # (H, W, 4(or 3))
+            if rgba_color_maps.shape[-1] == 4:
+                self.color_maps = rgba_color_maps[..., :3].unsqueeze(dim=0) # remove alpha channel, # (1, H, W, 3)
+                if self.masks is None:  # only update masks when it is not set
+                    self.masks = 1.0 - rgba_color_maps[..., 3:].squeeze(dim=-1)  # shape = (H, W), invert the alpha channel
+                    self.masks.unsqueeze(dim=0)  # (1, H, W)
+            else:
+                self.color_maps = rgba_color_maps.unsqueeze(dim=0)
+                if self.masks is None:
+                    self.masks = torch.zeros(self.color_maps.shape[1:3], dtype=torch.float32).unsqueeze(dim=0)  # (1, H, W)
+        elif isinstance(self.color_maps, Tensor):
+            if self.color_maps.shape[-1] == 4:
+                self.color_maps = self.color_maps[..., :3].unsqueeze(0)
+                if self.masks is None:
+                    self.masks = 1.0 - self.color_maps[..., 3:].squeeze(dim=-1)
+                    self.masks.unsqueeze(dim=0)
+            else:
+                self.color_maps = self.color_maps.unsqueeze(0)
+                self.masks = torch.zeros(self.color_maps.shape[1:3], dtype=torch.float32).unsqueeze(dim=0)
+            if len(self.color_maps.shape) == 3:
+                self.color_maps = torch.stack([self.color_maps, ] * self.frame_count, dim=0)
+            if self.color_maps[0, 0, 0, 0] > 1.0:   # not yet normalized
+                self.color_maps = self.color_maps / 255.0
+                
+        if isinstance(self.masks, Tensor):
+            if self.masks.shape[-1] == 0:
+                self.masks = torch.zeros(self.color_maps.shape[1:3], dtype=torch.float32).unsqueeze(dim=0)  # (1, H, W)
+            elif len(self.masks.shape) == 2:   
+                self.masks = self.masks.unsqueeze(dim=0)
+            elif len(self.masks.shape) == 3 and self.masks.shape[-1] == 1:
+                self.masks = self.masks.squeeze(dim=-1).unsqueeze(dim=0) # (1, H, W)
+            
+        if isinstance(self.id_maps, (Texture, Tensor)):
+            self.id_maps = IDMap(tensor=self.id_maps, frame_indices=self.frame_indices, masks=self.masks)   # type: ignore
+        
+        if isinstance(self.pos_maps, Texture):
+            self.pos_maps = self.pos_maps.tensor(update=True, flip=True)    # already RGB32F
+        if isinstance(self.pos_maps, Tensor):
+            if len(self.pos_maps.shape) == 3:
+                self.pos_maps = torch.stack([self.pos_maps, ] * self.frame_count, dim=0)
+        
+        if isinstance(self._normal_and_depth_maps, Texture):
+            normal_and_depth_map = self._normal_and_depth_maps.tensor(update=True, flip=True)
+            if self.normal_maps is None:
+                self.normal_maps = normal_and_depth_map[..., :3].unsqueeze(0) # shape = (1, H, W, 3)
+            if self.depth_maps is None:
+                self.depth_maps = normal_and_depth_map[..., 3:]  # shape = (1, H, W)
+            self._normal_and_depth_maps = None
+            del normal_and_depth_map
+        elif isinstance(self._normal_and_depth_maps, Tensor):
+            if len(self._normal_and_depth_maps.shape) in (3, 4):
+                self.normal_maps = self._normal_and_depth_maps[..., :3] # batch will be added later
+                self.depth_maps = self._normal_and_depth_maps[..., 3:]
+            else:
+                raise ValueError(f'Invalid shape of normal_and_depth_maps: {self._normal_and_depth_maps.shape}')
+            self._normal_and_depth_maps = None
+        
+        if isinstance(self.normal_maps, Texture):
+            self.normal_maps = self.normal_maps.tensor(update=True, flip=True).to(dtype=torch.float32)
+        if isinstance(self.normal_maps, Tensor):
+            if len(self.normal_maps.shape) == 3:
+                self.normal_maps = self.normal_maps.unsqueeze(dim=0)    #(1, H, W, 3)
+            self.normal_maps = self.normal_maps.to(dtype=torch.float32)
+            
+        if isinstance(self.depth_maps, Texture):
+            self.depth_maps = self.depth_maps.tensor(update=True, flip=True).squeeze(dim=-1)
+        if isinstance(self.depth_maps, Tensor):
+            self.depth_maps = self.depth_maps.to(dtype=torch.float32)
+            if len(self.depth_maps.shape) == 2:
+                self.depth_maps = self.depth_maps.unsqueeze(dim=0)  #(1, H, W)
+                self.depth_maps = torch.stack([self.depth_maps, ] * 3, dim=-1)  # make it 3 channels to act as IMAGE
+            elif len(self.depth_maps.shape) == 3 and self.depth_maps.shape[-1] == 1:
+                self.depth_maps = self.depth_maps.squeeze(dim=-1).unsqueeze(dim=0)  # (1, H, W)
+                self.depth_maps = torch.stack([self.depth_maps, ] * 3, dim=-1)  # make it 3 channels to act as IMAGE
+            if self.depth_maps.shape[-1] == 0:
+                self.depth_maps = torch.zeros(self.color_maps.shape[1:3], dtype=torch.float32).unsqueeze(dim=0)  # (1, H, W)
+                self.depth_maps = torch.stack([self.depth_maps, ] * 3, dim=-1)  # make it 3 channels to act as IMAGE
+        
+        if isinstance(self.noise_maps, Texture):
+            # get noise tensor from texture
+            self.noise_maps = self.noise_maps.tensor(update=True, flip=True).unsqueeze(0).to(dtype=torch.float32)  # RGBA32F (1, H, W, 4)
+        
+        if isinstance(self.noise_maps, Tensor):
+            if self.noise_maps.shape[-1] == 4:  # not yet rearranged
+                if len(self.noise_maps.shape) == 3:
+                    self.noise_maps = torch.stack([self.noise_maps, ] * self.frame_count, dim=0) # type: ignore
+              
+                # reshape self.mask to have the same shape as noise
+                mask = self.masks.unsqueeze(-1).expand_as(self.noise_maps).to(device=self.noise_maps.device)
+                # fill empty areas with gaussian noise, i.e. the area with alpha=0(equiv. to mask=1)
+                noise = self.noise_maps * (1.0 - mask) + torch.randn_like(self.noise_maps) * mask
+                # merge 8*8 to 1*1
+                height, width = noise.shape[1], noise.shape[2]
+                noise = noise.view(-1, 8, 8, 4).mean(dim=(1, 2)).view(height//8, width//8, 4)
+                if len(noise.shape) == 3:
+                    noise = rearrange(noise, 'h w c ->c h w').contiguous().unsqueeze(0)  # chw
+                else:
+                    noise = rearrange(noise, 'b h w c ->b c h w').contiguous()
+            else:
+                noise = self.noise_maps
+            self.noise_maps = LATENT(samples=noise, )
+            #TODO: carry out AdaIN for background noise?
+                
+        if is_dev_mode() and is_verbose_mode():
+            ComfyUILogger.debug(f'EngineData is created with the following shapes:')
+            ComfyUILogger.debug('Color maps shape: ' + str(self.color_maps.shape))
+            ComfyUILogger.debug('ID maps shape: ' + str(self.id_maps.tensor.shape))
+            ComfyUILogger.debug('Position maps shape: ' + str(self.pos_maps.shape))
+            ComfyUILogger.debug('Normal maps shape: ' + str(self.normal_maps.shape))
+            ComfyUILogger.debug('Depth maps shape: ' + str(self.depth_maps.shape))
+            ComfyUILogger.debug('Noise maps shape: ' + str(self.noise_maps.samples.shape))
+            ComfyUILogger.debug('Mask shape: ' + str(self.masks.shape))
     
     @classmethod
     def GetHiddenValue(cls, context):
-        return context.frame_data
+        return context.engine_data
+
 
 @attrs
-class BakingData(HIDDEN):
+class InferenceContext(HIDDEN): # InferenceContext is also a hidden value
     '''
-    Extra runtime data during baking an object. Its basically a pack of necessary tensors for stable-rendering process,
-    splitted from numerous frameDatas.
+    Inference context is the context across the whole single inference process.
+    For each `PromptExecutor.execute` call, a new InferenceContext will be created,
+    and each function during the execution will receive this context as the first argument.
+    
+    This is also the context for hidden types to find out their hidden values during execution,
+    by passing context to the `GetHiddenValue` function.
+    
+    In engine's rendering loop, this is also the final output in DiffusionManager.SubmitPrompt.
+    Useful values can be gotten directly from this context.
     '''
     
-    frame_count: int = attrib()
-    '''how many frames are packed in this baking session'''
+    @class_or_ins_property  # type: ignore
+    def _executor(cls_or_ins)-> 'PromptExecutor':
+        '''The prompt executor instance.'''
+        from comfyUI.execution import PromptExecutor
+        return PromptExecutor() # since the PromptExecutor is a singleton, it is safe to create a new instance here
     
-    color_maps: IMAGE
+    prompt:"PROMPT" = attrib()
+    '''The prompt of current execution. It is a dict containing all nodes' input for execution.'''
+    
+    extra_data: dict[str, Any] = attrib(factory=dict)
+    '''Extra data for the current execution.'''
+    
+    _current_node_id: Optional[str] = attrib(default=None, alias='current_node_id')
+    '''The current node for this execution.'''
+    
+    outputs: Dict[str, List[Any]] = attrib(factory=dict)
     '''
-    color maps of all frames. 
-    Note: this is not a single image. Shape = (B, C, W, H), where B is the frame count.
+    The outputs of the nodes for execution. {node id: [output1, output2, ...], ...}
+    Note that in PromptExecutor, the `outputs` is a `ComfyCacheDict`, while here it is a normal dict.
     '''
-    id_maps: torch.Tensor
-    '''maps of IDs for tracing.'''
-    pos_maps: IMAGE
-    '''position maps'''
-    depth_maps: IMAGE
-    '''depth maps in each frame. For constraints in diffusion..'''
-    normal_maps: IMAGE
-    '''normal maps in each frame(view space). For constraints in diffusion.'''
-    noise_maps: IMAGE
-    '''noise maps in each frame. You can use this as the initial noise for sampling.'''
-    masks: MASK
-    '''mask in each frame.'''
-    rotation_angles: torch.Tensor
-    '''rotation angles in each frame.'''
-    correspond_map: "CorrespondMap"
-    '''correspond map for this obj.'''
+    
+    outputs_ui: Dict[str, Dict[str, Any]] = attrib(factory=dict)
+    '''
+    The outputs of the nodes for ui. {node id: {output_name: [output_value1, ...], ...}, ...}
+    Note that in PromptExecutor, the `outputs_ui` is a `ComfyCacheDict`, while here it is a normal dict.
+    '''
+    
+    to_be_executed: List[Tuple[int, str]] = attrib(factory=list)
+    '''node ids waiting to be executed. [(order, node_id), ...]'''
+    
+    executed_node_ids: set[str] = attrib(factory=set)
+    '''The executed nodes' ids.'''
+    
+    engine_data: Optional["EngineData"] = attrib(default=None)
+    '''The data passed from engine to comfyUI for this execution.'''
+    
+    status_messages: 'StatusMsgs' = attrib(factory=list)
+    '''The status messages for current execution. [(event, {msg_key: msg_value, ...}), ...]'''
+    
+    success:bool = attrib(default=False)
+    '''Whether the execution is successful.'''
+    
+    final_output: "InferenceOutput" = attrib(default=None)
+    '''the final output for `DiffusionManager.SubmitPrompt`.'''
+    
+    def node_is_waiting_to_execute(self, node_id: Union[str, int])->bool:
+        node_id = str(node_id)
+        for (_, id) in self.to_be_executed:
+            if id == node_id:
+                return True
+        return False
+    
+    def remove_from_execute_waitlist(self, node_id: Union[str, int]):
+        node_id = str(node_id)
+        for (_, id) in tuple(self.to_be_executed):
+            if id == node_id:
+                self.to_be_executed.remove((_, id))
+            
+    @property
+    def prompt_id(self)->str:
+        '''The prompt id for current execution.'''
+        return self.prompt.id
+
+    @property
+    def current_node_id(self)->Optional[str]:
+        return self._current_node_id
+    
+    @current_node_id.setter
+    def current_node_id(self, value: Union[str, int, "ComfyUINode"]):
+        from .node_base import ComfyUINode
+        if isinstance(value, int):
+            value = str(value)
+        elif isinstance(value, ComfyUINode):
+            node_id = value.ID
+            node_type_name = self.prompt[node_id]['class_type']
+            if node_type_name != value.NAME:
+                raise ValueError(f'The given node is not the same as the node in the prompt: {node_type_name} != {value.NAME}')
+            value = node_id
+            
+        if isinstance(value, str):
+            if value != self._current_node_id:
+                self._current_node_id = value
+                if is_dev_mode() and is_verbose_mode():
+                    if self.current_node_cls_name:
+                        ComfyUILogger.debug(f'Current running node id is set to: {value}({self.current_node_cls_name})')
+                    else:
+                        ComfyUILogger.debug(f'Current running node id is set to: {value}')
+        else:
+            raise ValueError(f'Invalid current node id type: {value}')
+        
+    @property
+    def current_node_cls_name(self)->Optional[str]:
+        '''return the class name of current node.'''
+        if not self.current_node_id:
+            return None
+        try:
+            return self.prompt[self.current_node_id]['class_type']
+        except KeyError as e:
+            if is_dev_mode():
+                raise e
+            else:
+                return None
+        
+    @property
+    def current_node_cls(self)->Optional[Type["ComfyUINode"]]:
+        '''return the origin type of current node.'''
+        if not self.current_node_cls_name:
+            return None
+        return get_node_cls_by_name(self.current_node_cls_name)
     
     @property
-    def frame_size(self)->tuple[int, int]:
-        '''height & width of the frame'''
-        return tuple(self.color_maps.shape[-2:])
-    
+    def current_node(self)->Optional["ComfyUINode"]:
+        '''return the current node instance.'''
+        from .runtime import NodePool
+        if not self.current_node_id:
+            return None
+        return NodePool.Instance().get_or_create(self.current_node_id, self.current_node_cls_name)  # type: ignore
+
+    @current_node.setter
+    def current_node(self, value: Union[str, int, "ComfyUINode"]):
+        self.current_node_id = value
+
     @classmethod
-    def GetHiddenValue(cls, context):
-        return context.baking_data
-    
-    
-__all__.extend(['FrameData', 'BakingData'])
+    def GetHiddenValue(cls, context: "InferenceContext"):
+        return context  # just return the context itself
+
+
+__all__ = ['HIDDEN', 'PROMPT', 'EXTRA_DATA', 'EXTRA_PNG_INFO', 'UNIQUE_ID', 'EngineData', 'InferenceContext', 'EnvPrompts', 'CorrespondMaps']

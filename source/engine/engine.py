@@ -37,7 +37,7 @@ if is_dev_mode():
 
 
 
-_EngineInstance: Optional['Engine'] = GetOrAddGlobalValue("__ENGINE_INSTANCE__", None)    # type: ignore
+__ENGINE_INSTANCE__: Optional['Engine'] = GetOrAddGlobalValue("__ENGINE_INSTANCE__", None)    # type: ignore
 _OnEngineStageChanged: Event = GetOrCreateGlobalValue("_ON_ENGINE_STAGE_CHANGED", Event, EngineStage)
 
 @prevent_re_init
@@ -49,28 +49,28 @@ class Engine:
     
     @staticmethod
     def Instance():
-        if not _EngineInstance:
+        if not __ENGINE_INSTANCE__:
             raise RuntimeError('Engine is not initialized yet.')
-        return _EngineInstance
+        return __ENGINE_INSTANCE__
     
     @class_or_ins_property  # type: ignore
     def IsLooping(cls_or_self)->bool:
         '''Whether the engine is within running stage(FrameBegin, FrameRun, FrameEnd).'''
-        if not _EngineInstance:
+        if not __ENGINE_INSTANCE__:
             return False
-        return _EngineInstance._stage in EngineStage.RunningStages()
+        return __ENGINE_INSTANCE__._stage in EngineStage.RunningStages()
     
     def __new__(cls, *args, **kwargs):
-        global _EngineInstance
-        if _EngineInstance is not None:
-            clsName = _EngineInstance.__class__.__qualname__
+        global __ENGINE_INSTANCE__
+        if __ENGINE_INSTANCE__ is not None:
+            clsName = __ENGINE_INSTANCE__.__class__.__qualname__
             if clsName != cls.__qualname__:
                 raise RuntimeError(f'Engine is running as {clsName}. As a singleton, it can not be created again.')
-            return _EngineInstance
+            return __ENGINE_INSTANCE__
         else:
             e = super().__new__(cls)
             SetGlobalValue("__ENGINE_INSTANCE__", e)
-            _EngineInstance = e
+            __ENGINE_INSTANCE__ = e
             return e
 
     def __init__(self,
@@ -94,9 +94,14 @@ class Engine:
                  target_device: Optional[int]=None,
                  mode: EngineMode=EngineMode.GAME,
                  disableComfyUI: bool = False,
-                 workflow: Union[Workflow, str, Path, None] = None,
+                 diffuse_workflow: Union[Workflow, str, Path, None] = None,
+                 verbose: bool=False,
                  **kwargs):
+        if verbose:
+            os.environ['VERBOSE'] = '1'
         self._stage = EngineStage.INIT
+        self._exit = False
+        '''flag to exit the engine loop.'''
         if disableComfyUI:
             EngineLogger.warn('ComfyUI is disable. This setting is just for debugging. Please make sure you are not in production mode.')
             self.disableComfyUI = True
@@ -155,7 +160,7 @@ class Engine:
                                                   maxFrameCacheCount=maxFrameCacheCount,
                                                   mapSavingInterval=mapSavingInterval,
                                                   threadPoolSize=threadPoolSize,
-                                                  workflow=workflow,
+                                                  diffuse_workflow=diffuse_workflow,
                                                   **find_kwargs_for_manager(DiffusionManager))
         
         self._sceneManager = SceneManager(mainScene=scene, **find_kwargs_for_manager(SceneManager))
@@ -170,7 +175,7 @@ class Engine:
         return _OnEngineStageChanged
     
     @property
-    def Mode(self):
+    def Mode(self)->EngineMode:
         '''Running mode of the engine. It can be 'game' or 'editor'. Default is 'game'.'''
         return self._mode
     
@@ -261,6 +266,10 @@ class Engine:
     def afterRelease(self):...
     # endregion
 
+    def Exit(self):
+        '''exit engine safely.'''
+        self._exit = True
+
     def Pause(self):
         raise NotImplementedError # TODO
     
@@ -268,29 +277,51 @@ class Engine:
         raise NotImplementedError # TODO
     
     def run(self):        
+        # TODO: when calling this method again from pause, it should continue from the last frame
         EngineLogger.info('Engine Preparing...')
         
         self.Stage = EngineStage.BEFORE_PREPARE
         self.beforePrepare()
+        if self._exit:
+            return
+        
         Manager._RunPrepare()  # prepare work, mainly for sceneManager to build scene, load resources, etc.
+        if self._exit:
+            return
+        
         self.afterPrepare()
+        if self._exit:
+            return
+        
         self.Stage = EngineStage.AFTER_PREPARE
 
         EngineLogger.info('Engine Preparation Done. Start Running...')
-        while not glfw.window_should_close(self.WindowManager.Window):
+        while not self._exit and not glfw.window_should_close(self.WindowManager.Window):
             
             self.Stage = EngineStage.BEFORE_FRAME_BEGIN
             self.beforeFrameBegin()
+            if self._exit:
+                break
             Manager._RunFrameBegin()  # input events / clear buffers / etc.
-
+            if self._exit:
+                break
+            
             self.Stage = EngineStage.BEFORE_FRAME_RUN
             self.beforeFrameRun()
+            if self._exit:
+                break
             Manager._RunFrameRun() # update gameobjs, components / render / ... etc.
-
+            if self._exit:
+                break
+            
             self.Stage = EngineStage.BEFORE_FRAME_END
             self.beforeFrameEnd()
+            if self._exit:
+                break
             Manager._RunFrameEnd() #  swap buffers / time count / etc.
-
+            if self._exit:
+                break
+            
         EngineLogger.info('Engine loop Ended. Releasing Resources...')
         
         self.Stage = EngineStage.BEFORE_RELEASE
@@ -301,13 +332,30 @@ class Engine:
         
         EngineLogger.success('Engine is ended.')
         self.Stage = EngineStage.ENDED
-        
+    
     @classmethod
-    def Run(cls, *args, **kwargs):
-        global _EngineInstance
-        if _EngineInstance is None:
-            _EngineInstance = cls(*args, **kwargs)
+    def Bake(cls, **kwargs):
+        global __ENGINE_INSTANCE__
+        if __ENGINE_INSTANCE__ is None:
+            kwargs['mode'] = EngineMode.BAKE
+            if kwargs.get('disableComfyUI', False):
+                EngineLogger.warn('Bake mode must enable comfyUI. `disableComfyUI` will forced to be False.')
+            kwargs['disableComfyUI'] = False
+            __ENGINE_INSTANCE__ = cls(**kwargs)
+        else:
+            EngineLogger.warn('Engine is already running. Bake mode may not be successful initialized.')
+            __ENGINE_INSTANCE__._mode = EngineMode.BAKE
         try:
-            _EngineInstance.run()
+            __ENGINE_INSTANCE__.run()
+        except KeyboardInterrupt:
+            EngineLogger.info('Engine is stopped by user.')
+    
+    @classmethod
+    def Run(cls, **kwargs):
+        global __ENGINE_INSTANCE__
+        if __ENGINE_INSTANCE__ is None:
+            __ENGINE_INSTANCE__ = cls(**kwargs)
+        try:
+            __ENGINE_INSTANCE__.run()
         except KeyboardInterrupt:
             EngineLogger.info('Engine is stopped by user.')

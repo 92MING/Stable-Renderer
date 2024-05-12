@@ -108,4 +108,4 @@ if __name__ == '__main__':
                outputCannyMap=False,
                saveSDColorOutput=False,
                disableComfyUI=False,
-               workflow=img2img_boat_path)
+               default_workflow=img2img_boat_path)

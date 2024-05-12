@@ -3,8 +3,6 @@
 
 in vec2 vertexUV;
 
-uniform int objID;
-
 uniform sampler2D diffuseTex;
 uniform int hasDiffuseTex;
 uniform sampler2D normalTex;

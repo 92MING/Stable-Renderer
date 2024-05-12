@@ -6,22 +6,6 @@ from pathlib import Path
 from torchvision.io import read_image, ImageReadMode
 
 from comfyUI.types import *
-from stable_rendering.src.data_classes import CorrespondenceMap
-
-
-class CorrespondenceMapLoader(StableRenderingNode):
-
-    Category = "loader"
-
-    def __call__(self,
-                 directory: STRING(forceInput=True),
-                 num_frames: INT(min=0),  # type: ignore
-                 merge_nearby: INT(min=0) = 5,
-                 enable_cache: bool = True # type: ignore
-        ) -> CorrespondenceMap:
-        corr_map = CorrespondenceMap.FromExisting(directory, num_frames, enable_cache=enable_cache)
-        corr_map.merge_nearby(merge_nearby)
-        return corr_map
 
 
 class ImageSequenceLoader(StableRenderingNode):
@@ -31,8 +15,8 @@ class ImageSequenceLoader(StableRenderingNode):
     def __call__(self, 
                  directory: Path,
                  frame_start: INT(min=0) = 0,
-                 num_frames: INT(min=1) = 16
-    ) -> IMAGE:
+                 num_frames: INT(min=1) = 16,
+                 prefix: str="") -> IMAGE:
         """Load image sequence from a given folder
 
         Note: The filename of images should contain a number, indicating its frame index in
@@ -43,6 +27,7 @@ class ImageSequenceLoader(StableRenderingNode):
             directory (str): The absolute path to the desired folder
             frame_start (int, optional): The first returning frame. Defaults to 0.
             num_frames (int, optional): Number of frames to be returned. Defaults to 16.
+            prefix (str, optional): Prefix of the image filenames. Defaults to "".
 
         Returns:
             torch.Tensor: Tensor of shape (num_frames, height, width, channels)
@@ -55,7 +40,10 @@ class ImageSequenceLoader(StableRenderingNode):
         get_frame_number = lambda fname: int(re.search(r"\d+", fname).group())
 
         # Sort filenames by the index extracted from filename
-        filenames = list(filter(file_filter, os.listdir(directory)))
+        all_files = os.listdir(directory)
+        if prefix:
+            all_files = [f for f in all_files if f.startswith(prefix)]
+        filenames = list(filter(file_filter, all_files))
         filenames.sort(key=get_frame_number)
 
         # Read images as tensor from filenames
@@ -66,3 +54,6 @@ class ImageSequenceLoader(StableRenderingNode):
             tensor_images.append(tensor_img)
 
         return torch.cat(tensor_images, dim=0) 
+    
+    
+__all__ = ['ImageSequenceLoader']

@@ -393,48 +393,57 @@ class Shader(NamedObj, EngineObj):
     '''
 
     # region class methods & variables
-    _Default_GBuffer_Shader: 'Shader'
-    _Default_Defer_Shader: 'Shader'
-    _Default_Post_Shader: 'Shader'
-    _Debug_Shader: 'Shader'
-    _Current_Shader: Optional['Shader'] = None
+    _DefaultGBufferShader: 'Shader'
+    _DefaultDeferShader: 'Shader'
+    _DefaultPostProcessShader: 'Shader'
+    _DebugShader: 'Shader'
+    _CurrentShader: Optional['Shader'] = None
     '''The last shader that has been used(by calling `useProgram()`). It is used to avoid redundant shader switch.'''
     
     @classmethod
-    def Default_GBuffer_Shader(cls):
-        if not hasattr(cls, '_Default_GBuffer_Shader'):
-            cls._Default_GBuffer_Shader = Shader("default_Gbuffer_shader",
-                                                  os.path.join(SHADER_DIR, "default_Gbuffer.vert.glsl"),
-                                                  os.path.join(SHADER_DIR, "default_Gbuffer.frag.glsl"))
-        return cls._Default_GBuffer_Shader
+    def DefaultGBufferShader(cls):
+        '''
+        Default GBuffer shader.
+        GBuffer is the stage for submitting data for diffusion process.
+        '''
+        if not hasattr(cls, '_DefaultGBufferShader') or cls._DefaultGBufferShader is None:
+            cls._DefaultGBufferShader = Shader("__DEFAULT_GBUFFER_SHADER__",
+                                                os.path.join(SHADER_DIR, "default_Gbuffer.vert.glsl"),
+                                                os.path.join(SHADER_DIR, "default_Gbuffer.frag.glsl")) # type: ignore
+        return cls._DefaultGBufferShader
     
     @classmethod
-    def Default_Defer_Shader(cls):
-        if not hasattr(cls, '_Default_Defer_Shader'):
-            cls._Default_Defer_Shader = Shader("default_defer_render_shader",
+    def DefaultDeferShader(cls):
+        '''
+        default shader for defer rendering.
+        defer rendering is the stage just after diffusion
+        '''
+        if not hasattr(cls, '_DefaultDeferShader') or cls._DefaultDeferShader is None:
+            cls._DefaultDeferShader = Shader("__DEFAULT_DEFER_SHADER__",
                                                 os.path.join(SHADER_DIR, "default_defer_render.vert.glsl"),
-                                                os.path.join(SHADER_DIR, "default_defer_render.frag.glsl"))
-        return cls._Default_Defer_Shader
+                                                os.path.join(SHADER_DIR, "default_defer_render.frag.glsl")) # type: ignore
+        return cls._DefaultDeferShader
     
     @classmethod
-    def Default_Post_Shader(cls):
-        if not hasattr(cls, '_Default_Post_Shader'):
-            cls._Default_Post_Shader = Shader("default_post_process",
+    def DefaultPostProcessShader(cls):
+        '''default shader for post processing.'''
+        if not hasattr(cls, '_DefaultPostProcessShader') or cls._DefaultPostProcessShader is None:
+            cls._DefaultPostProcessShader = Shader("__DEFAULT_POST_PROCESS_SHADER__",
                                               os.path.join(SHADER_DIR, 'default_post_process.vert.glsl'),
-                                              os.path.join(SHADER_DIR, 'default_post_process.frag.glsl'))
-        return cls._Default_Post_Shader
+                                              os.path.join(SHADER_DIR, 'default_post_process.frag.glsl')) # type: ignore
+        return cls._DefaultPostProcessShader
     
     @classmethod
-    def Debug_Shader(cls):
-        if not hasattr(cls, '_Debug_Shader'):
-            cls._Debug_Shader = Shader("debug_shader",
+    def DebugShader(cls):
+        if not hasattr(cls, '_DebugShader') or cls._DebugShader is None:
+            cls._DebugShader = Shader("__DEBUG_SHADER__",
                                         os.path.join(SHADER_DIR, "debug.vert.glsl"),
-                                        os.path.join(SHADER_DIR, "debug.frag.glsl"))
-        return cls._Debug_Shader
+                                        os.path.join(SHADER_DIR, "debug.frag.glsl")) # type: ignore
+        return cls._DebugShader
     
     @staticmethod
     def CurrentShader()->Optional['Shader']:
-        return Shader._Current_Shader
+        return Shader._CurrentShader
     
     @staticmethod
     def SetShaderConstant(name:str, s):
@@ -553,7 +562,7 @@ class Shader(NamedObj, EngineObj):
         if gl.glUseProgram(self._programID):
             self.engine.PrintOpenGLError()
             raise RuntimeError(f'Failed to use shader {self.name}')
-        Shader._Current_Shader = self
+        Shader._CurrentShader = self
 
     def getUniformID(self, name:str):
         return gl.glGetUniformLocation(self._programID, name)

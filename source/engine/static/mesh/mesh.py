@@ -93,12 +93,12 @@ class Mesh(ResourcesObj):
     generate_vertex_ids: bool = attrib(default=True, kw_only=True)
     '''For Stable-Rendering to do latent tracing(could also be done by texture UV.)
     If indices exists, ID values will not be generated, because the indices can be used as ID values.'''
-    cullback: bool = attrib(default=False, kw_only=True)
+    cullback: bool = attrib(default=True, kw_only=True)
     '''If True, the mesh will be culled backface. Default is False.'''
     
     # internal use
     meshID: Final[int] = attrib(factory=_get_mesh_id, init=False)
-    '''internal integer id of the mesh. This is for passing to shader to build the id.'''
+    '''internal integer id for this mesh.'''
     
     def __attrs_post_init__(self):
         super().__attrs_post_init__()

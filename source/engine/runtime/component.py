@@ -136,7 +136,10 @@ class Component(EngineObj, metaclass=ComponentMeta):
         onDestroy will not follow the priority rule.
         onDisable will be called before onDestroy.
         '''
-
+        
+    def onGameObjAddComp(self, new_comp: 'Component'):
+        '''define this method to do something if you want to do something when a component is added to the GameObject'''
+        
     @property
     def gameObj(self)->'GameObject':
         return self._gameObj

@@ -417,8 +417,12 @@ def lanczos(samples, width, height):
 
 def common_upscale(samples, width, height, upscale_method, crop):
         if crop == "center":
-            old_width = samples.shape[3]
-            old_height = samples.shape[2]
+            if len(samples.shape) == 3:
+                old_width = samples.shape[2]
+                old_height = samples.shape[1]
+            else:
+                old_width = samples.shape[3]
+                old_height = samples.shape[2]
             old_aspect = old_width / old_height
             new_aspect = width / height
             x = 0

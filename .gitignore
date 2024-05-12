@@ -18,6 +18,7 @@ venv/
 /input/
 
 # files
+imgui.ini
 *.env
 *.ipynb
 *.zip

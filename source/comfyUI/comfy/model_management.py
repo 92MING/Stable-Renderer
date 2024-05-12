@@ -38,7 +38,7 @@ lowvram_available = True
 xpu_available = False
 
 if args.deterministic:
-    ComfyUILogger.debug("Using deterministic algorithms for pytorch")
+    ComfyUILogger.print("Using deterministic algorithms for pytorch")
     torch.use_deterministic_algorithms(True, warn_only=True)
 
 directml_enabled = False
@@ -50,7 +50,7 @@ if args.directml is not None:
         directml_device = torch_directml.device()
     else:
         directml_device = torch_directml.device(device_index)
-    ComfyUILogger.debug("Using directml with device:" + str(torch_directml.device_name(device_index)))
+    ComfyUILogger.print("Using directml with device:" + str(torch_directml.device_name(device_index)))
     # torch_directml.disable_tiled_resources(True)
     lowvram_available = False   #TODO: need to find a way to get free memory in directml before this can be enabled by default.
 
@@ -141,7 +141,7 @@ XFORMERS_VERSION = ""
 XFORMERS_ENABLED_VAE = True
 
 if args.disable_xformers:   # for any case that comfyUI start by editor or game, `xformers` is not available
-    ComfyUILogger.debug('Disabled xformers.')
+    ComfyUILogger.print('Disabled xformers.')
     XFORMERS_IS_AVAILABLE = False
 else:
     try:
@@ -224,11 +224,11 @@ elif args.highvram or args.gpu_only:
 FORCE_FP32 = False
 FORCE_FP16 = False
 if args.force_fp32:
-    ComfyUILogger.debug("Forcing FP32, if this improves things please report it.")
+    ComfyUILogger.print("Forcing FP32, if this improves things please report it.")
     FORCE_FP32 = True
 
 if args.force_fp16:
-    ComfyUILogger.debug("Forcing FP16.")
+    ComfyUILogger.print("Forcing FP16.")
     FORCE_FP16 = True
 
 if lowvram_available:
@@ -242,12 +242,12 @@ if cpu_state != CPUState.GPU:
 if cpu_state == CPUState.MPS:
     vram_state = VRAMState.SHARED
 
-ComfyUILogger.debug(f"Set vram state to: {vram_state.name}")
+ComfyUILogger.print(f"Set vram state to: {vram_state.name}")
 
 DISABLE_SMART_MEMORY = args.disable_smart_memory
 
 if DISABLE_SMART_MEMORY:
-    ComfyUILogger.debug("Disabling smart memory management")
+    ComfyUILogger.print("Disabling smart memory management")
 
 def get_torch_device_name(device):
     if hasattr(device, 'type'):
@@ -265,11 +265,11 @@ def get_torch_device_name(device):
         return "CUDA {}: {}".format(device, torch.cuda.get_device_name(device))
 
 try:
-    ComfyUILogger.debug("Device:", get_torch_device_name(get_torch_device()))
+    ComfyUILogger.print("Device:", get_torch_device_name(get_torch_device()))
 except:
-    ComfyUILogger.debug("Could not pick default device.")
+    ComfyUILogger.print("Could not pick default device.")
 
-ComfyUILogger.debug("VAE dtype:" + str(VAE_DTYPE))
+ComfyUILogger.print("VAE dtype:" + str(VAE_DTYPE))
 
 current_loaded_models: List["LoadedModel"] = GetOrCreateGlobalValue("__COMFY_CURRENT_LOADED_MODELS__", list)
 '''
@@ -323,7 +323,7 @@ class LoadedModel:
             raise e
 
         if lowvram_model_memory > 0:
-            ComfyUILogger.debug("loading in lowvram mode", lowvram_model_memory/(1024 * 1024))
+            ComfyUILogger.print("loading in lowvram mode", lowvram_model_memory/(1024 * 1024))
             mem_counter = 0
             for m in self.real_model.modules():
                 if hasattr(m, "comfy_cast_weights"):
@@ -336,7 +336,7 @@ class LoadedModel:
                 elif hasattr(m, "weight"): #only modules with comfy_cast_weights can be set to lowvram mode
                     m.to(self.device)
                     mem_counter += module_size(m)
-                    ComfyUILogger.debug("lowvram: loaded module regularly", m)
+                    ComfyUILogger.print("lowvram: loaded module regularly", m)
 
             self.model_accelerated = True
 
@@ -422,12 +422,12 @@ def load_models_gpu(models: Union[Sequence["ModelPatcher"], "ModelPatcher"], mem
                 current_loaded_models.insert(0, current_loaded_models.pop(index))
             models_already_loaded.append(loaded_model)
             if is_dev_mode() and is_verbose_mode():
-                ComfyUILogger.debug(f"Model already loaded: {loaded_model}")
+                ComfyUILogger.print(f"Model already loaded: {loaded_model}")
         else:
             if hasattr(x, "model"):
-                ComfyUILogger.debug(f"Requested to load model: `{x.name}({x.model.__class__.__qualname__})`")
+                ComfyUILogger.print(f"Requested to load model: `{x.name}({x.model.__class__.__qualname__})`")
             else:
-                ComfyUILogger.debug(f"Requested to load model: `{x.name}`")
+                ComfyUILogger.print(f"Requested to load model: `{x.name}`")
             models_to_load.append(loaded_model)
 
     if len(models_to_load) == 0:
@@ -470,7 +470,7 @@ def load_models_gpu(models: Union[Sequence["ModelPatcher"], "ModelPatcher"], mem
         current_loaded_models.insert(0, loaded_model)
     
     if is_dev_mode() and is_verbose_mode():
-        ComfyUILogger.debug(f"Load models success. Current loaded models: {current_loaded_models}")
+        ComfyUILogger.print(f"Load models success. Current loaded models: {current_loaded_models}")
 
 
 def load_model_gpu(model: "ModelPatcher"):

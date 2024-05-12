@@ -6,14 +6,10 @@ if __name__ == '__main__': # for debugging
     
 import torch
 import taichi as ti
-from typing import TYPE_CHECKING
 
-from ..global_utils import GetOrAddGlobalValue, SetGlobalValue
+from ..math_utils import init_taichi
 
-
-if not GetOrAddGlobalValue('__TAICHI_INITED__', False):
-    ti.init(arch=ti.gpu)
-    SetGlobalValue('__TAICHI_INITED__', True)
+init_taichi()
 
 @ti.func
 def _check_values_equal(values: ti.types.ndarray(),
@@ -28,7 +24,7 @@ def _check_values_equal(values: ti.types.ndarray(),
     return equal
 
 @ti.func
-def _get_similarity(id_flatten_maps: ti.types.ndarray(),            # b, h*w, 4(objID, materialID, map_index, vertexID), pixel space
+def _get_similarity(id_flatten_maps: ti.types.ndarray(),            # b, h*w, 4(spriteID, materialID, map_index, vertexID), pixel space
                     target_start_ivec2: ti.math.ivec2,          # ivec2(b, i), from where to start(cell space)
                     compare_target_start_ivec2: ti.math.ivec2,
                     cell_contains_pixel: int,   # how many pixels in a cell
@@ -118,6 +114,17 @@ def cells_value_overlap(id_flatten_maps: ti.types.ndarray(),    # (b, h*w, 4), p
                         new_values: ti.types.ndarray(),         # placeholder for the new values
                         contributions: ti.types.ndarray(),       # (b, h*w), e.g. 1/64, pixel space
                         ):
+    '''
+    Calculate the average value of overlapped cells according to the similarity of the cells, 
+    and store the result in new_values.
+    
+    Args:
+        - id_flatten_maps: (b, h*w, 4), pixel space
+        - values: e.g. (b, 4096, 320) for post-atten, (b, 4096, 1) for latent
+        - new_values: placeholder for the new values
+        - contributions: (b, h*w), e.g. 1/64, pixel space. This defines each pixels' contribution to its cell,
+                          so as to calculate the similarity between cells.
+    '''
     cell_contains_pixel = id_flatten_maps.shape[1] // values.shape[1]
     for b, i in ti.ndrange(values.shape[0], values.shape[1]):
         _cell_values_overlap(id_flatten_maps, 
@@ -126,6 +133,9 @@ def cells_value_overlap(id_flatten_maps: ti.types.ndarray(),    # (b, h*w, 4), p
                              ti.math.ivec2([b, i]), 
                              cell_contains_pixel, 
                              contributions)
+
+
+__all__ = ['cells_value_overlap']
 
 
 if __name__ == '__main__':

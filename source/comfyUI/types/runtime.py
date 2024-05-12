@@ -1,22 +1,20 @@
 import torch
 from deprecated import deprecated
 from typing import (Union, TypeAlias, Literal, Optional, List, Any, Type, Dict, Tuple, TYPE_CHECKING, 
-                    Sequence, TypeVar, Generic, Set, NamedTuple, Union, Callable, Any)
+                    Sequence, TypeVar, Generic, Set, NamedTuple, Union, Callable, Any, NewType)
 from attr import attrs, attrib
 from dataclasses import dataclass
 from collections import OrderedDict
 from common_utils.debug_utils import ComfyUILogger
-from common_utils.global_utils import is_dev_mode, is_verbose_mode
 from common_utils.type_utils import get_cls_name, NameCheckMetaCls
-from common_utils.decorators import singleton, class_or_ins_property, Overload
+from common_utils.decorators import singleton, Overload
 
 from ._utils import get_node_cls_by_name
-from .hidden import PROMPT, FrameData, BakingData, HIDDEN
-    
+
 if TYPE_CHECKING:
+    from .hidden import PROMPT
     from .basic import IMAGE
     from .node_base import ComfyUINode
-    from comfyUI.execution import PromptExecutor
 
 
 _CT = TypeVar('_CT')
@@ -102,148 +100,6 @@ class InferenceOutput:
     
     frame_color: "IMAGE" = attrib(default=None)
     '''The final color output of this frame.'''
-
-@attrs
-class InferenceContext(HIDDEN): # InferenceContext is also a hidden value
-    '''
-    Inference context is the context across the whole single inference process.
-    For each `PromptExecutor.execute` call, a new InferenceContext will be created,
-    and each function during the execution will receive this context as the first argument.
-    
-    This is also the context for hidden types to find out their hidden values during execution,
-    by passing context to the `GetHiddenValue` function.
-    
-    In engine's rendering loop, this is also the final output in DiffusionManager.SubmitPrompt.
-    Useful values can be gotten directly from this context.
-    '''
-    
-    @class_or_ins_property  # type: ignore
-    def _executor(cls_or_ins)-> 'PromptExecutor':
-        '''The prompt executor instance.'''
-        from comfyUI.execution import PromptExecutor
-        return PromptExecutor() # since the PromptExecutor is a singleton, it is safe to create a new instance here
-    
-    prompt:"PROMPT" = attrib()
-    '''The prompt of current execution. It is a dict containing all nodes' input for execution.'''
-    
-    extra_data: dict = attrib(factory=dict)
-    '''Extra data for the current execution.'''
-    
-    _current_node_id: Optional[str] = attrib(default=None, alias='current_node_id')
-    '''The current node for this execution.'''
-    
-    outputs: Dict[str, List[Any]] = attrib(factory=dict)
-    '''
-    The outputs of the nodes for execution. {node id: [output1, output2, ...], ...}
-    Note that in PromptExecutor, the `outputs` is a `ComfyCacheDict`, while here it is a normal dict.
-    '''
-    
-    outputs_ui: Dict[str, Dict[str, Any]] = attrib(factory=dict)
-    '''
-    The outputs of the nodes for ui. {node id: {output_name: [output_value1, ...], ...}, ...}
-    Note that in PromptExecutor, the `outputs_ui` is a `ComfyCacheDict`, while here it is a normal dict.
-    '''
-    
-    to_be_executed: List[Tuple[int, str]] = attrib(factory=list)
-    '''node ids waiting to be executed. [(order, node_id), ...]'''
-    
-    executed_node_ids: Set[str] = attrib(factory=set)
-    '''The executed nodes' ids.'''
-    
-    frame_data: Optional["FrameData"] = attrib(default=None)
-    '''The frame data for current execution.'''
-    
-    baking_data: Optional["BakingData"] = attrib(default=None)
-    '''The baking data for current execution.'''
-    
-    status_messages: 'StatusMsgs' = attrib(factory=list)
-    '''The status messages for current execution. [(event, {msg_key: msg_value, ...}), ...]'''
-    
-    success:bool = attrib(default=False)
-    '''Whether the execution is successful.'''
-    
-    final_output: InferenceOutput = attrib(default=None)
-    '''the final output for `DiffusionManager.SubmitPrompt`.'''
-    
-    def node_is_waiting_to_execute(self, node_id: Union[str, int])->bool:
-        node_id = str(node_id)
-        for (_, id) in self.to_be_executed:
-            if id == node_id:
-                return True
-        return False
-    
-    def remove_from_execute_waitlist(self, node_id: Union[str, int]):
-        node_id = str(node_id)
-        for (_, id) in tuple(self.to_be_executed):
-            if id == node_id:
-                self.to_be_executed.remove((_, id))
-            
-    @property
-    def prompt_id(self)->str:
-        '''The prompt id for current execution.'''
-        return self.prompt.id
-
-    @property
-    def current_node_id(self)->Optional[str]:
-        return self._current_node_id
-    
-    @current_node_id.setter
-    def current_node_id(self, value: Union[str, int, "ComfyUINode"]):
-        from .node_base import ComfyUINode
-        if isinstance(value, int):
-            value = str(value)
-        elif isinstance(value, ComfyUINode):
-            node_id = value.ID
-            node_type_name = self.prompt[node_id]['class_type']
-            if node_type_name != value.NAME:
-                raise ValueError(f'The given node is not the same as the node in the prompt: {node_type_name} != {value.NAME}')
-            value = node_id
-            
-        if isinstance(value, str):
-            if value != self._current_node_id:
-                self._current_node_id = value
-                if is_dev_mode() and is_verbose_mode():
-                    if self.current_node_cls_name:
-                        ComfyUILogger.debug(f'Current running node id is set to: {value}({self.current_node_cls_name})')
-                    else:
-                        ComfyUILogger.debug(f'Current running node id is set to: {value}')
-        else:
-            raise ValueError(f'Invalid current node id type: {value}')
-        
-    @property
-    def current_node_cls_name(self)->Optional[str]:
-        '''return the class name of current node.'''
-        if not self.current_node_id:
-            return None
-        try:
-            return self.prompt[self.current_node_id]['class_type']
-        except KeyError as e:
-            if is_dev_mode():
-                raise e
-            else:
-                return None
-        
-    @property
-    def current_node_cls(self)->Optional[Type["ComfyUINode"]]:
-        '''return the origin type of current node.'''
-        if not self.current_node_cls_name:
-            return None
-        return get_node_cls_by_name(self.current_node_cls_name)
-    
-    @property
-    def current_node(self)->Optional["ComfyUINode"]:
-        '''return the current node instance.'''
-        if not self.current_node_id:
-            return None
-        return NodePool.Instance().get_or_create(self.current_node_id, self.current_node_cls_name)  # type: ignore
-
-    @current_node.setter
-    def current_node(self, value: Union[str, int, "ComfyUINode"]):
-        self.current_node_id = value
-
-    @classmethod
-    def GetHiddenValue(cls, context: "InferenceContext"):
-        return context  # just return the context itself
 
 @singleton(cross_module_singleton=True)
 class NodePool(ComfyCacheDict["ComfyUINode"]):
@@ -737,8 +593,13 @@ SamplerCallback: TypeAlias = Union[
 ]
 '''callback when a inference step is finished''' 
 
+VAEDecodeCallback: TypeAlias = Callable[['IMAGE'], Any]
+globals()['VAEDecodeCallback'] = NewType("VAEDecodeCallback", Callable[['IMAGE'], Any])     # type: ignore
+# tricks for making `VAEDecodeCallback` have a `__name__` attribute
 
-__all__ = ['InferenceOutput', 'InferenceContext', 'SamplingCallbackContext', 'SamplerCallback',
+
+
+__all__ = ['InferenceOutput', 'SamplingCallbackContext', 'SamplerCallback', 'VAEDecodeCallback',
                 
             'ComfyCacheDict', 'NodePool', 'NodeBindingParam', 'NodeInputs', 
             

@@ -10,7 +10,9 @@ if TYPE_CHECKING:
 
 
 class Renderer(Component):
-    def __init__(self, gameObj, enable=True,
+    def __init__(self, 
+                 gameObj, 
+                 enable=True,
                  materials:Union["Material", Iterable["Material"], None] = None):
         super().__init__(gameObj, enable)
         self._materials:List["Material"] = []
@@ -62,7 +64,10 @@ class Renderer(Component):
                 break
 
     def _draw(self):
-        '''Draw to screen. Override this method to implement your own drawing logic. Usually add render task to RenderManager here'''
+        '''
+        Draw to screen. Override this method to implement your own drawing logic. Usually add render task to RenderManager here.
+        `_draw` will be called in `lateUpdate` if `_drawAvailable` returns True.
+        '''
         raise NotImplementedError
 
     def _drawAvailable(self):

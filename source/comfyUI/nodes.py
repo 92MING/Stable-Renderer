@@ -14,7 +14,7 @@ import safetensors.torch
 
 from PIL import Image, ImageOps, ImageSequence
 from PIL.PngImagePlugin import PngInfo
-from typing import (Dict, Tuple, List, Literal, Any, Optional, Callable, Type, TYPE_CHECKING)
+from typing import (Dict, Tuple, List, Literal, Any, Optional, Union, Type, TYPE_CHECKING, Callable, Sequence, Tuple)
 
 from common_utils.global_utils import GetGlobalValue, is_dev_verbose, SetGlobalValue, GetOrAddGlobalValue, is_dev_mode, should_run_web_server, is_engine_looping
 from common_utils.debug_utils import ComfyUILogger
@@ -35,7 +35,8 @@ import latent_preview
 from comfy.cli_args import args
 from comfyUI.types import NODE_MAPPING
 if TYPE_CHECKING:
-    from comfyUI.types import ComfyUINode, CONDITIONING as Conditioning, COMFY_SCHEDULERS as Schedulers
+    from comfyUI.types import (ComfyUINode, CONDITIONING as Conditioning, COMFY_SCHEDULERS as Schedulers, VAEDecodeCallback,
+                               LATENT, SamplerCallback)
     from comfy.sd import VAE, CLIP
     from comfy.controlnet import ControlBase
     from comfy.model_patcher import ModelPatcher
@@ -286,14 +287,20 @@ class ConditioningSetTimestepRange:
 class VAEDecode:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "samples": ("LATENT", ), "vae": ("VAE", )}}
+        return {
+            "required": {"samples": ("LATENT", ), "vae": ("VAE", )},
+            "optional": {"callback": ("VAEDecodeCallback", {"default": None}), }
+        }
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "decode"
 
     CATEGORY = "latent"
 
-    def decode(self, vae: 'VAE', samples):
-        return (vae.decode(samples["samples"]), )
+    def decode(self, vae: 'VAE', samples, callback: Optional["VAEDecodeCallback"] = None):
+        result = vae.decode(samples["samples"])
+        if callback is not None:
+            callback(result)
+        return (result, )
 
 class VAEDecodeTiled:
     @classmethod
@@ -813,10 +820,23 @@ class ControlNetApply:
         if strength == 0:
             return (conditioning, )
 
+        if len(image.shape) == 2:   
+            # only height & width, probably grayscale image
+            # turn it into 3 channel and add batch channel, i.e. (1, 3, h, w)
+            image = torch.stack([image, image, image], dim=0).unsqueeze(0)
+        elif len(image.shape) == 3:
+            # add batch channel, i.e. (1, 3, h, w)
+            image = image.unsqueeze(0)
+            
         c = []
-        ComfyUILogger.print("image dims", image.shape)
-        control_hint = image.movedim(-1,1)
-        ComfyUILogger.print("control hint dim", control_hint.shape)
+        if is_dev_mode():
+            ComfyUILogger.print("image dims:", image.shape)
+        if image.shape[-1] in (3,4) and image.shape[1] >=256:   # probably in shape (1, h, w, c), change to (1, c, h, w) 
+            control_hint = image.movedim(-1,1)
+        else:
+            control_hint = image
+        if is_dev_mode():
+            ComfyUILogger.print("control hint dim:", control_hint.shape)
         for t in conditioning:
             n = [t[0], t[1].copy()]
             c_net = control_net.copy().set_cond_hint(control_hint, strength)    # type: ignore
@@ -1416,7 +1436,7 @@ def common_ksampler(model: "ModelPatcher",
     return (out, )
 
 def custom_ksampler(model: "ModelPatcher",
-                    seed: int,
+                    seed: Optional[int],
                     steps: int,
                     cfg: float,
                     sampler_name: str,
@@ -1425,21 +1445,29 @@ def custom_ksampler(model: "ModelPatcher",
                     negative: "Conditioning",
                     latent: Dict[str, Any],
                     denoise: float = 1.0,
-                    noise_option: Literal['disable', 'default', 'incoming'] = 'default',
+                    noise_option: Literal['disable', 'random', 'incoming'] = 'random',
                     start_step: Optional[int] = None,
                     last_step: Optional[int] = None,
                     force_full_denoise: bool = False,
-                    callbacks: List[Callable] = [],
-                    **kwargs) -> Tuple[Dict[str, Any]]:
+                    callbacks: Union["SamplerCallback", List["SamplerCallback"], Tuple["SamplerCallback", ...], None] = None,
+                    **kwargs) -> Tuple["LATENT"]:
+    if seed is None:
+        seed = int(torch.randint(0, 2**32, (1,)).item())
+    
     latent_image = latent["samples"]
+    
     match noise_option:
         case 'disable':
             noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
-        case 'default':
+        case 'random':
             batch_inds = latent["batch_index"] if "batch_index" in latent else None
             noise = comfy.sample.prepare_noise(latent_image, seed, batch_inds)
         case 'incoming':
-            noise = latent["noise"]
+            if 'noise' in latent:
+                noise = latent["noise"]
+            else:
+                batch_inds = latent["batch_index"] if "batch_index" in latent else None
+                noise = comfy.sample.prepare_noise(latent_image, seed, batch_inds)
         case _:
             raise ValueError(f"Invalid noise option: {noise_option}")
    
@@ -1447,6 +1475,12 @@ def custom_ksampler(model: "ModelPatcher",
     if "noise_mask" in latent:
         noise_mask = latent["noise_mask"]
 
+    if callbacks is None:
+        callbacks = []
+    elif isinstance(callbacks, Callable):
+        callbacks = [callbacks,]
+    elif isinstance(callbacks, tuple):
+        callbacks = list(callbacks)
     callbacks.append(latent_preview.prepare_callback(model, steps))
     if is_engine_looping():
         disable_pbar = True
@@ -2138,7 +2172,6 @@ def load_custom_nodes(raise_err=False):
         cls_namespace = advance_node_cls.NameSpace or ""
         advance_node_mapping[(cls_real_name, cls_namespace)] = advance_node_cls._RealComfyUINodeCls
         advance_node_name_mapping[(cls_real_name, cls_namespace)] = advance_node_cls._ReadableName
-            
     NODE_CLASS_MAPPINGS.update(advance_node_mapping)
     NODE_DISPLAY_NAME_MAPPINGS.update(advance_node_name_mapping)
 

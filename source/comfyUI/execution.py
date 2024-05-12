@@ -687,12 +687,16 @@ class PromptExecutor:
                            node_id: Optional[str]=None)->RecursiveExecuteResult:
         prompt = context.prompt
         if not prompt:
+            if is_dev_mode() and is_verbose_mode():
+                ComfyUILogger.error("PromptExecutor.__recursive_will_execute error: No prompt to execute.")
             return RecursiveExecuteResult(False, None, ValueError("No prompt to execute."))
         
         executed_node_ids = context.executed_node_ids
         
         current_node_id = node_id or context.current_node_id
         if current_node_id is None:
+            if is_dev_mode() and is_verbose_mode():
+                ComfyUILogger.error("PromptExecutor.__recursive_will_execute error: No node specify to execute in the context.")
             return RecursiveExecuteResult(False, None, ValueError("No node specify to execute in the context."))
         context.current_node_id = current_node_id
         
@@ -700,6 +704,8 @@ class PromptExecutor:
         current_node_cls_name = prompt[current_node_id]['class_type']
         current_node_cls = get_node_cls_by_name(current_node_cls_name)
         if not current_node_cls:
+            if is_dev_mode() and is_verbose_mode():
+                ComfyUILogger.error(f"PromptExecutor.__recursive_will_execute error: Node class `{current_node_cls_name}` not found.")
             return RecursiveExecuteResult(False, None, ValueError(f"Node class `{current_node_cls_name}` not found."))
         lazy_input_params = current_node_cls.LAZY_INPUTS if hasattr(current_node_cls, "LAZY_INPUTS") else []
         
@@ -743,6 +749,8 @@ class PromptExecutor:
                         
                         result = self._recursive_execute(context, from_node_id)
                         if not result.success:
+                            if is_dev_mode() and is_verbose_mode():
+                                ComfyUILogger.error(f"Recursive execute failed. Reason: {result.error_details}")
                             return result # Another node failed further upstream
 
         input_data_all = None
@@ -774,12 +782,12 @@ class PromptExecutor:
         
         except comfy.model_management.InterruptProcessingException as iex:
             ComfyUILogger.info("Processing interrupted")
-
             # skip formatting inputs/outputs
             error_details = {
                 "node_id": current_node_id,
             }
-
+            if is_dev_mode() and is_verbose_mode():
+                ComfyUILogger.error(f"Interrupted during processing. Reason: {iex}")
             return RecursiveExecuteResult(False, error_details, iex)
         
         except Exception as ex:
@@ -978,8 +986,7 @@ class PromptExecutor:
                 prompt_id: Optional[str] = None, # random string by uuid4 
                 extra_data: Optional[dict] = None, 
                 node_ids_to_be_ran: Union[List[str], List[int], None] = None,
-                frame_data: Optional['FrameData'] = None,
-                baking_data: Optional[BakingData] = None)->InferenceContext:
+                frame_data: Optional['EngineData'] = None)->InferenceContext:
         '''
         The entry for inference.
         When using web UI, this method will be called instead of `loop_executed`.
@@ -1025,8 +1032,7 @@ class PromptExecutor:
                                            current_node_id=None,
                                            outputs=context_outputs,
                                            outputs_ui=context_outputs_ui,
-                                           frame_data=frame_data,
-                                           baking_data=baking_data,
+                                           engine_data=frame_data,
                                            status_messages=[],
                                            executed_node_ids=set(),
                                            success=False)

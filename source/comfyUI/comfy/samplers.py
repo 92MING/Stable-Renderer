@@ -243,7 +243,6 @@ def calc_cond_uncond_batch(model: model_base.BaseModel,
 
         c['transformer_options'] = transformer_options
         c.update(kwargs)    # extra args are passed to the model from here.
-        c['has_uncond'] = has_uncond    # for stable-rendering
 
         if 'model_function_wrapper' in model_options:
             output = model_options['model_function_wrapper'](model.apply_model, {"input": input_x, "timestep": timestep_, "c": c, "cond_or_uncond": cond_or_uncond}).chunk(batch_chunks)
@@ -312,7 +311,7 @@ class CFGNoisePredictor(torch.nn.Module):
         
     def apply_model(self, x, timestep, cond, uncond, cond_scale, model_options={}, seed=None, **kwargs):
         if is_dev_mode() and is_verbose_mode():
-            ComfyUILogger.debug(f'CFGNoisePredictor.apply_model: x.shape={x.shape}, timestep={timestep}, cond={cond}, uncond={uncond}, cond_scale={cond_scale}, model_options={model_options}, seed={seed}')
+            ComfyUILogger.debug(f'CFGNoisePredictor.apply_model: x.shape={x.shape}, timestep={timestep}, seed={seed}')
         out = sampling_function(self.inner_model, 
                                 x, 
                                 timestep, 
@@ -337,12 +336,14 @@ class KSamplerX0Inpaint(torch.nn.Module):
         
     def forward(self, x, sigma, uncond, cond, cond_scale, denoise_mask, model_options={}, seed=None, **kwargs):
         if is_dev_mode() and is_verbose_mode():
-            ComfyUILogger.debug(f'KSamplerX0Inpaint: x.shape={x.shape}, sigma.shape={sigma.shape}, uncond={uncond}, cond={cond}, cond_scale={cond_scale}, denoise_mask={denoise_mask}, model_options={model_options}, seed={seed}')
+            ComfyUILogger.debug(f'KSamplerX0Inpaint: x.shape={x.shape}, sigma.shape={sigma.shape}, cond_scale={cond_scale}, model_options={model_options}, seed={seed}')
+        
         if denoise_mask is not None:
             if "denoise_mask_function" in model_options:
                 denoise_mask = model_options["denoise_mask_function"](sigma, denoise_mask, extra_options={"model": self.inner_model, "sigmas": self.sigmas})
             latent_mask = 1. - denoise_mask
             x = x * denoise_mask + self.inner_model.inner_model.model_sampling.noise_scaling(sigma.reshape([sigma.shape[0]] + [1] * (len(self.noise.shape) - 1)), self.noise, self.latent_image) * latent_mask
+        
         out = self.inner_model(x, sigma, cond=cond, uncond=uncond, cond_scale=cond_scale, model_options=model_options, seed=seed, **kwargs)
         if denoise_mask is not None:
             out = out * denoise_mask + self.latent_image * latent_mask
@@ -462,7 +463,7 @@ def resolve_areas_and_cond_masks(
                 mask = torch.nn.functional.interpolate(mask.unsqueeze(1), size=(h, w), mode='bilinear', align_corners=False).squeeze(1)
 
             if modified.get("set_area_to_bounds", False):
-                bounds = torch.max(torch.abs(mask),dim=0).values.unsqueeze(0)
+                bounds = torch.max(torch.abs(mask), dim=0).values.unsqueeze(0)
                 boxes, is_empty = get_mask_aabb(bounds)
                 if is_empty[0]:
                     # Use the minimum possible size for efficiency reasons. (Since the mask is all-0, this becomes a noop anyway)
@@ -576,17 +577,18 @@ def apply_empty_x_to_equal_area(conds, uncond, name, uncond_fill_func):
     if len(uncond_cnets) > 0:
         return
 
-    for x in range(len(cond_cnets)):
-        temp = uncond_other[x % len(uncond_other)]
-        o = temp[0]
-        if name in o and o[name] is not None:
-            n = o.copy()
-            n[name] = uncond_fill_func(cond_cnets, x)
-            uncond += [n]
-        else:
-            n = o.copy()
-            n[name] = uncond_fill_func(cond_cnets, x)
-            uncond[temp[1]] = n
+    if len(uncond_other) > 0:
+        for x in range(len(cond_cnets)):
+            temp = uncond_other[x % len(uncond_other)]
+            o = temp[0]
+            if name in o and o[name] is not None:
+                n = o.copy()
+                n[name] = uncond_fill_func(cond_cnets, x)
+                uncond += [n]
+            else:
+                n = o.copy()
+                n[name] = uncond_fill_func(cond_cnets, x)
+                uncond[temp[1]] = n
 
 def encode_model_conds(model_function: Callable[[Dict[str, Any]], Dict[str, Any]],
                        conds: "ConvertedConditioning",
@@ -978,7 +980,9 @@ class KSampler:
                 else:
                     return torch.zeros_like(noise)
         sampler = sampler_object(self.sampler_name)
-
+        
+        if len(noise.shape) == 3:   # no batch channel, add it
+            noise = noise.unsqueeze(0)
         return sample(self.model, 
                       noise, 
                       positive, 

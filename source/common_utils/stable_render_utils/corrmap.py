@@ -5,20 +5,97 @@ if __name__ == '__main__': # for debugging
     __package__ = 'common_utils.stable_render_utils'
 
 import torch
+import json
+import zipfile
 import taichi as ti
+import numpy as np
+import OpenGL.GL as gl
+
+from PIL import Image
+from pathlib import Path
 from attr import attrs, attrib
 from torch import Tensor
-from typing import Literal, TypeAlias
-from ..global_utils import GetOrAddGlobalValue, SetGlobalValue
-from .corresponder import IDMap
+from typing import Literal, TypeAlias, Optional
+from uuid import uuid4
+from common_utils.path_utils import TEMP_DIR
+from common_utils.global_utils import is_dev_mode
+from common_utils.debug_utils import EngineLogger
+from engine.static.enums import TextureFilter, TextureWrap
+from ..math_utils import init_taichi
 
 
-if not GetOrAddGlobalValue('__TAICHI_INITED__', False):
-    ti.init(arch=ti.gpu)
-    SetGlobalValue('__TAICHI_INITED__', True)
+@attrs
+class IDMap:
+    '''
+    IDMap represents the ID information of each frame, which is used to build the correspondence map(a packed version of IDMap).
+    Note: there could be cases that the idmap obj contains more than 1 frames' id data, e.g. on baking process.
+    '''
+    
+    frame_indices: list[int] = attrib()
+    '''the frame indices of this map. Note that there could be multiple frames' data in this map, so it is a list of int.'''
+    @property
+    def frame_count(self)->int:
+        '''the count of frames in this map.'''
+        return len(self.frame_indices)
+    
+    def __getitem__(self, index:int)->Tensor:
+        '''get the id-map tensor of the index-th frame.'''
+        return self.tensor[index]
+    
+    def __len__(self):
+        return self.frame_count
+
+    tensor: torch.Tensor = attrib()
+    '''
+    The real data of this id-map.
+    You can also use a Texture object here, it will be converted to tensor automatically.
+    '''
+    
+    masks: torch.Tensor = attrib(default=None)
+    '''
+    Mask for the id-map. shape = (N, height, width), 1 means ignore, 0 means not ignore.
+    Note that there could be multiple frames' masks in this map.
+    '''
+    
+    @property
+    def height(self)->int:
+        '''height of the map.'''
+        return self.tensor.shape[-2]
+    
+    @property
+    def width(self)->int:
+        '''width of the map.'''
+        return self.tensor.shape[-1]
+    
+    def __attrs_post_init__(self):
+        from engine.static import Texture
+        
+        if isinstance(self.frame_indices, int):
+            self.frame_indices = [self.frame_indices,]
+        
+        if isinstance(self.tensor, Texture):
+            self.tensor = self.tensor.tensor(update=True, flip=True).to(torch.int32)
+        if isinstance(self.tensor, torch.Tensor) and len(self.tensor.shape) ==3:
+            self.tensor = torch.stack([self.tensor, ] * len(self.frame_indices), dim=0)
+        
+        if self.masks is None:
+            self.masks = torch.zeros(self.frame_count, self.tensor.shape[-2], self.tensor.shape[-1], dtype=torch.float32)
+        else:
+            if len(self.masks.shape) == 2:  # (H, W)
+                # add batch dim(frame count)
+                self.masks = torch.stack([self.masks, ] * self.frame_count, dim=0)
+    
+    def __deepcopy__(self):
+        tensor = self.tensor.clone()
+        masks = self.masks.clone() if self.masks is not None else None
+        m = IDMap(frame_indices=self.frame_indices, tensor=tensor, masks=masks) # type: ignore
+        return m
+
+
+init_taichi()
 
 @ti.kernel
-def _taichi_find_dup_id_and_treat(id_map: ti.template(), value_map: ti.template(), mode: int):
+def _taichi_find_dup_id_and_treat(id_map: ti.template(), value_map: ti.template(), mode: int):  # type: ignore
     '''
     id_map: flattened id_map. shape = (height * width, 2), cell = (map_index, vertex_id)
     value_map: shape = (height * width, channel_count), cell = rgba(or rgb)
@@ -92,16 +169,14 @@ Mode to update the value in the map.
 '''
 
 
-@attrs
+@attrs(repr=False)
 class CorrespondMap:
+    
+    name: str = attrib(default='untitled_map', kw_only=True)
+    '''the name of the map. It is just for saving/printing/debugging.'''
     
     k: int = attrib(default=3, kw_only=True)
     '''cache size. View directions are split into k*k parts.'''
-    
-    objID: int|None = attrib(default=None, kw_only=True)
-    '''for matching the cells belonging to this map. If None, it means all cells are matched.'''
-    materialID: int|None = attrib(default=None, kw_only=True)
-    '''for matching the cells belonging to this map. If None, it means all cells are matched.'''
     
     height: int = attrib(default=512, kw_only=True)
     '''default height of the map. This is only for load/dump, it has no relationship with the size of the screen/window.'''
@@ -114,22 +189,88 @@ class CorrespondMap:
     ''' shape = (k^2(map_index), height*width(vertex id), channel_count(color)), vertexID = self.width * y + x'''
     _writtens: Tensor = attrib(init=False)
     '''
-    shape = (k^2(map_index), height*width(vertex id), 1(bool)), vertexID = self.width * y + x.
+    shape = (k^2(map_index), height*width(vertex id)), vertexID = self.width * y + x.
     This represents whether a blob has values or not (since the real value can also be all zeros)
     '''
-    _post_attention_values: dict[int, Tensor] = attrib(init=False, factory=dict)
-    _post_attention_written: dict[int, Tensor] = attrib(init=False, factory=dict)
+    
+    _texID: Optional[int] = attrib(default=None, init=False)
+    '''sampler2DArray's texture id in OpenGL. This is for rendering purpose.'''
+    tex_min_filter: TextureFilter = attrib(default=TextureFilter.LINEAR, kw_only=True)
+    tex_mag_filter: TextureFilter = attrib(default=TextureFilter.LINEAR, kw_only=True)
+    tex_wrap_s: TextureFilter = attrib(default=TextureWrap.CLAMP_TO_EDGE, kw_only=True)
+    tex_wrap_t: TextureFilter = attrib(default=TextureWrap.CLAMP_TO_EDGE, kw_only=True)
+    tex_midmap_level: int = attrib(default=1, kw_only=True)
     
     def __attrs_post_init__(self):
         self._values = torch.zeros(self.k*self.k, self.height * self.width, self.channel_count, dtype=torch.float32)
         self._writtens = torch.zeros(self.k*self.k, self.height * self.width, dtype=torch.bool)
-        
+    
+    def __repr__(self):
+        return f"<CorrespondMap: {self.name}, k={self.k}, size={self.height}x{self.width}, channel_count={self.channel_count}>"
+    
     def __getitem__(self, index):
         '''
         You can directly access the color value of the index-th view direction. (height, width, channel_count).
         This is an alias of `self._values[index]`.
         '''
         return self._values[index]
+    
+    # region gl texture related
+    def load(self):
+        '''load data to opengl.'''
+        if self.loaded:
+            return
+        if is_dev_mode():
+            EngineLogger.info(f"Loading Correspondence Map: {self.name}")
+        self._texID = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, self.texID)
+        if self.channel_count == 4:
+            format = gl.GL_RGBA8
+        elif self.channel_count == 3:
+            format = gl.GL_RGB8
+        elif self.channel_count == 2:
+            format = gl.GL_RG8
+        elif self.channel_count == 1:
+            format = gl.GL_R8
+        else:
+            raise ValueError("Unsupported channel count: ", self.channel_count)
+        gl.glTexStorage3D(gl.GL_TEXTURE_2D_ARRAY, 
+                          self.tex_midmap_level,
+                          format,
+                          self.width,
+                          self.height,           
+                          self.k*self.k
+                          )
+        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MIN_FILTER, self.tex_min_filter.value)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MAG_FILTER, self.tex_mag_filter.value)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_S, self.tex_wrap_s.value)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_T, self.tex_wrap_t.value)
+        
+        for i in range(self.k*self.k):
+            gl.glTexSubImage3D(gl.GL_TEXTURE_2D_ARRAY, 
+                               0, 
+                               0, 0, i, 
+                               self.width, self.height, 1, 
+                               format, 
+                               gl.GL_FLOAT, 
+                               self._values[i].numpy().ctypes.data
+                               )
+        
+    @property
+    def loaded(self):
+        return self.texID is not None
+    
+    @property
+    def texID(self):
+        return self._texID
+    
+    def bind(self, slot:int, uniformID):
+        if self.texID is None:
+            raise Exception('Texture is not yet sent to GPU. Cannot bind.')
+        gl.glActiveTexture(gl.GL_TEXTURE0 + slot)   # type: ignore
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texID)
+        gl.glUniform1i(uniformID, slot)
+    # endregion
     
     def get_map(self, index: int, height:int|None=None, width:int|None=None, ):
         '''
@@ -154,16 +295,35 @@ class CorrespondMap:
             return self._values[:, :width*height].view(self.k*self.k, height, width, self.channel_count)
         return self._values.view(self.k*self.k, height, width, self.channel_count)
     
-    @torch.no_grad()
+    def get_written_flag_map(self, index: int, height:int|None=None, width:int|None=None):
+        '''
+        `written` map indicates whether a cell has been written a value or not. 
+        
+        shape = (height, width)
+        value = 1 means written, 0 means not written.
+        '''
+        if height is None:
+            height = self.height
+        if width is None:
+            width = self.width
+        if height*width < self.height * self.width:   # means only the first part of the map is used
+            return self._writtens[index, :width*height].view(height, width)
+        return self._writtens[index].view(height, width)
+    
     def update(self, 
                color_frames: list[Tensor]|Tensor, 
                id_maps: list[Tensor|IDMap]|Tensor|IDMap,
-               mode: UpdateMode = 'first',
+               spriteID: int|None = None,
+               materialID: int|None = None,
+               mode: UpdateMode = 'first_avg',
+               masks: list[Tensor]|Tensor|None=None,
                ignore_obj_mat_id: bool=False):
         '''
         Args:
             - color_frames: shape = (height, width, channel_count)
-            - id_maps: shape = (height, width, 4), cell = (objID, materialID, map_index, vertexID), where vertexID = self.width * y + x
+            - id_maps: shape = (height, width, 4), cell = (spriteID, materialID, map_index, vertexID), where vertexID = self.width * y + x
+            - spriteID: if not None, only update the cells that have the same spriteID.
+            - materialID: if not None, only update the cells that have the same materialID.
             - mode:
                 - replace: 
                     replace the old value with the new value
@@ -174,54 +334,102 @@ class CorrespondMap:
                 - first_avg: 
                     only update the value if the old cell in not written. 
                     But if there are multiple values for the same cell in this update process, average them.
-            - ignore_obj_mat_id: if True, still update even if the objID and materialID are not matching to this map.
+            - masks: shape = (h, w), the region to ignore.
+            - ignore_obj_mat_id: if True, still update even if the spriteID and materialID are not matching to this map.
             
         Note:
             the size in color_frames & id_maps is just the window size. It has no relationship with the size of the map.
         '''
-        if not isinstance(color_frames, list):
-            color_frames = [color_frames]
-        if not isinstance(id_maps, list):
-            id_maps = [id_maps]
-        for i in range(len(id_maps)):
-            m = id_maps[i]
+        if isinstance(color_frames, Tensor):
+            if len(color_frames.shape) == 4: # frames are concatenated as a tensor, split them
+                color_frames = torch.split(color_frames, 1, dim=0)
+            elif len(color_frames.shape) == 3:
+                color_frames = [color_frames, ]
+            else:
+                raise ValueError("The shape of color_frames is invalid. Got: ", color_frames.shape)
+            
+        if isinstance(id_maps, Tensor):
+            if len(id_maps.shape) == 4: # maps are concatenated as a tensor, split them
+                id_maps = torch.split(id_maps, 1, dim=0)    # type: ignore
+            elif len(id_maps.shape) == 3:
+                id_maps = [id_maps, ]
+            else:
+                raise ValueError("The shape of id_maps is invalid. Got: ", id_maps.shape)
+        elif isinstance(id_maps, IDMap):
+            id_maps = [id_maps.tensor, ]
+        
+        if masks is None:
+            masks = [None] * len(color_frames)  # type: ignore
+        elif masks is not None:
+            if isinstance(masks, Tensor):
+                if len(masks.shape) == 4 and masks.shape[-1] == 1:  # not yet squeezed
+                    masks = torch.split(masks.squeeze(-1), 1, dim=0)
+                elif len(masks.shape) == 3:
+                    masks = torch.split(masks, 1, dim=0)
+                elif len(masks.shape) == 2:
+                    masks = [masks,]
+                else:
+                    raise ValueError("The shape of masks is invalid. Got: ", masks.shape)
+        
+        if len(color_frames) != len(id_maps):   # type: ignore
+            raise ValueError("The length of color_frames and id_maps should be the same.")
+        if len(masks) != len(color_frames): # type: ignore
+            raise ValueError("The length of masks should be the same as color_frames.")
+        
+        for i in range(len(id_maps)):   # type: ignore
+            m = id_maps[i]  # type: ignore
             if isinstance(m, IDMap):
-                id_maps[i] = m.tensor
-                
-        for color_frame, id_map in zip(color_frames, id_maps):
-            self._update(color_frame, id_map, mode, ignore_obj_mat_id)  # type: ignore
+                id_maps[i] = m.tensor   # type: ignore
+        
+        for color_frame, id_map, mask in zip(color_frames, id_maps, masks): # type: ignore
+            self._update(color_frame=color_frame, 
+                         id_map=id_map, 
+                         spriteID=spriteID,
+                         materialID=materialID,
+                         mode=mode, 
+                         mask=mask, 
+                         ignore_obj_mat_id=ignore_obj_mat_id)  # type: ignore
     
     def _update(self: "CorrespondMap", 
                 color_frame: Tensor, 
                 id_map: Tensor, 
-                mode: UpdateMode,
+                spriteID: int|None = None,
+                materialID: int|None=None,
+                mode: UpdateMode = 'first_avg',
+                mask: Optional[Tensor]=None,
                 ignore_obj_mat_id: bool=False):
+        
         if self.channel_count < color_frame.shape[-1]:
             color_frame = color_frame[..., :self.channel_count]
         elif self.channel_count == 4 and color_frame.shape[-1] == 3:    # add alpha channel
             color_frame = torch.cat([color_frame, torch.ones_like(color_frame[..., :1])], dim=-1)
         
         # flatten maps
-        indices = torch.arange(id_map.shape[0], device=id_map.device).view(-1, 1)
+        indices = torch.arange(id_map.shape[0]*id_map.shape[1], device=id_map.device).view(-1, 1)
         id_map = id_map.view(-1, id_map.shape[-1])
-        id_map = torch.cat([indices, id_map], dim=-1)  
+        id_map = torch.cat([indices, id_map], dim=-1)
         # shape = (height * width, 5)
-        # cell = (i, objID, materialID, map_index, vertexID)
+        # cell = (i, spriteID, materialID, map_index, vertexID)
         
         color_frame = color_frame.view(-1, color_frame.shape[-1])
         color_frame = torch.cat([indices, color_frame], dim=-1)
         # shape = (height * width, channel_count + 1)
         # cell = (i, r, g, b, a)
         
-        if not ignore_obj_mat_id:
-            if self.objID is not None:
-                id_map = id_map[id_map[..., 1] == self.objID]
-            if self.materialID is not None:
-                id_map = id_map[id_map[..., 2] == self.materialID]
+        if mask is not None:
+            mask = mask.view(-1, 1) # shape = (height * width), flatten
+            id_map = id_map[mask[..., 0]<1]     # 1 means ignore
             color_frame = color_frame[id_map[..., 0]]
         
-        # remove the objID and materialID
-        id_map = torch.cat([id_map[..., 0], id_map[..., 3:]], dim=-1)   # now cell = (i, map_index, vertexID)
+        if not ignore_obj_mat_id:
+            if spriteID is not None:
+                id_map = id_map[id_map[..., 1] == spriteID]
+            if materialID is not None:
+                id_map = id_map[id_map[..., 2] == materialID]
+            color_frame = color_frame[id_map[..., 0]]
+        
+        # remove the spriteID and materialID
+        id_map = torch.cat([id_map[..., 0].unsqueeze(-1), id_map[..., 3:]], dim=-1)   # now cell = (i, map_index, vertexID)
         
         if mode in ['first', 'first_avg']:  # only choose cells that are not written
             # self._writtens's shape = (k^2(map_index), width * height(vertex id), 1(bool))
@@ -230,16 +438,153 @@ class CorrespondMap:
             color_frame = color_frame[~written]
         
         elif mode in ['replace', 'replace_avg']:
+            id_map = id_map.contiguous()
+            color_frame = color_frame.contiguous()
             id_map, color_frame = _find_dup_index_and_treat(id_map, color_frame, mode)  # type: ignore
 
         # update the values
         self._values[id_map[..., 1], id_map[..., 2]] = color_frame[..., 1:]
         self._writtens[id_map[..., 1], id_map[..., 2]] = True
     
+    def dump(self, path: str|Path, name: Optional[str]=None, zip=False):
+        name = name or self.name
+        real_name = name
+        count = 1
+        while os.path.exists(os.path.join(path, real_name)):
+            real_name = f"{name}_{count}"
+            count += 1
+        
+        if zip:
+            random_name = str(uuid4()).replace('-', '')
+            real_path = TEMP_DIR / f"{random_name}.zip"
+        else:
+            real_path = os.path.join(path, real_name)
+        os.makedirs(real_path, exist_ok=True)
+            
+        for i in range(self.k*self.k):
+            map_data = self.get_map(i)
+            
+            img = 255. * map_data.cpu().numpy()
+            img = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
+            img.save(os.path.join(real_path, f"{i}.png"))
+
+            # also output as img, for easy debug & check. 
+            # white means written, black means not written
+            written = self.get_written_flag_map(i)
+            img = 255. * written.cpu().numpy()
+            img = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), mode='L')
+            img.save(os.path.join(real_path, f"{i}_written.png"))
+        
+        meta = {    # spriteID & matID will not be saved, since it will be generated when loading
+            "k": self.k,
+            "height": self.height,
+            "width": self.width,
+            "channel_count": self.channel_count,
+            "name": name
+        }
+        with open(os.path.join(real_path, 'meta.json'), 'w') as f:
+            json.dump(meta, f)
+        
+        if zip:
+            count = 1
+            real_name = name
+            while os.path.exists(os.path.join(path, f"{real_name}.zip")):
+                real_name = f"{name}_{count}"
+                count += 1
+            saving_path = os.path.join(path, f"{real_name}.zip")
+            
+            with zipfile.ZipFile(saving_path, 'w') as z:
+                for i in range(self.k*self.k):
+                    z.write(os.path.join(real_path, f"{i}.png"), f"{i}.png")
+                    z.write(os.path.join(real_path, f"{i}_written.png"), f"{i}_written.png")
+                    os.remove(os.path.join(real_path, f"{i}.png"))
+                    os.remove(os.path.join(real_path, f"{i}_written.png"))
+                    
+                z.write(os.path.join(real_path, 'meta.json'), 'meta.json')
+                os.remove(os.path.join(real_path, 'meta.json'))
+                z.close()
+            os.rmdir(real_path) # will only remove when the folder is empty
+    
+    @classmethod
+    def Load(cls, path: str|Path, name: Optional[str]=None):
+        '''
+        Load the correspond map from the disk.
+        
+        Args:
+            - path: the path of the map. It should be a folder or a zip file.
+            - name: the name of the map. If given, it will overwrite the name in the meta file.
+            - spriteID: force to assign the spriteID to the map.
+            - materialID: force to assign the materialID to the map.
+        '''
+        is_zip = False
+        if os.path.isfile(path):
+            is_zip = True
+            random_name = str(uuid4()).replace('-', '')
+            real_path = TEMP_DIR / f"{random_name}"
+            with zipfile.ZipFile(path, 'r') as z:
+                z.extractall(real_path)
+        else:
+            real_path = path
+        
+        with open(os.path.join(real_path, 'meta.json'), 'r') as f:
+            meta = json.load(f)
+        
+        map = cls(name=name or meta['name'], 
+                  k=meta['k'], 
+                  height=meta['height'], 
+                  width=meta['width'], 
+                  channel_count=meta['channel_count'])
+        
+        for i in range(map.k*map.k):
+            img = Image.open(os.path.join(real_path, f"{i}.png"))
+            img = np.array(img)
+            img = torch.tensor(img, dtype=torch.float32) / 255.
+            map._values[i] = img.view(-1, map.channel_count)
+            
+            img = Image.open(os.path.join(real_path, f"{i}_written.png"))
+            img = np.array(img)
+            img = torch.tensor(img, dtype=torch.float32) / 255.
+            img = img.bool()
+            map._writtens[i] = img.view(-1)
+            
+            if is_zip:
+                os.remove(os.path.join(real_path, f"{i}.png"))
+                os.remove(os.path.join(real_path, f"{i}_written.png"))
+        
+        if is_zip:
+            os.remove(os.path.join(real_path, 'meta.json'))
+            os.rmdir(real_path)
+        
+        return map
 
 
-__all__ = ['CorrespondMap']
+__all__ = ['IDMap', 'UpdateMode', 'CorrespondMap']
+
 
 
 if __name__ == '__main__':  # for debug
-    ...
+    from common_utils.path_utils import TEMP_DIR
+    
+    def dump_test():
+        m = CorrespondMap(name='test', k=3)
+        m._values = torch.rand(9, 512*512, 4)
+        m.dump(TEMP_DIR)
+        
+    def load_test():
+        m = CorrespondMap.Load(TEMP_DIR / 'test')
+        print(m)
+        
+    def update_test():
+        m = CorrespondMap(name='test', k=3)
+        fully_red = torch.zeros(512, 512, 4, dtype=torch.float32)
+        fully_red[..., 0] = 1.
+        fully_red[..., 3] = 1.
+        id_map = torch.zeros(512, 512, 4, dtype=torch.int32)
+        id_map[..., 2] = 4  # map_index
+        id_map[..., 3] = torch.arange(512*512).view(512, 512)   # vertexID
+        m.update(fully_red, id_map)
+        m.dump(TEMP_DIR, name='update_test')
+        
+    # dump_test()
+    # load_test()
+    update_test()

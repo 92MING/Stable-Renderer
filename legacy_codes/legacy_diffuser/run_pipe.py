@@ -15,7 +15,7 @@ from PIL import Image
 from typing import List, Optional
 from datetime import datetime
 
-from common_utils.image_utils import save_images_as_gif
+from legacy_codes.utils.image_utils import save_images_as_gif
 from common_utils.global_utils import GetEnv
 from common_utils.debug_utils import DefaultLogger
 from common_utils.path_utils import OUTPUT_DIR as GIF_OUTPUT_DIR, MAP_OUTPUT_DIR, EXAMPLE_MAP_OUTPUT_DIR

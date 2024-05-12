@@ -7,7 +7,7 @@ When the QObject is deleted, when the corresponding listener method is running a
 if __name__ == '__main__':
     import os, sys
     sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-    __package__ = 'utils.data_struct'   
+    __package__ = 'common_utils.data_struct'   
 
 import heapq, functools
 
@@ -288,8 +288,8 @@ class Event:
         if self._noCheck:
             return
         try:
-            isVarArgFunc = getfullargspec(listener).varargs is not None   # 是否是可变参数函数
-            defaultsCount = len(getfullargspec(listener).defaults) if getfullargspec(listener).defaults is not None else 0
+            isVarArgFunc = getfullargspec(listener).varargs is not None   # whether the function is varargs
+            defaultsCount = len(getfullargspec(listener).defaults) if getfullargspec(listener).defaults is not None else 0  # type: ignore
         except TypeError:
             isVarArgFunc = False
             defaultsCount = 0
@@ -298,7 +298,7 @@ class Event:
         elif isinstance(listener,MethodType):
             if issubclass(listener.__self__.__class__, Event):
                 if listener.__qualname__.split('.')[-1] == 'invoke':
-                    args = listener.__self__.args
+                    args = listener.__self__.args   # type: ignore
                     for i, arg in enumerate(args):
                         if not subClassCheck(arg, self.args[i]):
                             raise Exception("Listener's arg must be type or type name")
@@ -350,7 +350,7 @@ class Event:
             self._checkListener(listener)
             if isinstance(listener,MethodType):
                 if isinstance(listener.__self__, QObject):
-                    listener.__self__.destroyed.connect(functools.partial(self._removeDestroyedListener, listener))
+                    listener.__self__.destroyed.connect(functools.partial(self._removeDestroyedListener, listener))     # type: ignore
             self._events.add(listener)
         else:
             raise TypeError("Listener must be Callable, or iterable of Callable")
@@ -364,7 +364,7 @@ class Event:
             self._checkListener(listener)
             if isinstance(listener,MethodType):
                 if isinstance(listener.__self__, QObject):
-                    listener.__self__.destroyed.connect(functools.partial(self._removeDestroyedTempListener, listener))
+                    listener.__self__.destroyed.connect(functools.partial(self._removeDestroyedTempListener, listener))    # type: ignore
         self._tempEvents.add(listener)
 
     def removeListener(self, listener:Callable, throwError=True):
@@ -521,25 +521,25 @@ class Tasks(Event):
         possibleInputs = [signalArgs]
         while not _allPossibleInputsOk(possibleInputs):
             possibleInput = _getHasUnionInput(possibleInputs)
-            possibleInputs.remove(possibleInput)
-            for i, arg in enumerate(possibleInput):
+            possibleInputs.remove(possibleInput)    # type: ignore
+            for i, arg in enumerate(possibleInput):   # type: ignore
                 if get_origin(arg) is not None and get_origin(arg) == Union:
                     for argType in get_args(arg):  # for each type in Union
                         argTypeOrigin = get_origin(argType)
                         if argTypeOrigin is not None and argTypeOrigin != Union:
                             argType = argTypeOrigin
-                        newPossibleInput = list(possibleInput)
-                        newPossibleInput[i] = argType
+                        newPossibleInput = list(possibleInput)  # type: ignore
+                        newPossibleInput[i] = argType   
                         possibleInputs.append(newPossibleInput.copy())
                     break
         self._possibleInputs = possibleInputs
         if len(possibleInputs) == 1:
             self._qtSignal = _SignalWrapper(*possibleInputs[0])
-            self._qtSignal.signal.connect(self._execute)
+            self._qtSignal.signal.connect(self._execute)    # type: ignore
         else:
             self._qtSignal = _SignalWrapper(*possibleInputs)
             for possibleInput in possibleInputs:
-                self._qtSignal.signal.__getitem__(possibleInput).connect(self._execute)
+                self._qtSignal.signal.__getitem__(possibleInput).connect(self._execute)   # type: ignore
         if acceptNone:
             self._possibleInputs.append([type(None)] * len(signalArgs))
 
@@ -627,14 +627,14 @@ class AutoSortTask(Tasks):
         possibleInputs = [signalArgs]
         while not _allPossibleInputsOk(possibleInputs):
             possibleInput = _getHasUnionInput(possibleInputs)
-            possibleInputs.remove(possibleInput)
-            for i, arg in enumerate(possibleInput):
+            possibleInputs.remove(possibleInput)    # type: ignore
+            for i, arg in enumerate(possibleInput):   # type: ignore
                 if get_origin(arg) is not None and get_origin(arg) == Union:
                     for argType in get_args(arg):  # for each type in Union
                         argTypeOrigin = get_origin(argType)
                         if argTypeOrigin is not None and argTypeOrigin != Union:
                             argType = argTypeOrigin
-                        newPossibleInput = list(possibleInput)
+                        newPossibleInput = list(possibleInput)  # type: ignore
                         newPossibleInput[i] = argType
                         possibleInputs.append(newPossibleInput.copy())
                     break
@@ -683,23 +683,24 @@ class AutoSortTask(Tasks):
             return self._order >= other._order
         def __ne__(self, other):
             return self._order != other._order
+        
     @classmethod
     def _TaskWrapper(cls, func, order):
         return cls.TaskWrapper(func, order)
 
-    def addListener(self, listener:Union[Callable, Iterable[Callable]], order:int=0):
-        self._checkListener(listener)
+    def addListener(self, listener:Union[Callable, Iterable[Callable]], order:int|float=0):
+        self._checkListener(listener)   # type: ignore
         if listener not in self._events:
             heapq.heappush(self._events, self._TaskWrapper(listener, order))
             
-    def addTempListener(self, listener:Union[Callable, Iterable[Callable]], order:int=0):
-        self._checkListener(listener)
+    def addTempListener(self, listener:Union[Callable, Iterable[Callable]], order:int|float=0):
+        self._checkListener(listener)    # type: ignore
         if listener not in self._tempEvents:
             heapq.heappush(self._tempEvents, self._TaskWrapper(listener, order))
             
     def removeListener(self, listener, throwError:bool=False):
         if isinstance(listener, Iterable):
-            for l in listener:
+            for l in listener:   # type: ignore
                 self.removeListener(l)
         else:
             for task in self._events:
@@ -711,7 +712,7 @@ class AutoSortTask(Tasks):
             
     def removeTempListener(self, listener, throwError:bool=False):
         if isinstance(listener, Iterable):
-            for l in listener:
+            for l in listener:   # type: ignore
                 self.removeTempListener(l)
         else:
             for task in self._tempEvents:
@@ -721,27 +722,27 @@ class AutoSortTask(Tasks):
             if throwError:
                 raise ListenerNotFoundError(f"listener {listener} not found")
 
-    def addTask(self, task:Callable, order:int=0):
+    def addTask(self, task:Callable, order:int|float=0):
         self.addTempListener(task, order)
         
-    def addTasks(self, tasks:Union[Callable, Iterable[Callable]], orders:Union[int, Iterable[int]]=0):
+    def addTasks(self, tasks:Union[Callable, Iterable[Callable]], orders:Union[int, float, Iterable[int|float]]=0):
         if not isinstance(tasks, Iterable):
             tasks = [tasks]
         if isinstance(orders, int):
-            orders = [orders] * len(tasks)
-        for task, order in zip(tasks, orders):
+            orders = [orders] * len(tasks)   # type: ignore
+        for task, order in zip(tasks, orders):  # type: ignore
             self.addTask(task, order)
     
-    def addForeverTasks(self, tasks:Union[Callable, Iterable[Callable]], orders:Union[int, Iterable[int]]=0):
+    def addForeverTasks(self, tasks:Union[Callable, Iterable[Callable]], orders:Union[int, float, Iterable[int|float]]=0):
         if not isinstance(tasks, Iterable):
             tasks = [tasks]
         if isinstance(orders, int):
-            orders = [orders] * len(tasks)
-        for task, order in zip(tasks, orders):
+            orders = [orders] * len(tasks)   # type: ignore
+        for task, order in zip(tasks, orders):  # type: ignore
             self.addForeverTask(task, order)
             
-    def addForeverTask(self, task:Callable, order:int=0):
-        self.addListener(task, order)
+    def addForeverTask(self, task:Callable, order:int|float=0):
+        self.addListener(task, order)   # type: ignore
 
     def _execute(self, *args):
         if self._hasEmitted:
@@ -790,3 +791,10 @@ class AutoSortTask(Tasks):
             self._noneIndexes.clear()
 
 __all__ = ["Event", "ListenerNotFoundError", "NoneTypeNotSupportedError", "DelayEvent", "Tasks", "AutoSortTask"]
+
+
+if __name__ == '__main__':  # for debugging
+    task = AutoSortTask()
+    task.addTask(lambda : print('x'), 1.1)
+    task.addTask(lambda : print('y'), 1.0)
+    task.execute()  # y, x

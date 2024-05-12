@@ -49,6 +49,8 @@ class ControlBase(ABC):
 
     def set_cond_hint(self, cond_hint, strength=1.0, timestep_percent_range=(0.0, 1.0)):
         self.cond_hint_original = cond_hint
+        if self.cond_hint_original is not None and len(self.cond_hint_original.shape) == 3:
+            self.cond_hint_original = self.cond_hint_original.unsqueeze(0)  # add the batch dimension
         self.strength = strength
         self.timestep_percent_range = timestep_percent_range
         return self
@@ -167,6 +169,9 @@ class ControlNet(ControlBase):
                 if self.identifier is not None and other.identifier is not None:
                     return self.identifier == other.identifier
         return super().__eq__(other)
+    
+    def __hash__(self):
+        return super().__hash__()
 
     def get_control(self, x_noisy, t, cond, batched_number):
         control_prev = None
@@ -189,7 +194,10 @@ class ControlNet(ControlBase):
             if self.cond_hint is not None:
                 del self.cond_hint
             self.cond_hint = None
-            self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, x_noisy.shape[3] * 8, x_noisy.shape[2] * 8, 'nearest-exact', "center").to(dtype).to(self.device)
+            self.cond_hint = comfy.utils.common_upscale(self.cond_hint_original, 
+                                                        x_noisy.shape[3] * 8, 
+                                                        x_noisy.shape[2] * 8, 
+                                                        'nearest-exact', "center").to(dtype).to(self.device)
         if x_noisy.shape[0] != self.cond_hint.shape[0]:
             self.cond_hint = broadcast_image_to(self.cond_hint, x_noisy.shape[0], batched_number)
 

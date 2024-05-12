@@ -257,7 +257,10 @@ class BaseModel(torch.nn.Module):
             if self.manual_cast_dtype is not None:
                 dtype = self.manual_cast_dtype
             #TODO: this needs to be tweaked
-            area = input_shape[0] * input_shape[2] * input_shape[3]
+            if len(input_shape) == 3:   # no batch dimension
+                area = input_shape[1] * input_shape[2]  # c,h,w
+            else:
+                area = input_shape[0] * input_shape[2] * input_shape[3]
             return (area * comfy.model_management.dtype_size(dtype) / 50) * (1024 * 1024)
         else:
             #TODO: this formula might be too aggressive since I tweaked the sub-quad and split algorithms to use less memory.

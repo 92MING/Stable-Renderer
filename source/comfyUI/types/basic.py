@@ -175,6 +175,8 @@ class AnnotatedParam(metaclass=_anno_param_meta):
                     raise TypeError(f'Unexpected type for Union: {origin_args}. Only Support Optional type.')
                 origin = origin_args[0] if origin_args[0] != NoneType else origin_args[1]
                 param_type = 'optional' # force to optional type
+                if default == Parameter.empty:
+                    default = None
                 
             elif origin_origin == list:
                 origin = get_args(origin)[0]
@@ -337,9 +339,19 @@ class AnnotatedParam(metaclass=_anno_param_meta):
     @property
     def _comfyUI_definition(self)->tuple:
         '''return the tuple form for registration, e.g. ("INT", {...})'''
-        data_dict = self.extra_params
+        data_dict = self.extra_params or {}
         if self.default != Parameter.empty:
             data_dict['default'] = self.default
+        
+        comfy_type_str = self._comfy_type
+        if comfy_type_str == 'STRING':
+            if 'multiline' not in data_dict:
+                data_dict['multiline'] = False
+            if 'forceInput' not in data_dict:
+                data_dict['forceInput'] = False
+            if 'dynamicPrompts' not in data_dict:
+                data_dict['dynamicPrompts'] = False
+                
         if data_dict:
             return (self._comfy_type, data_dict)
         else:
@@ -512,15 +524,21 @@ class LATENT(dict):
         if 'samples' in self:
             return self['samples']
         return None
+    
     @samples.setter
     def samples(self, val: Tensor):
         self['samples'] = val
         
     @property
     def noise(self)-> Optional[Tensor]:
+        '''
+        latent noise.
+        The shape should be (b, c, h, w).
+        '''
         if 'noise' in self:
             return self['noise']
         return None
+    
     @noise.setter
     def noise(self, val: Tensor):
         self['noise'] = val
@@ -530,6 +548,7 @@ class LATENT(dict):
         if 'noise_mask' in self:
             return self['noise_mask']
         return None
+    
     @noise_mask.setter
     def noise_mask(self, val: Tensor):
         self['noise_mask'] = val
@@ -539,6 +558,7 @@ class LATENT(dict):
         if 'batch_index' in self:
             return self['batch_index']
         return None
+    
     @batch_index.setter
     def batch_index(self, val: List[int]):
         self['batch_index'] = val
@@ -676,6 +696,8 @@ class UIImage(UI, valueT=IMAGE):
                  filename: Optional[str] = None, 
                  subfolder : str = "",
                  type: Literal['output', 'temp']='output', 
+                 force_path: str|Path|None = None,
+                 force_saving: bool = False,
                  animated: bool=False,
                  prefix: Optional[str] = None,
                  prompt: Optional["PROMPT"] = None,
@@ -691,6 +713,8 @@ class UIImage(UI, valueT=IMAGE):
             - filename: the filename of the image(under the `output` folder)
             - subfolder: the subfolder of the image(under the `output` folder)
             - type: (output/temp) `output` means the image is saved under the output folder, `temp` means the image is saved under the temp folder.
+            - force_path: the force path for saving the image. If this is set, the `type`/`filename`/`subfolder` will be ignored.
+            - force_saving: force saving the image even if in engine looping.
             - prefix: the prefix of the filename
             - prompt: the prompt for the image. This is for building the metadata of the image.
             - extra_pnginfo: extra png info for the image. This is for building the metadata of the image.
@@ -703,17 +727,17 @@ class UIImage(UI, valueT=IMAGE):
             - frame_rate: the frame rate for the gif (only available for animated=True)
             - loop_count: the loop count for the gif (only available for animated=True)
         '''
-        if is_engine_looping(): 
+        if is_engine_looping() and not force_saving: 
             # means the engine is looping, we should not save the image
             super().__init__('images', value=value, ui_value={}, **extra_params)
             return
         
-        if prefix is None:
+        if force_path is None and prefix is None:
             if type =='temp':
                 prefix = time.strftime("%y-%m-%d", time.localtime()) + "_"
             else:
                 prefix = ""
-        if not filename:
+        if force_path is None and not filename:
             if type == 'temp':
                 file_dir = get_temp_directory()
             else:
@@ -728,7 +752,12 @@ class UIImage(UI, valueT=IMAGE):
         if compress_level is None:
             compress_level = 1 if type == 'temp' else 4
         
-        os.makedirs(os.path.join(file_dir, subfolder), exist_ok=True)
+        if force_path is None:
+            os.makedirs(os.path.join(file_dir, subfolder), exist_ok=True)
+        else:
+            file_dir = os.path.dirname(force_path)
+            filename = os.path.basename(force_path)
+            subfolder = ""
         
         from comfy.cli_args import args
         

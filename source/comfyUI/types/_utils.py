@@ -68,7 +68,12 @@ def get_comfy_type_definition(tp: Union[type, str, TypeAlias], inner_type: Optio
                     return arg._comfy_type
             raise TypeError(f'Unexpected Annotated type: {tp}')
         else:
-            raise TypeError(f'Unexpected type annotation: {tp}')
+            if hasattr(tp, '__qualname__'): # really cant know what type of tp is(usually special types, e.g. Callable), just use its name as identifier
+                origin = tp.__qualname__.split('.')[-1].upper() # type: ignore
+            elif hasattr(tp, '__name__'):
+                origin = tp.__name__.split('.')[-1].upper()  # type: ignore
+            else:
+                raise TypeError(f'Unexpected type annotation: {tp}')
     
     if isinstance(tp, ForwardRef):
         return tp.__forward_arg__.upper()

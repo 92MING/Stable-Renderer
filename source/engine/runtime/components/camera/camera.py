@@ -5,6 +5,7 @@ from ...component import Component
 from ..transform import Transform
 from engine.static.color import Color
 from engine.static.enums import ProjectionType
+from common_utils.stable_render_utils import EnvPrompt
 
 if TYPE_CHECKING:
     from engine.managers import RuntimeManager
@@ -21,6 +22,7 @@ class Camera(Component):
     @classmethod
     def ActiveCameras(cls):
         return [cam for cam in cls._All_Cameras if cam.enable]
+    
     @classmethod
     def MainCamera(cls):
         return cls._Main_Camera
@@ -33,20 +35,37 @@ class Camera(Component):
                  near_plane=0.1,
                  far_plane=100.0,
                  ortho_size=1.0,
+                 projection_type=ProjectionType.PERSPECTIVE,
                  bgColor=Color.CLEAR,
-                 projection_type=ProjectionType.PERSPECTIVE):
+                 bgPrompt: str|EnvPrompt=''):
+        '''
+        Args:
+            - fov: Field of view in degrees
+            - near_plane: Near clipping plane
+            - far_plane: Far clipping plane
+            - ortho_size: Orthographic size
+            - projection_type: Projection type (perspective or orthographic)
+            - bgColor: Background color(for empty areas)
+            - bgPrompt: environment prompt(for empty areas)
+        '''
         super().__init__(gameObj, enable)
+        
         self.fov = fov
         self.near_plane = near_plane
         self.far_plane = far_plane
         self.ortho_size = ortho_size
-        self.bgColor = bgColor
         self.projection_type = projection_type
+        self.bgColor = bgColor
+        self.bgPrompt: EnvPrompt = bgPrompt # type: ignore
+        if isinstance(bgPrompt, str):
+            self.bgPrompt = EnvPrompt(bgPrompt)
 
     def awake(self):
         Camera._All_Cameras.add(self)
+
     def onDestroy(self):
         Camera._All_Cameras.remove(self)
+
     def onDisable(self):
         if self.isMainCamera:
             Camera._Main_Camera = None
@@ -61,6 +80,7 @@ class Camera(Component):
     @property
     def isMainCamera(self):
         return Camera._Main_Camera == self
+    
     def set_as_main_camera(self)->bool:
         '''
         Set this camera as the main camera. Return True if success, otherwise return False.
@@ -77,6 +97,7 @@ class Camera(Component):
         forward = self.transform.forward
         up = self.transform.up
         return glm.lookAt(pos, pos + forward, up)
+    
     @property
     def projectionMatrix(self):
         if self.projection_type == ProjectionType.PERSPECTIVE:
@@ -121,6 +142,8 @@ class Camera(Component):
                 self.far_plane,
                 self.fov,
             )
+            if not self.engine.disableComfyUI:
+                self.engine.RenderManager.SubmitEnvPrompt(self.bgPrompt)
 
 
 __all__ = ['Camera']

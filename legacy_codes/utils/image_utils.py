@@ -5,8 +5,8 @@ from PIL.Image import Image
 from typing import Sequence, Union
 from pathlib import Path
 
-from .debug_utils import DefaultLogger
-from .path_utils import OUTPUT_DIR as GIF_OUTPUT_DIR
+from ...source.common_utils.debug_utils import DefaultLogger
+from ...source.common_utils.path_utils import OUTPUT_DIR as GIF_OUTPUT_DIR
 
 def save_images_as_gif(images: Sequence[Image],
                        output_fname: str = 'output.gif', 

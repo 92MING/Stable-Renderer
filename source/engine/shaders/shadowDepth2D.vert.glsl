@@ -1,4 +1,6 @@
-#version 330 core
+// TODO: light system is not yet finished.
+
+#version 430 core
 
 in layout (location = 0) vec3 position;
 uniform mat4 modelMatrix;

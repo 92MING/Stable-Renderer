@@ -513,11 +513,22 @@ class AdvancedNodeBase(ABC):
         cls._RealComfyUINodeCls = newcls
     
     def __init_subclass__(cls):
+        cls._IsAbstract = False
         if cls.IsAbstract is not None:
             cls._IsAbstract = cls.IsAbstract
-        else:
+            
+        if not cls._IsAbstract:
             cls._IsAbstract = isabstract(cls)
-        
+
+        if not cls._IsAbstract:
+            if not should_run_web_server:
+                if cls.__call__ == AdvancedNodeBase.__call__ or is_empty_method(cls.__call__):
+                    cls._IsAbstract = True
+            else:
+                if ((cls.__call__ == AdvancedNodeBase.__call__ or is_empty_method(cls.__call__)) and 
+                    (cls.__server_call__ == AdvancedNodeBase.__server_call__ or is_empty_method(cls.__server_call__))):
+                    cls._IsAbstract = True
+
         if should_run_web_server:
             cls._HasServerModeCall = cls.__server_call__ != AdvancedNodeBase.__server_call__
             if cls._HasServerModeCall:
@@ -592,7 +603,7 @@ class AdvancedNodeBase(ABC):
         return ret
         
     @staticmethod
-    def _AllSubclasses(non_abstract_only: bool = True)->Tuple[Type["AdvancedNodeBase"]]:
+    def _AllSubclasses(non_abstract_only: bool = False)->Tuple[Type["AdvancedNodeBase"]]:
         '''return all subclasses of `NodeBase`.'''
         all_clses = list(AdvancedNodeBase.__subclasses__())
         subclses = set()

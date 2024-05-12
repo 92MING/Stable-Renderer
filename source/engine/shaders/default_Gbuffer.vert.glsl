@@ -1,4 +1,6 @@
-// default VS for late shading
+// default VS for GBuffer submits
+// this shader is available for both AI(Instance) or non-AI(normal mesh) rendering.
+
 #version 430 core
 #define MAX_LIGHTS_NUM 256  // this constant will be edit by python script
 #define RUNTIME_UBO_BINDING 0
@@ -32,6 +34,7 @@ out vec3 viewNormal;	// not normal from normal map!
 out vec3 modelTangent;
 out vec3 modelBitangent;
 out vec2 uv;
+out vec3 vertexColor;
 flat out int vertexID; // vertex ID no need interpolation
 
 void main()
@@ -48,6 +51,7 @@ void main()
 	uv = texcoord;
 	modelTangent = normalize(tangent);
 	modelBitangent = normalize(bitangent);
+	vertexColor = vertex_color;
 
 	gl_Position = projection * vec4(worldPos, 1.0);
 }

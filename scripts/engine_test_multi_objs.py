@@ -14,7 +14,7 @@ if __name__ == '__main__':
 
     class AutoRotation(Component):
         def update(self):
-            self.transform.rotateLocalY(0.5)
+            self.transform.rotateLocalY(4 * self.engine.RuntimeManager.DeltaTime)
     
     class Sample(Engine):
         def beforePrepare(self):

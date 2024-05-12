@@ -343,14 +343,14 @@ class WorkflowNodeInfo(Dict[str, Any]):
             info['id'] = str(info['id'])
             try:
                 datas[info['id']] = WorkflowNodeInfo(info, workflow)
-            except InvalidNodeError:  
+            except InvalidNodeError as e:
                 # the node's input is not complete, means this node is not a valid node
                 # e.g a useless node but forgot to delete it. So we just skip it.
                 if 'type' in info:
                     node_type = info['type']
-                    EngineLogger.warning(f'Node {info["id"]}({node_type}) is not a valid node, skipped.')
+                    EngineLogger.warning(f'Node {info["id"]}({node_type}) is not a valid node, reason: {str(e)}. Skipped.')
                 else:
-                    EngineLogger.warning(f'Node {info["id"]} is not a valid node, skipped.')
+                    EngineLogger.warning(f'Node {info["id"]} is not a valid node, reason: {str(e)}. Skipped.')
                 try:
                     del datas[info['id']]
                 except KeyError:

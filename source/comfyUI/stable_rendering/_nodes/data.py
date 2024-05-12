@@ -3,48 +3,44 @@ from comfyUI.types import *
 from common_utils.debug_utils import ComfyUILogger
 from common_utils.global_utils import is_dev_mode, is_verbose_mode
 if TYPE_CHECKING:
-    from common_utils.stable_render_utils import IDMap
+    from common_utils.stable_render_utils import IDMap, SpriteInfos
 
 
-class BakingDataNode(StableRenderingNode):
-    '''nodes providing the runtime data during baking'''
+class EngineDataNode(StableRenderingNode):
+    '''
+    Nodes providing the runtime data during rendering.
+    `EngineData` is a hidden type, which means no input is required for this node,
+    the data will be passed during runtime automatically.
+    '''
     
-    def __call__(self, 
-                 baking_data: BakingData  # this is hidden value, will be passed during runtime
-                )->Tuple[
-                        Named(float, 'azimuth'),        # type: ignore
-                        Named(float, 'elevation')       # type: ignore
-                ]:
-        pass    # TODO
-
-
-class FrameDataNode(StableRenderingNode):
-    '''nodes providing the runtime data during rendering'''
-    
-    def __call__(self, 
-                 frame_data: FrameData  # this is hidden value, will be passed during runtime
-                )->Tuple[
-                        Named(IMAGE, "color"),  # type: ignore
-                        Named("IDMap", "id"),     # type: ignore
-                        Named(IMAGE, "pos"),    # type: ignore
-                        Named(IMAGE, "normal"), # type: ignore
-                        Named(IMAGE, "depth"),  # type: ignore
-                        Named(LATENT, "noise"), # type: ignore
-                        Named(MASK, "mask")     # type: ignore
+    def __call__(self, engine_data: EngineData)->Tuple[
+                        Named[IMAGE, "colors"],  # type: ignore
+                        Named["IDMap", "ids"],     # type: ignore
+                        Named[IMAGE, "positions"],    # type: ignore
+                        Named[IMAGE, "normals"], # type: ignore
+                        Named[IMAGE, "depths"],  # type: ignore
+                        Named[LATENT, "noises"], # type: ignore
+                        Named[MASK, "masks"],     # type: ignore
+                        Named[CorrespondMaps, 'correspond_maps'],   # type: ignore
+                        Named["SpriteInfos", "sprites"], # type: ignore
+                        Named[EnvPrompts, "env_prompt"], # type: ignore
                 ]:
         
-        if frame_data is None:
-                return (None, None, None, None, None, None, None)
+        if engine_data is None:
+                return (None, None, None, None, None, None, None, None, {}, "")
         
-        return (frame_data.color_map, 
-                frame_data.id_map, 
-                frame_data.pos_map, 
-                frame_data.normal_map,
-                frame_data.depth_map, 
-                frame_data.noise_map,
-                frame_data.mask)
+        return (engine_data.color_maps, 
+                engine_data.id_maps, 
+                engine_data.pos_maps, 
+                engine_data.normal_maps,
+                engine_data.depth_maps, 
+                engine_data.noise_maps,
+                engine_data.masks,
+                engine_data.correspond_maps,
+                engine_data.sprite_infos,
+                engine_data.env_prompts)
 
-    def IsChanged(self, frame_data: FrameData):
+    def IsChanged(self, engine_data: EngineData):
         from engine.engine import Engine
         if not Engine.IsLooping:
             return      # no need return anything for checking when engine is not running
@@ -87,4 +83,4 @@ class InferenceOutputNode(StableRenderingNode):
         
     
     
-__all__ = ['BakingDataNode', 'FrameDataNode', 'InferenceOutputNode']
+__all__ = ['EngineDataNode', 'InferenceOutputNode']

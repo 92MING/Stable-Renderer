@@ -237,7 +237,7 @@ class Texture(ResourcesObj):
             torch.cuda.synchronize()
             mapping.unmap()
         else:
-            numpy_data = self.numpy_data()
+            numpy_data = self.numpy_data(flipY=False)
             self._tensor = torch.from_numpy(numpy_data).to(f"cuda:{self.engine.RenderManager.TargetDevice}")
         
         if flip:
@@ -370,7 +370,7 @@ class Texture(ResourcesObj):
             if data.dtype != self.data_type.value.torch_dtype:
                 data = data.to(self.data_type.value.torch_dtype)
             
-            if self.share_to_torch and data.device.type == 'cuda':
+            if self.share_to_torch and data.device.type == 'cuda' and __SUPPORT_GL_CUDA_SHARE__():
                 
                 if data.device.index != self.engine.RenderManager.TargetDevice:
                     data = data.to(f"cuda:{self.engine.RenderManager.TargetDevice}")
@@ -492,8 +492,8 @@ class Texture(ResourcesObj):
     
     @staticmethod
     def CreateNoiseTex(name:Optional[str]=None,
-                       height: int = 64,
-                       width: int = 64,
+                       height: int = 512,
+                       width: int = 512,
                        sigma: float = 1.0,
                        channel_count = 4,   # same as latent size
                        data_size: Literal[16, 32] = 32,
