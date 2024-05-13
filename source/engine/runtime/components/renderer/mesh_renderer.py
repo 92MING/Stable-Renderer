@@ -4,6 +4,8 @@ from functools import partial
 from typing import Iterable, Union, Sequence, Optional, TYPE_CHECKING
 from .renderer import Renderer
 from engine.static.enums import RenderOrder, RenderMode
+from common_utils.stable_render_utils import get_new_spriteID
+from ..ai import SpriteInfo
 
 if TYPE_CHECKING:
     from engine.static.material import Material, Material_MTL
@@ -18,6 +20,8 @@ class MeshRenderer(Renderer):
                  enable=True,
                  materials: Union["Material", Iterable["Material"], None] = None,
                  mesh: Optional["Mesh"] = None,
+                 use_texcoord_id: bool = False,
+                 spriteID: Optional[int] = None
                  ):
         '''
         Args:
@@ -25,9 +29,23 @@ class MeshRenderer(Renderer):
             - enable: if this component is enabled.
             - materials: a sequence of materials.
             - mesh: the mesh object to render.
+            - use_tex_coord_id: if True, even the mesh has vertexID, UV texcoord will be used for pixel tracing instead.
+                                Default to be true for sphere mesh mapper.
+            - spriteID: force the spriteID in shader to be a specific value. It can be None if it is offered in the `corrmap`.
         '''
         super().__init__(gameObj=gameObj, enable=enable, materials=materials)
         self.mesh = mesh
+        self.use_texcoord_id = use_texcoord_id
+        self.force_spriteID = spriteID if spriteID is not None else get_new_spriteID()
+    
+    @property
+    def spriteID(self):
+        '''the sprite object contained in the `SpriteInfo` component.'''
+        if self.force_spriteID is not None:
+            return self.force_spriteID
+        if not (sprite_info:=self.gameObj.getComponent(SpriteInfo)):
+            return None
+        return sprite_info.sprite.spriteID
 
     def load_MTL_Materials(self, mats: Union["Material_MTL", Sequence["Material_MTL"]]):
         '''
@@ -58,11 +76,13 @@ class MeshRenderer(Renderer):
         
         material.use()
         material.shader.setUniform('renderMode', int(RenderMode.NORMAL.value))  # for AI rendering, plz use `CorrMapRenderer`
-        material.shader.setUniform('spriteID', 0)  # 0 means no sprite
+        material.shader.setUniform('spriteID', self.spriteID or 0)  # 0 means no sprite
+        material.shader.setUniform('useTexcoordAsID', int(self.use_texcoord_id and self.mesh is not None and self.mesh.has_uvs))
         
         if mesh is not None:
             material.shader.setUniform("hasVertexColor", int(mesh.has_colors))  # vertex color will be used only when texture is not given
             mesh.draw(slot)
+        material.unbind()
             
     def _check_and_get_order_factor(self):
         from ..camera import Camera
@@ -91,6 +111,7 @@ class MeshRenderer(Renderer):
                 order = mat.render_order + 1 / main_cam_z   # transparent do from far to near
             else:   # overlay
                 order = mat.render_order
+            
             self.engine.RenderManager.AddGBufferTask(order=order,
                                                      mesh=mesh,
                                                      shader=mat.shader,

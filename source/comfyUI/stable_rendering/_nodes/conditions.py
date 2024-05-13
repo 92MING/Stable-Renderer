@@ -123,9 +123,9 @@ class SceneTextEncode(StableRenderingNode):
         
         if env_prompts:
             for env_prompt in env_prompts:
-                if env_prompt.prompt:
+                if env_prompt.prompt is not None:
                     conds.append(_text_encode(clip=clip, text=env_prompt.prompt, weight=env_prompt.weight))
-                if env_prompt.negative_prompt:
+                if env_prompt.negative_prompt is not None:  # empty string will also do the encoding, since ComfyUI must have a neg prompt.
                     neg_conds.append(_text_encode(clip=clip, text=env_prompt.negative_prompt, weight=env_prompt.negative_weight))
         
         if is_dev_mode() and is_verbose_mode():

@@ -6,7 +6,7 @@ from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.runtime.components import Camera, MeshRenderer, CameraController, SpriteInfo
 from engine.engine import Engine
-from engine.static import Mesh, Material_MTL
+from engine.static import Mesh, Material_MTL, Texture, DefaultTextureType
 from common_utils.path_utils import *
 from common_utils.stable_render_utils import EnvPrompt
 
@@ -19,8 +19,11 @@ if __name__ == '__main__':
     class Sample(Engine):
         def beforePrepare(self):
             mikuPath = os.path.join(EXAMPLE_3D_MODEL_DIR, 'miku')
-            mikuMesh = Mesh.Load(os.path.join(mikuPath, 'miku.obj'), alias='miku') 
+            mikuMesh = Mesh.Load(os.path.join(mikuPath, 'miku.obj'), alias='miku', cullback=False) 
             mikuMaterials = Material_MTL.Load(os.path.join(mikuPath, 'miku.mtl')) # dict of materials
+            noise_map = Texture.CreateNoiseTex('miku noise map', 512, 512)
+            for mat in mikuMaterials:
+                mat.addDefaultTexture(noise_map, DefaultTextureType.NoiseTex)
             
             env_prompt = EnvPrompt('no background', negative_prompt="watermark")
             camera = GameObject('Camera')
@@ -31,15 +34,14 @@ if __name__ == '__main__':
             meshRenderer = miku.addComponent(MeshRenderer, mesh=mikuMesh)
             meshRenderer.load_MTL_Materials(mikuMaterials)
             miku.addComponent(AutoRotation)
-            miku.addComponent(SpriteInfo, auto_spriteID=True, prompt='miku')
+            miku.addComponent(SpriteInfo, auto_spriteID=True, prompt='miku, 1 girl, anime, waifu, long blue hair')
     
     # workflow_path = EXAMPLE_WORKFLOWS_DIR / 'miku-img2img-example.json'
     # workflow_path = EXAMPLE_WORKFLOWS_DIR / 'miku-direct-latent.json'
     workflow_path = EXAMPLE_WORKFLOWS_DIR / 'new-miku-control.json'
     Sample.Run(winSize=(512, 512),
-               mapSavingInternal=1,
                needOutputMaps=False,
                saveSDColorOutput=False,
                disableComfyUI=False,
-               verbose=True,
+               verbose=False,
                diffuse_workflow=workflow_path)

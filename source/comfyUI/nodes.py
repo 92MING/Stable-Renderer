@@ -1409,7 +1409,7 @@ def common_ksampler(model: "ModelPatcher",
                     force_full_denoise=False,
                     **kwargs):
     latent_image: torch.Tensor = latent["samples"]
-    if latent.get('noise'):
+    if "noise" in latent:
         noise = latent['noise']
     else:
         if disable_noise:

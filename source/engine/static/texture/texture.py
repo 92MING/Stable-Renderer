@@ -132,22 +132,29 @@ class Texture(ResourcesObj):
         return self.format.channel_count
    
     @Overload
-    def bind(self, slot:int, uniformID):
+    def bind(self, slot:int, uniformID):    # type: ignore
         '''
         Bind texture to a slot and set shader uniform.
         Make sure you have used shader before calling this function.
         '''
         if self.texID is None:
-            raise Exception('Texture is not yet sent to GPU. Cannot bind.')
+            raise Exception('Texture is not yet sent to GPU. Cannot bind')
         gl.glActiveTexture(gl.GL_TEXTURE0 + slot)   # type: ignore
+        gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, 0)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.texID)
         gl.glUniform1i(uniformID, slot)
+        
+    def unbind(self, slot:int):
+        if self.texID is None:
+            return
+        gl.glActiveTexture(gl.GL_TEXTURE0 + slot)   # type: ignore
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         
     @Overload
     def bind(self):
         '''call `glBindTexture` to bind the texture to the current context.'''
         if self.texID is None:
-            raise Exception('Texture is not yet sent to GPU. Cannot bind.')
+            raise Exception('Texture is not yet sent to GPU. Cannot bind')
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.texID)
 
     @Overload
@@ -263,7 +270,8 @@ class Texture(ResourcesObj):
         data = self.data
         if not data:
             data = np.zeros((self.height, self.width, self.format.channel_count), 
-                            dtype=self.data_type.value.numpy_dtype).tobytes()
+                            dtype=self.data_type.value.numpy_dtype
+                            ).tobytes()
         
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 
                         0, 
@@ -288,6 +296,8 @@ class Texture(ResourcesObj):
         
         if self.share_to_torch:
             self._init_tensor()
+            
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
     
     def clear(self):
         '''
@@ -309,7 +319,7 @@ class Texture(ResourcesObj):
             self.texID = None
             
         self.data = None
-        self.tensor = None
+        self.tensor = None  # type: ignore
 
     def set_data(self, 
                  data: Union[bytes, Tensor, np.ndarray], 
@@ -325,6 +335,7 @@ class Texture(ResourcesObj):
         
         if isinstance(data, bytes):
             gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, xOffset, yOffset, width, height, self.format.value.gl_format, self.data_type.value.gl_data_type, data)
+            return
             
         elif isinstance(data, np.ndarray):
             if (data.shape[0] != height or data.shape[1] != width):
@@ -389,7 +400,7 @@ class Texture(ResourcesObj):
                 mapping.unmap()
                 
             else:   # must copy data from CPU to GPU           
-                data = data.cpu().numpy().tobytes()
+                data = data.cpu().numpy().astype(self.data_type.value.numpy_dtype).tobytes()
                 gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, xOffset, yOffset, width, height, self.format.value.gl_format, self.data_type.value.gl_data_type, data)
         else:
             raise Exception('Invalid data type: {}'.format(data))
@@ -514,7 +525,7 @@ class Texture(ResourcesObj):
             - sigma: The standard deviation of the gaussian noise.
             - channel_count: The channel count of the texture. It should be in [1, 4].
                              Default is 4, which is same as latent size.
-            - data_size: The data size of the texture. It should be 16 or 32.
+            - data_size: The data size of the texture. It should be float16 or float32.
             - min_filter: The minification filter of the texture. Default is NEAREST(since it's noise texture, should not be interpolated)
             - mag_filter: The magnification filter of the texture. Default is NEAREST(since it's noise texture, should not be interpolated)
             - s_wrap: The wrap mode of the texture in s direction.

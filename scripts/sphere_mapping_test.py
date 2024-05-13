@@ -32,9 +32,7 @@ if __name__ == '__main__':
             camera.addComponent(Camera)
             self.helical_orbit_wrapper = camera.addComponent(HelicalOrbit, theta_speed=1, phi=180)
 
-    Sample.Run(enableGammaCorrection=False,
-               debug=False,
-               mapSavingInterval=1,
+    Sample.Run(mapSavingInterval=1,
                winSize=(512, 512),
                needOutputMaps=False,
                startComfyUI=False)

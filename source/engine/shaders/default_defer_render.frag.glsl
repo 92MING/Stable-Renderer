@@ -5,6 +5,7 @@ uniform usampler2D currentIDs;      // ivec4 (spriteID, material id, vertexID, 3
 uniform sampler2D currentPos;     // vec3, world space position
 uniform sampler2D currentNormalDepth; // vec4, (vec3(view space normal), depth)
 uniform sampler2D currentNoises; // vec4, latent noise
+uniform sampler2D currentCanny;
 
 in vec2 uv;  // screen space UV
 

@@ -99,7 +99,7 @@ class ResourcesObj(ABC, metaclass=ResourcesObjMeta):
                     return obj  # type: ignore
             else:
                 return None
-        return __NAMED_RESOURCES_OBJS__[cls.BaseClsName].get(name, None)
+        return __NAMED_RESOURCES_OBJS__[cls.BaseClsName].get(name, None)    # type: ignore
     
     @classmethod
     def ClassName(cls):

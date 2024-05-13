@@ -2,12 +2,11 @@ import torch
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Protocol, Any
 from .corr_utils import cells_value_overlap
-from .corrmap import UpdateMode
 from attr import attrs, attrib
 
 if TYPE_CHECKING:
     from comfyUI.types import SamplingCallbackContext, IMAGE, EngineData
-    from .corrmap import CorrespondMap
+    from engine.static.corrmap import UpdateMode
     from comfyUI.comfy.ldm.modules.attention import BasicTransformerBlock
 
 
@@ -93,7 +92,7 @@ class DefaultCorresponder:
     '''
     update_corrmap: bool = attrib(default=True)
     '''whether to update the correspondence map'''
-    update_corrmap_mode: UpdateMode = attrib(default='first_avg')
+    update_corrmap_mode: "UpdateMode" = attrib(default='first_avg')
     '''the mode for updating the correspondence map'''
     post_attn_inject_ratio: float = attrib(default=0.6)
     '''final attn value = cached value * post_attn_inject_ratio + origin value * (1 - post_attn_inject_ratio)'''

@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 '''this module contains enums, constants, etc.'''
-
+import glm
 import torch
 import numpy as np
 import OpenGL.GL as gl
+import cupy
 
 from typing import Optional
 from enum import Enum
@@ -50,7 +51,112 @@ class EngineStage(Enum):
     def RunningStages():
         return (EngineStage.BEFORE_FRAME_BEGIN, EngineStage.BEFORE_FRAME_RUN, EngineStage.BEFORE_FRAME_END )
 
-__all__ = ['EngineMode', 'EngineStage']
+class EngineFBO(Enum):
+    '''
+    Bind GBuffer textures to the target shader.
+    Please ensure that your shader has the following uniforms:
+        
+    - currentColor: sampler2D (vec4)
+    - currentIDs: usampler2D (ivec4)
+    - currentPos: sampler2D (vec3)
+    - currentNormalDepth: sampler2D (vec4)
+    - currentNoises: sampler2D  (vec4)
+    
+    value=(binding point, uniform name)
+    '''
+    COLOR = (0, 'currentColor')
+    '''Color buffer, rgba, f16'''
+    ID = (1, 'currentIDs')
+    '''ID buffer, (spriteID, materialID, map_index, vertexID), uint32(but since torch does not support uint32, it will be converted to int32 later'''
+    POS = (2, 'currentPos')
+    '''Position buffer'''
+    NORMAL_DEPTH = (3, 'currentNormalDepth')
+    '''Normal and Depth buffer. (nx, ny, nz, depth), float16'''
+    NOISE = (4, 'currentNoises')
+    '''Latent. 4 channels, float16'''
+    CANNY = (5, 'currentCanny')
+    '''Canny edge detection. 1 channel, float16'''
+    
+    @property
+    def binding_pt(self)->int:
+        return self.value[0]
+    
+    @property
+    def uniform_name(self)->str:
+        return self.value[1] 
+
+@dataclass
+class DefaultTexture:
+    '''This class is used to store the default texture info in glsl.'''
+    name: str
+    '''Name of the default texture, e.g. diffuseTex'''
+    shader_check_name: str
+    '''for glsl internal use, e.g. "hasDiffuseTex"'''
+
+class DefaultTextureType(Enum):
+    '''This class is used to store the default texture types. e.g. DiffuseTex, NormalTex, etc.'''
+
+    DiffuseTex = DefaultTexture('diffuseTex', 'hasDiffuseTex')
+    '''Color texture of the material'''
+    NormalTex = DefaultTexture('normalTex', 'hasNormalTex')
+    '''Normal texture of the material'''
+    SpecularTex = DefaultTexture('specularTex', 'hasSpecularTex')
+    '''Light reflection texture of the material'''
+    EmissionTex = DefaultTexture('emissionTex', 'hasEmissionTex')
+    '''Light emission texture of the material'''
+    OcclusionTex = DefaultTexture('occlusionTex', 'hasOcclusionTex')
+    '''Ambient occlusion texture of the material. Known as `AO` texture.'''
+    MetallicTex = DefaultTexture('metallicTex', 'hasMetallicTex')
+    '''Metallic texture of the material'''
+    RoughnessTex = DefaultTexture('roughnessTex', 'hasRoughnessTex')
+    '''Roughness texture of the material'''
+    DisplacementTex = DefaultTexture('displacementTex', 'hasDisplacementTex')
+    '''Displacement texture of the material'''
+    AlphaTex = DefaultTexture('alphaTex', 'hasAlphaTex')
+    '''Alpha texture of the material'''
+    NoiseTex = DefaultTexture('noiseTex', 'hasNoiseTex')
+    '''Noise texture, for AI rendering'''
+    CorrespondMap = DefaultTexture('correspond_map', 'hasCorrMap')
+    '''correspondence map, for AI baked rendering'''
+
+    @classmethod
+    def FindDefaultTexture(cls, texName:str):
+        '''Return DefaultTextureType with given name. Return None if not found.'''
+        texName = texName.lower()
+        for item in cls:
+            if item.value.name.lower() == texName:
+                return item
+        return None
+
+
+@dataclass
+class DefaultVariable:
+    '''This class is used to represent a default glsl variable'''
+    name: str
+    val_type: type
+
+class DefaultVariableType(Enum):
+    '''This class is used to store the default variable types in glsl. e.g. Ns, Ka, Kd, etc.'''
+
+    Specular_Exp = DefaultVariable('Ns', float)
+    '''Specular exponent of the material'''
+    Ambient_Col = DefaultVariable('Ka', glm.vec3)
+    '''Ambient color of the material'''
+    Diffuse_Col = DefaultVariable('Kd', glm.vec3)
+    '''Diffuse color of the material'''
+    Specular_Col = DefaultVariable('Ks', glm.vec3)
+    '''Specular color of the material'''
+    Emission_Col = DefaultVariable('Ke', glm.vec3)
+    '''Emission color of the material'''
+    Optical_Density = DefaultVariable('Ni', float)
+    '''Optical density of the material'''
+    Alpha = DefaultVariable('alpha', float)
+    '''Alpha value of the material'''
+    Illumination_Model = DefaultVariable('illum', int)
+    '''Illumination model of the material'''
+
+
+__all__ = ['EngineMode', 'EngineStage', 'EngineFBO', 'DefaultTextureType', 'DefaultTexture', 'DefaultVariableType', 'DefaultVariable']
 # endregion
 
 # region render
@@ -280,7 +386,6 @@ __all__.extend(['MouseButton', 'InputAction', 'InputModifier', 'GLFW_Key'])
 
 
 # region opengl
-
 class TextureWrap(Enum):
     REPEAT = gl.GL_REPEAT
     MIRRORED_REPEAT = gl.GL_MIRRORED_REPEAT

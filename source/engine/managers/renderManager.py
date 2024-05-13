@@ -7,11 +7,10 @@ import numpy as np
 
 from torch import Tensor
 from functools import partial
-from typing import Union, Optional, Callable, TYPE_CHECKING, TypeAlias, Any
+from typing import Union, Optional, Callable, TypeAlias, Any
 from common_utils.cuda_utils import *
-from common_utils.global_utils import is_dev_mode
 from common_utils.debug_utils import EngineLogger
-from common_utils.stable_render_utils import CorrespondMap, Sprite, EnvPrompt
+from common_utils.stable_render_utils import Sprite, EnvPrompt
 from common_utils.data_struct.event import AutoSortTask
 from .manager import Manager
 from .runtimeManager import RuntimeManager
@@ -19,9 +18,7 @@ from ..static.shader import Shader
 from ..static.texture import Texture
 from ..static.enums import *
 from ..static.mesh import Mesh
-
-if TYPE_CHECKING:
-    from comfyUI.types import EngineData
+from ..static.corrmap import CorrespondMap
 
 
 def _wrapPostProcessTask(render_manager:'RenderManager', shader: "Shader", task: Optional[Callable] = None):
@@ -57,10 +54,15 @@ def _wrapGBufferTask(render_manager:'RenderManager', task: Optional[Callable], s
             gl.glDisable(gl.GL_CULL_FACE)
         else:
             gl.glEnable(gl.GL_CULL_FACE)
+    done = False
     if task is not None:
         task()
+        done = True
     elif mesh is not None:
         mesh.draw()
+        done = True
+    if done:
+        render_manager._update_gbuffer_tex_to_shader_binding_tex()
 
 IdenticalGBufferDrawCallback: TypeAlias = Callable[["Texture", "Texture", "Texture", "Texture", "Texture", "Texture"], Any]
 '''
@@ -69,9 +71,9 @@ Parameters:
     1. color texture
     2. id texture
     3. pos texture
-    4. normal texture
+    4. normal & depth texture(nx, ny, nz, depth)
     5. noise texture
-    6. depth texture
+    6. canny edge texture
 ''' 
 
 def _wrapIdenticalGBufferTask(render_manager:'RenderManager',
@@ -97,13 +99,14 @@ def _wrapIdenticalGBufferTask(render_manager:'RenderManager',
         mesh.draw()
         done = True
     if done:
+        render_manager._update_gbuffer_tex_to_shader_binding_tex()
         if callback is not None:
             callback(render_manager.idFBOTex, 
                     render_manager.posFBOTex, 
                     render_manager.normal_and_depth_FBOTex, 
                     render_manager.noiseFBOTex, 
                     render_manager.colorFBOTex, 
-                    render_manager.depthFBOTex)
+                    render_manager.cannyFBOTex)
         if save_to_temp:    # save to temp buffer, these temp buffers will be write to the real buffer after all identical gbuffer tasks are done
             current_normal_and_depth = render_manager.normal_and_depth_FBOTex.tensor(update=True, flip=True)
             current_depth = current_normal_and_depth[..., -1].squeeze()
@@ -117,7 +120,8 @@ def _wrapIdenticalGBufferTask(render_manager:'RenderManager',
             render_manager._id_buffer_temp[closer_pixels] = render_manager.idFBOTex.tensor(update=True, flip=True)[closer_pixels]
             render_manager._pos_buffer_temp[closer_pixels] = render_manager.posFBOTex.tensor(update=True, flip=True)[closer_pixels]
             render_manager._noise_buffer_temp[closer_pixels] = render_manager.noiseFBOTex.tensor(update=True, flip=True)[closer_pixels]
-            
+            render_manager._canny_buffer_temp[closer_pixels] = render_manager.cannyFBOTex.tensor(update=True, flip=True)[closer_pixels]
+        
 class RenderManager(Manager):
     '''Manager of all rendering stuffs'''
 
@@ -163,10 +167,14 @@ class RenderManager(Manager):
         self.engine._renderManager = self # special case, because renderManager is created before engine's assignment
         
         self._init_opengl()
-        
         self._init_framebuffers()  # framebuffers for post-processing
-        self._init_post_process(enableHDR=enableHDR, enableGammaCorrection=enableGammaCorrection, gamma=gamma, exposure=exposure,
-                                saturation=saturation, brightness=brightness, contrast=contrast)
+        self._init_post_process(enableHDR=enableHDR, 
+                                enableGammaCorrection=enableGammaCorrection, 
+                                gamma=gamma, 
+                                exposure=exposure,
+                                saturation=saturation, 
+                                brightness=brightness, 
+                                contrast=contrast)
         self._init_quad()  # quad for post-processing
         self._init_light_buffers()
         
@@ -174,7 +182,7 @@ class RenderManager(Manager):
         gl.glClearColor(0, 0, 0, 0)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glEnable(gl.GL_CULL_FACE)
-        gl.glDisable(gl.GL_BLEND)   # blending will be carried out in GBuffer shader
+        gl.glEnable(gl.GL_BLEND)   # blending will be carried out in GBuffer shader
         
     def _init_framebuffers(self):
         self._default_gBuffer_shader = Shader.DefaultGBufferShader()
@@ -191,14 +199,26 @@ class RenderManager(Manager):
                                    format=TextureFormat.RGBA,
                                    s_wrap=TextureWrap.CLAMP_TO_EDGE, 
                                    t_wrap=TextureWrap.CLAMP_TO_EDGE, 
-                                   min_filter=TextureFilter.NEAREST, 
-                                   mag_filter=TextureFilter.NEAREST, 
+                                   min_filter=TextureFilter.LINEAR, 
+                                   mag_filter=TextureFilter.LINEAR, 
                                    internal_format=TextureInternalFormat.RGBA16F, # alpha for masking
                                    data_type=TextureDataType.HALF,
                                    share_to_torch=True)
         '''texture for saving every pixels' color in each frame'''
         self.colorFBOTex.load()
         self._color_buffer_temp = torch.zeros((winHeight, winWidth, 4), dtype=torch.float16, device='cuda') # for saving the output from identical gbuffer
+        self._colorFboTexForShaderBinding = Texture(name='__COLOR_FBO_FOR_SHADER__',
+                                                width=winWidth,
+                                                height=winHeight,
+                                                format=TextureFormat.RGBA,
+                                                s_wrap=TextureWrap.CLAMP_TO_EDGE,
+                                                t_wrap=TextureWrap.CLAMP_TO_EDGE,
+                                                min_filter=TextureFilter.LINEAR,
+                                                mag_filter=TextureFilter.LINEAR,
+                                                internal_format=TextureInternalFormat.RGBA16F, # alpha for masking
+                                                data_type=TextureDataType.HALF,
+                                                share_to_torch=False)
+        '''texture for binding to shader, since the colorFBOTex is used for saving the output from identical gbuffer, it can't be bound to shader directly.'''
         
         self.idFBOTex = Texture(name='__ID_FBO__',
                                 width=winWidth,
@@ -208,12 +228,24 @@ class RenderManager(Manager):
                                 t_wrap=TextureWrap.CLAMP_TO_EDGE,
                                 min_filter=TextureFilter.NEAREST,
                                 mag_filter=TextureFilter.NEAREST,
-                                internal_format=TextureInternalFormat.RGBA_32UI,  # (spriteID, material id, uv_Xcoord, uv_Ycoord)
-                                data_type=TextureDataType.SHORT,
+                                internal_format=TextureInternalFormat.RGBA_32UI,  # (spriteID, material id, map_index, vertexID)
+                                data_type=TextureDataType.UNSIGNED_INT,
                                 share_to_torch=True)
         '''texture for saving every pixels' vertex ID in each frame'''
         self.idFBOTex.load()
-        self._id_buffer_temp = torch.zeros((winHeight, winWidth, 4), dtype=torch.int16, device='cuda') # for saving the output from identical gbuffer
+        self._id_buffer_temp = torch.zeros((winHeight, winWidth, 4), dtype=torch.int32, device='cuda') # for saving the output from identical gbuffer
+        self._idFboTexForShaderBinding = Texture(name='__ID_FBO_FOR_SHADER__',
+                                                width=winWidth,
+                                                height=winHeight,
+                                                format=TextureFormat.RGBA_INT,
+                                                s_wrap=TextureWrap.CLAMP_TO_EDGE,
+                                                t_wrap=TextureWrap.CLAMP_TO_EDGE,
+                                                min_filter=TextureFilter.NEAREST,
+                                                mag_filter=TextureFilter.NEAREST,
+                                                internal_format=TextureInternalFormat.RGBA_32UI,  # (spriteID, material id, map_index, vertexID)
+                                                data_type=TextureDataType.UNSIGNED_INT,
+                                                share_to_torch=False)
+        '''texture for binding to shader, since the idFBOTex is used for saving the output from identical gbuffer, it can't be bound to shader directly.'''
         
         self.posFBOTex = Texture(name='__POS_FBO__',
                                 width=winWidth,
@@ -229,6 +261,18 @@ class RenderManager(Manager):
         '''texture for saving every frame's position in each pixel'''
         self.posFBOTex.load()
         self._pos_buffer_temp = torch.zeros((winHeight, winWidth, 3), dtype=torch.float32, device='cuda') # for saving the output from identical gbuffer
+        self._posFboTexForShaderBinding = Texture(name='__POS_FBO_FOR_SHADER__',
+                                                width=winWidth,
+                                                height=winHeight,
+                                                format=TextureFormat.RGB,
+                                                s_wrap=TextureWrap.CLAMP_TO_EDGE,
+                                                t_wrap=TextureWrap.CLAMP_TO_EDGE,
+                                                min_filter=TextureFilter.NEAREST,
+                                                mag_filter=TextureFilter.NEAREST,
+                                                internal_format=TextureInternalFormat.RGB32F,    # use 32 here since cudaGraphicsGLRegisterImage doesn't support RGB16F
+                                                data_type=TextureDataType.FLOAT,
+                                                share_to_torch=False)
+        '''texture for binding to shader, since the posFBOTex is used for saving the output from identical gbuffer, it can't be bound to shader directly.'''
         
         self.normal_and_depth_FBOTex = Texture(name='__NORMAL_FBO__',
                                     width=winWidth,
@@ -244,8 +288,20 @@ class RenderManager(Manager):
         '''texture for saving every pixel's normal in each frame'''
         self.normal_and_depth_FBOTex.load()
         self._normal_buffer_temp = torch.zeros((winHeight, winWidth, 3), dtype=torch.float16, device='cuda') # for saving the output from identical gbuffer
-        self._depth_buffer_temp = torch.zeros((winHeight, winWidth), dtype=torch.float32, device='cuda') 
+        self._depth_buffer_temp = torch.zeros((winHeight, winWidth), dtype=torch.float16, device='cuda') 
         # depth is not `ones` because the depth value has been 0-1 inverted in shader, closer object has larger depth value
+        self._normalDepthFboTexForShaderBinding = Texture(name='__NORMAL_DEPTH_FBO_FOR_SHADER__',
+                                                width=winWidth,
+                                                height=winHeight,
+                                                format=TextureFormat.RGBA,
+                                                s_wrap=TextureWrap.CLAMP_TO_EDGE,
+                                                t_wrap=TextureWrap.CLAMP_TO_EDGE,
+                                                min_filter=TextureFilter.NEAREST,
+                                                mag_filter=TextureFilter.NEAREST,
+                                                internal_format=TextureInternalFormat.RGBA16F,    # alpha channel for saving depth
+                                                data_type=TextureDataType.HALF,
+                                                share_to_torch=False)
+        '''texture for binding to shader, since the normal_and_depth_FBOTex is used for saving the output from identical gbuffer, it can't be bound to shader directly.'''
         
         self.noiseFBOTex = Texture(name='__NOISE_FBO__',
                                    width=winWidth,
@@ -261,6 +317,46 @@ class RenderManager(Manager):
         '''Noise texture(which has the same size of model's latent) for further use in AI rendering'''
         self.noiseFBOTex.load()
         self._noise_buffer_temp = torch.zeros((winHeight, winWidth, 4), dtype=torch.float16, device='cuda') # for saving the output from identical gbuffer
+        self._noiseFboTexForShaderBinding = Texture(name='__NOISE_FBO_FOR_SHADER__',
+                                                width=winWidth,
+                                                height=winHeight,
+                                                format=TextureFormat.RGBA,
+                                                s_wrap=TextureWrap.REPEAT,
+                                                t_wrap=TextureWrap.REPEAT,
+                                                min_filter=TextureFilter.NEAREST,
+                                                mag_filter=TextureFilter.NEAREST,
+                                                internal_format=TextureInternalFormat.RGBA16F,    # 4 channel to make the shape same as a random latent
+                                                data_type=TextureDataType.HALF,
+                                                share_to_torch=False)
+        '''texture for binding to shader, since the noiseFBOTex is used for saving the output from identical gbuffer, it can't be bound to shader directly.'''
+        
+        # TODO: 1D is enough for canny, put into `posFBOTex` as the 4th channel
+        self.cannyFBOTex = Texture(name='__CANNY_FBO__',
+                                   width=winWidth,
+                                   height=winHeight,
+                                   format=TextureFormat.RGB,
+                                   s_wrap=TextureWrap.CLAMP_TO_EDGE,
+                                   t_wrap=TextureWrap.CLAMP_TO_EDGE,
+                                   min_filter=TextureFilter.NEAREST,
+                                   mag_filter=TextureFilter.NEAREST,
+                                   internal_format=TextureInternalFormat.RGB32F,    # use 32 here since cudaGraphicsGLRegisterImage doesn't support RGB16F
+                                   data_type=TextureDataType.HALF,
+                                   share_to_torch=True)
+        '''Canny edge texture for further use in controlnet'''
+        self.cannyFBOTex.load()
+        self._canny_buffer_temp = torch.zeros((winHeight, winWidth, 3), dtype=torch.float16, device='cuda') # for saving the output from identical gbuffer
+        self._cannyFboTexForShaderBinding = Texture(name='__CANNY_FBO_FOR_SHADER__',
+                                                width=winWidth,
+                                                height=winHeight,
+                                                format=TextureFormat.RGB,
+                                                s_wrap=TextureWrap.CLAMP_TO_EDGE,
+                                                t_wrap=TextureWrap.CLAMP_TO_EDGE,
+                                                min_filter=TextureFilter.NEAREST,
+                                                mag_filter=TextureFilter.NEAREST,
+                                                internal_format=TextureInternalFormat.RGB32F,    # use 32 here since cudaGraphicsGLRegisterImage doesn't support RGB16F
+                                                data_type=TextureDataType.FLOAT,
+                                                share_to_torch=False)
+        '''texture for binding to shader, since the cannyFBOTex is used for saving the output from identical gbuffer, it can't be bound to shader directly.'''
         
         self.depthFBOTex = Texture(name='__DEPTH_FBO__',
                                     width=winWidth,
@@ -280,8 +376,9 @@ class RenderManager(Manager):
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT2, gl.GL_TEXTURE_2D, self.posFBOTex.texID, 0)
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT3, gl.GL_TEXTURE_2D, self.normal_and_depth_FBOTex.texID, 0)
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT4, gl.GL_TEXTURE_2D, self.noiseFBOTex.texID, 0)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT5, gl.GL_TEXTURE_2D, self.cannyFBOTex.texID, 0)
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_DEPTH_ATTACHMENT, gl.GL_TEXTURE_2D, self.depthFBOTex.texID, 0)
-        gl.glDrawBuffers(5, [gl.GL_COLOR_ATTACHMENT0, gl.GL_COLOR_ATTACHMENT1, gl.GL_COLOR_ATTACHMENT2, gl.GL_COLOR_ATTACHMENT3, gl.GL_COLOR_ATTACHMENT4])
+        gl.glDrawBuffers(6, [gl.GL_COLOR_ATTACHMENT0, gl.GL_COLOR_ATTACHMENT1, gl.GL_COLOR_ATTACHMENT2, gl.GL_COLOR_ATTACHMENT3, gl.GL_COLOR_ATTACHMENT4, gl.GL_COLOR_ATTACHMENT5])
         
         if (gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER) != gl.GL_FRAMEBUFFER_COMPLETE):
             raise Exception("G-Framebuffer is not complete! Some error occurred.")
@@ -407,7 +504,7 @@ class RenderManager(Manager):
             try:
                 func()
             except Exception as e:
-                EngineLogger.warn(f"Render Task ({order}, {func}) Error. Msg: {e}. Skipped.")
+                EngineLogger.warning(f"Render Task ({order}, {func}) Error. Msg: {e}. Skipped.")
         
         if identical_buffer:
             self.identical_gbuffer_tasks._tempEvents.clear()
@@ -426,11 +523,42 @@ class RenderManager(Manager):
         '''
         if shader is None:
             return
-        self.colorFBOTex.bind(0, 'currentColor', shader)
-        self.idFBOTex.bind(1, 'currentIDs', shader)
-        self.posFBOTex.bind(2, 'currentPos', shader)
-        self.normal_and_depth_FBOTex.bind(3, 'currentNormalDepth', shader)
-        self.noiseFBOTex.bind(4, 'currentNoises', shader)
+        self._colorFboTexForShaderBinding.bind(EngineFBO.COLOR.binding_pt, EngineFBO.COLOR.uniform_name, shader)
+        self._idFboTexForShaderBinding.bind(EngineFBO.ID.binding_pt, EngineFBO.ID.uniform_name, shader)
+        self._posFboTexForShaderBinding.bind(EngineFBO.POS.binding_pt, EngineFBO.POS.uniform_name, shader)
+        self._normalDepthFboTexForShaderBinding.bind(EngineFBO.NORMAL_DEPTH.binding_pt, EngineFBO.NORMAL_DEPTH.uniform_name, shader)
+        self._noiseFboTexForShaderBinding.bind(EngineFBO.NOISE.binding_pt, EngineFBO.NOISE.uniform_name, shader)
+        self._cannyFboTexForShaderBinding.bind(EngineFBO.CANNY.binding_pt, EngineFBO.CANNY.uniform_name, shader)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+    
+    def _update_gbuffer_tex_to_shader_binding_tex(self):
+        width, height = self.engine.WindowManager.WindowSize
+        
+        gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT0)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._colorFboTexForShaderBinding.texID)
+        gl.glCopyTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height)
+        
+        gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._idFboTexForShaderBinding.texID)
+        gl.glCopyTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height)
+        
+        gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT2)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._posFboTexForShaderBinding.texID)
+        gl.glCopyTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height)
+        
+        gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT3)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._normalDepthFboTexForShaderBinding.texID)
+        gl.glCopyTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height)
+        
+        gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT4)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._noiseFboTexForShaderBinding.texID)
+        gl.glCopyTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height)
+        
+        gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT5)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._cannyFboTexForShaderBinding.texID)
+        gl.glCopyTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height)
+        
+        gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT0)
     # endregion
 
     # region opengl
@@ -744,8 +872,13 @@ class RenderManager(Manager):
         else:
             self.data_to_be_added_to_engineData['noise_maps'] = torch.cat([self.data_to_be_added_to_engineData['noise_maps'], 
                                                                             self.noiseFBOTex.tensor(update=True, flip=True)], dim=0)
+        
+        if 'canny_maps' not in self.data_to_be_added_to_engineData:
+            self.data_to_be_added_to_engineData['canny_maps'] = self.cannyFBOTex.tensor(update=True, flip=True).clone()
+        else:
+            self.data_to_be_added_to_engineData['canny_maps'] = torch.cat([self.data_to_be_added_to_engineData['canny_maps'], 
+                                                                            self.cannyFBOTex.tensor(update=True, flip=True)], dim=0)
             
-    
     def on_frame_run(self):
         self.BindFrameBuffer(self._gBuffer)
         
@@ -776,6 +909,7 @@ class RenderManager(Manager):
             colorData = self.colorFBOTex.numpy_data(flipY=True)
             idData = self.idFBOTex.numpy_data(flipY=True)
             posData = self.posFBOTex.numpy_data(flipY=True)
+            cannyData = self.cannyFBOTex.numpy_data(flipY=True)
             
             normal_and_depth_data = self.normal_and_depth_FBOTex.numpy_data(flipY=True)
             # depth data is in the alpha channel of `normal_and_depth_data`
@@ -787,12 +921,13 @@ class RenderManager(Manager):
             diffManager = self.engine.DiffusionManager
             diffManager.OutputMap('color', colorData)
             diffManager.OutputMap('normal', normalData)
+            diffManager.OutputMap('canny', cannyData)
             diffManager.OutputNumpyData('id', idData)
             diffManager.OutputNumpyData('pos', posData)
             diffManager.OutputNumpyData('noise', noiseData)
             diffManager.OutputDepthMap(depthData)
-            if diffManager.NeedOutputCannyMap:
-                diffManager.OutputCannyMap(colorData)
+            if diffManager.NeedOutputAICannyMap:
+                diffManager.OutputAICannyMap(colorData) # generate AI canny map from color map
         
         # TODO: combiner process
         

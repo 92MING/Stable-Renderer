@@ -16,12 +16,12 @@ from .basic import AnnotatedParam, IMAGE, MASK, LATENT
 
 if TYPE_CHECKING:
     from engine.static.texture import Texture
+    from engine.static.corrmap import IDMap, CorrespondMap
     from comfyUI.execution import PromptExecutor
     from .runtime import NodeInputs
     from .node_base import ComfyUINode
     from .runtime import InferenceOutput, StatusMsgs
-    from common_utils.stable_render_utils import IDMap, SpriteInfos, EnvPrompt, CorrespondMap
-
+    from common_utils.stable_render_utils import SpriteInfos, EnvPrompt
 
 _hidden_meta = NameCheckMetaCls(ABCMeta)
 _HT = TypeVar('_HT', bound='HIDDEN')
@@ -268,7 +268,7 @@ class EngineData(HIDDEN):
     Color of the current frame(s).
     shape=(N, H, W, 3). dtype=float32, range=[0, 1]
     When engine data is created, the data will be formatted into the correct shape and dtype.
-    Note: You could also directly pass `Texture` or `ndarray` to it.
+    Note: You could also directly pass `Texture` or `tensor` to it.
     '''
     
     id_maps: Optional["IDMap"] = attrib(default=None, kw_only=True)
@@ -276,14 +276,14 @@ class EngineData(HIDDEN):
     ID of each pixels in the current frame(s). If the pixel is not containing any object, the id is 0,0,0,0.
     Format: (spriteID, materialID, baking map index, vertexID): in baking mode
     shape = (N, H, W, 4), dtype = int32
-    Note: You could also directly pass `Texture` or `ndarray` to it.
+    Note: You could also directly pass `Texture` or `tensor` to it.
     '''
     
     pos_maps: IMAGE = attrib(default=None, kw_only=True)
     '''
     Position of the origin 3d vertex in each pixels in the current frame(s).
     This can be used for some special algos to trace the movement of a vertex.
-    Note: You could also directly pass `Texture` or `ndarray` to it.
+    Note: You could also directly pass `Texture` or `tensor` to it.
     '''
     
     _normal_and_depth_maps: Optional["Texture"] = attrib(default=None, kw_only=True, alias='normal_and_depth_map')
@@ -291,28 +291,35 @@ class EngineData(HIDDEN):
     normal and depth of the origin 3d vertex in each pixels in the current frame(s).
     Format: (nx, ny, nz, depth)
     Only pass to this attribute if u want to split normal and depth map.
-    Note: You could also directly pass `Texture` or `ndarray` to it.
+    Note: You could also directly pass `Texture` or `tensor` to it.
     '''
     
     noise_maps: Optional[LATENT] = attrib(default=None, kw_only=True)
     '''
     Noise of each vertex in each pixels in the current frame
     The latent for inputting to stable diffusion. Note that each 8*8 is merged into 1*1
-    Note: You could also directly pass `Texture` or `ndarray` to it.
+    Note: You could also directly pass `Texture` or `tensor` to it.
     '''
     
     normal_maps: Optional[IMAGE] = attrib(default=None, kw_only=True)
     '''
     Normal map of the current frame(s). shape=(N, H, W, 3)
     This can be used as the input of controlnet.
-    Note: Note: You could also directly pass `Texture` or `ndarray` to it.
+    Note: Note: You could also directly pass `Texture` or `tensor` to it.
     '''
     
     depth_maps: Optional[IMAGE] = attrib(default=None, kw_only=True)
     '''
     Depth map of the current frame(s). shape=(N, H, W).
     This can be used as the input of controlnet.
-    Note: Note: You could also directly pass `Texture` or `ndarray` to it.
+    Note: Note: You could also directly pass `Texture` or `tensor` to it.
+    '''
+    
+    canny_maps: Optional[IMAGE] = attrib(default=None, kw_only=True)
+    '''
+    Canny edge map of the current frame(s). shape=(N, H, W).
+    This can be used as the input of controlnet.
+    Note: Note: You could also directly pass `Texture` or `tensor` to it.
     '''
     
     masks: MASK = attrib(default=None, kw_only=True)
@@ -451,8 +458,18 @@ class EngineData(HIDDEN):
                     noise = rearrange(noise, 'b h w c ->b c h w').contiguous()
             else:
                 noise = self.noise_maps
-            self.noise_maps = LATENT(samples=noise, )
+            empty_latent = torch.zeros_like(noise)
+            self.noise_maps = LATENT(samples=empty_latent, noise=noise)
             #TODO: carry out AdaIN for background noise?
+        
+        if isinstance(self.canny_maps, Texture):
+            self.canny_maps = self.canny_maps.tensor(update=True, flip=True).unsqueeze(0).to(dtype=torch.float32)
+        if isinstance(self.canny_maps, Tensor):
+            if len(self.canny_maps.shape) == 3:
+                self.canny_maps = self.canny_maps.unsqueeze(0)
+            self.canny_maps = self.canny_maps.to(dtype=torch.float32)
+        if self.canny_maps[0, 0, 0, 0] > 1.0:   # not yet normalized
+            self.canny_maps = self.canny_maps / 255.0
                 
         if is_dev_mode() and is_verbose_mode():
             ComfyUILogger.debug(f'EngineData is created with the following shapes:')
@@ -462,6 +479,7 @@ class EngineData(HIDDEN):
             ComfyUILogger.debug('Normal maps shape: ' + str(self.normal_maps.shape))
             ComfyUILogger.debug('Depth maps shape: ' + str(self.depth_maps.shape))
             ComfyUILogger.debug('Noise maps shape: ' + str(self.noise_maps.samples.shape))
+            ComfyUILogger.debug('Canny maps shape: ' + str(self.canny_maps.shape))
             ComfyUILogger.debug('Mask shape: ' + str(self.masks.shape))
     
     @classmethod

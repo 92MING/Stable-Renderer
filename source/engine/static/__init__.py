@@ -13,3 +13,5 @@ from .material import *
 from .workflow import *
 
 from .scene import *
+
+from .corrmap import *

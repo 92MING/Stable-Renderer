@@ -9,19 +9,25 @@ import json
 import zipfile
 import taichi as ti
 import numpy as np
+import OpenGL.error
 import OpenGL.GL as gl
 
 from PIL import Image
 from pathlib import Path
 from attr import attrs, attrib
 from torch import Tensor
-from typing import Literal, TypeAlias, Optional
+from typing import Literal, TypeAlias, Optional, TYPE_CHECKING
 from uuid import uuid4
 from common_utils.path_utils import TEMP_DIR
 from common_utils.global_utils import is_dev_mode
 from common_utils.debug_utils import EngineLogger
-from engine.static.enums import TextureFilter, TextureWrap
-from ..math_utils import init_taichi
+from common_utils.decorators import Overload
+from common_utils.math_utils import init_taichi
+from .resources_obj import ResourcesObj
+from .enums import TextureFormat
+
+if TYPE_CHECKING:
+    from engine.static.shader import Shader
 
 
 @attrs
@@ -169,15 +175,13 @@ Mode to update the value in the map.
 '''
 
 
-@attrs(repr=False)
-class CorrespondMap:
+@attrs(repr=False, eq=False)
+class CorrespondMap(ResourcesObj):
     
-    name: str = attrib(default='untitled_map', kw_only=True)
-    '''the name of the map. It is just for saving/printing/debugging.'''
+    BaseClsName = 'CorrespondMap'
     
     k: int = attrib(default=3, kw_only=True)
     '''cache size. View directions are split into k*k parts.'''
-    
     height: int = attrib(default=512, kw_only=True)
     '''default height of the map. This is only for load/dump, it has no relationship with the size of the screen/window.'''
     width: int = attrib(default=512, kw_only=True)
@@ -193,20 +197,16 @@ class CorrespondMap:
     This represents whether a blob has values or not (since the real value can also be all zeros)
     '''
     
-    _texID: Optional[int] = attrib(default=None, init=False)
+    texID: Optional[int] = attrib(default=None, init=False)
     '''sampler2DArray's texture id in OpenGL. This is for rendering purpose.'''
-    tex_min_filter: TextureFilter = attrib(default=TextureFilter.LINEAR, kw_only=True)
-    tex_mag_filter: TextureFilter = attrib(default=TextureFilter.LINEAR, kw_only=True)
-    tex_wrap_s: TextureFilter = attrib(default=TextureWrap.CLAMP_TO_EDGE, kw_only=True)
-    tex_wrap_t: TextureFilter = attrib(default=TextureWrap.CLAMP_TO_EDGE, kw_only=True)
-    tex_midmap_level: int = attrib(default=1, kw_only=True)
-    
+
     def __attrs_post_init__(self):
-        self._values = torch.zeros(self.k*self.k, self.height * self.width, self.channel_count, dtype=torch.float32)
+        self._values = torch.zeros(self.k*self.k, self.height * self.width, self.channel_count, dtype=torch.float16)
         self._writtens = torch.zeros(self.k*self.k, self.height * self.width, dtype=torch.bool)
+        super().__attrs_post_init__()
     
     def __repr__(self):
-        return f"<CorrespondMap: {self.name}, k={self.k}, size={self.height}x{self.width}, channel_count={self.channel_count}>"
+        return f"<CorrespondMap: {self.name or 'untitled'}, k={self.k}, size={self.height}x{self.width}, channel_count={self.channel_count}>"
     
     def __getitem__(self, index):
         '''
@@ -216,61 +216,115 @@ class CorrespondMap:
         return self._values[index]
     
     # region gl texture related
+    def clear(self):
+        '''clear the data in the map.'''
+        super().clear() # just for printing logs
+        if self.texID is not None:
+            try:
+                buffer = np.array([self.texID], dtype=np.uint32)
+                gl.glDeleteTextures(1, buffer)
+            except OpenGL.error.GLError as glErr:
+                if glErr.err == 1282:
+                    pass
+                else:
+                    EngineLogger.warn('Warning: failed to delete texture. Error: {}'.format(glErr))
+            except Exception as err:
+                EngineLogger.warn('Warning: failed to delete texture. Error: {}'.format(err))
+            self.texID = None
+        self._values.zero_()
+        self._writtens.zero_()
+    
     def load(self):
         '''load data to opengl.'''
         if self.loaded:
             return
-        if is_dev_mode():
-            EngineLogger.info(f"Loading Correspondence Map: {self.name}")
-        self._texID = gl.glGenTextures(1)
+        super().load()
+        
+        self.texID = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, self.texID)
+ 
         if self.channel_count == 4:
-            format = gl.GL_RGBA8
+            format = gl.GL_RGBA
+            internalformat = gl.GL_RGBA16F
         elif self.channel_count == 3:
-            format = gl.GL_RGB8
+            format = gl.GL_RGB
+            internalformat = gl.GL_RGB16F
         elif self.channel_count == 2:
-            format = gl.GL_RG8
+            format = gl.GL_RG
+            internalformat = gl.GL_RG16F
         elif self.channel_count == 1:
-            format = gl.GL_R8
+            format = gl.GL_RED
+            internalformat = gl.GL_R16F
         else:
             raise ValueError("Unsupported channel count: ", self.channel_count)
+
+        data =self._values.cpu().numpy().tobytes()
+        
         gl.glTexStorage3D(gl.GL_TEXTURE_2D_ARRAY, 
-                          self.tex_midmap_level,
-                          format,
-                          self.width,
-                          self.height,           
-                          self.k*self.k
-                          )
-        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MIN_FILTER, self.tex_min_filter.value)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MAG_FILTER, self.tex_mag_filter.value)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_S, self.tex_wrap_s.value)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_T, self.tex_wrap_t.value)
+                          1, 
+                          internalformat, 
+                          self.width, self.height, self.k*self.k)
+        gl.glTexSubImage3D(
+            gl.GL_TEXTURE_2D_ARRAY,
+            0,
+            0, 0, 0,
+            self.width, self.height, self.k*self.k,
+            format,
+            gl.GL_HALF_FLOAT,
+            data
+        )
         
-        for i in range(self.k*self.k):
-            gl.glTexSubImage3D(gl.GL_TEXTURE_2D_ARRAY, 
-                               0, 
-                               0, 0, i, 
-                               self.width, self.height, 1, 
-                               format, 
-                               gl.GL_FLOAT, 
-                               self._values[i].numpy().ctypes.data
-                               )
+        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
         
+        self.engine.CatchOpenGLError()
+        gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, 0)
+    
+    def set_data(self, map_index: int, data: bytes):
+        gl.glTexSubImage3D(gl.GL_TEXTURE_2D_ARRAY, 
+                            0,   # level
+                            0, 0, map_index,     # xoffset, yoffset, zoffset
+                            self.width, self.height, 1,  # width, height, depth
+                            format,  # format
+                            gl.GL_HALF_FLOAT,     # type
+                            data)
+    
     @property
     def loaded(self):
         return self.texID is not None
     
-    @property
-    def texID(self):
-        return self._texID
+    @Overload
+    def bind(self, slot:int, name:str, shader:'Shader'):    # type: ignore
+        '''Use shader, and bind texture to a slot and set shader uniform with your given name.'''
+        shader.useProgram()
+        self.bind(slot, shader.getUniformID(name))
     
+    @Overload
+    def bind(self):
+        '''Bind the texture to the slot.'''
+        if self.texID is None:
+            raise Exception('Texture is not yet sent to GPU. Cannot bind')
+        gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, self.texID)
+    
+    @Overload
     def bind(self, slot:int, uniformID):
         if self.texID is None:
-            raise Exception('Texture is not yet sent to GPU. Cannot bind.')
+            raise Exception('Texture is not yet sent to GPU. Cannot bind')
         gl.glActiveTexture(gl.GL_TEXTURE0 + slot)   # type: ignore
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texID)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, self.texID)
         gl.glUniform1i(uniformID, slot)
+        
+    def unbind(self, slot:int):
+        gl.glActiveTexture(gl.GL_TEXTURE0 + slot)   # type: ignore
+        gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, 0)
     # endregion
+    
+    def numpy_data(self, map_index: int, width:int|None=None, height:int|None =None, dtype=np.float16)->np.ndarray:
+        '''return the numpy data of the map_index-th map.'''
+        return self.get_map(map_index, height, width).cpu().numpy().astype(dtype)
     
     def get_map(self, index: int, height:int|None=None, width:int|None=None, ):
         '''

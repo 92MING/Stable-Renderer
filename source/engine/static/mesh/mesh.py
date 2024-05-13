@@ -55,28 +55,43 @@ class Mesh(ResourcesObj):
 
     positions: List[Tuple[float, float, float]] = attrib(factory=list, kw_only=True)
     '''position data, [(x1, y1, z1), ...]'''
+    position_count: int = attrib(default=0, kw_only=True)
+    '''internal use only. For record the number of positions after data is cleared by `only_keep_gpu_data`'''
+    
     normals: List[Tuple[float, float, float]] = attrib(factory=list, kw_only=True)
     '''normals data, [(x1, y1, z1), ...]'''
+    normal_count: int = attrib(default=0, kw_only=True)
+    '''internal use only. For record the number of normals after data is cleared by `only_keep_gpu_data`'''
+    
     uvs: List[List[Tuple[float, float]]] = attrib(factory=list, kw_only=True)
     '''uvs data, [[(u1, v1), ...], ...]. By default, only will the first uvs data be sent to shader. 
     You can modify this in other mesh classes.'''
+    uv_count: int = attrib(default=0, kw_only=True)
+    '''internal use only. For record the number of uvs after data is cleared by `only_keep_gpu_data`'''
+    uv_components_counts: Union[int, List[int]] = attrib(default=2, kw_only=True)
+    '''number of uv components. Default is 2. If you have more than 2 uv components, you have to specify this field.'''
+    
     tangents: List[Tuple[float, float, float]] = attrib(factory=list, kw_only=True)
     '''tangents data, [(x1, y1, z1), ...]'''
+    tangent_count: int = attrib(default=0, kw_only=True)
+    '''internal use only. For record the number of tangents after data is cleared by `only_keep_gpu_data`'''
     bitangents: List[Tuple[float, float, float]] = attrib(factory=list, kw_only=True)
     '''bitangents data, [(x1, y1, z1), ...]'''
+    bitangent_count: int = attrib(default=0, kw_only=True)
+    '''internal use only. For record the number of bitangents after data is cleared by `only_keep_gpu_data`'''
+    
     colors: List[Tuple[float, float, float, float]] = attrib(factory=list, kw_only=True)
     '''colors data, [(r1, g1, b1, a1), ...]'''
+    color_count: int = attrib(default=0, kw_only=True)
+    '''internal use only. For record the number of colors after data is cleared by `only_keep_gpu_data`'''
+    
     indices: Union[List[List[int]], List[int]] = attrib(factory=list, kw_only=True)
     '''indices data, [index1, index2, ...]. If not empty, the mesh will be drawn with indices. Otherwise, it will be drawn with vertices.'''
+    indices_count: int = attrib(default=0, kw_only=True)
+    '''internal use only. For record the number of indices after data is cleared by `only_keep_gpu_data`'''
     
     materials: List[dict] = attrib(factory=list, kw_only=True)
     '''materials data, [material1, material2, ...]. Note that this material data is just dict type, not class `Material`'''
-    vertex_count: int = attrib(default=0, kw_only=True)
-    '''number of vertices in this mesh'''
-    indices_count: int = attrib(default=0, kw_only=True)
-    '''number of indices in this mesh'''
-    uv_components_counts: Union[int, List[int]] = attrib(default=2, kw_only=True)
-    '''number of uv components. Default is 2. If you have more than 2 uv components, you have to specify this field.'''
     inner_meshes: List[InnerMesh] = attrib(factory=list, kw_only=True)
     '''inner meshes. Specify this field when there are more than 1 targets inside this mesh data.'''
     
@@ -102,8 +117,8 @@ class Mesh(ResourcesObj):
     
     def __attrs_post_init__(self):
         super().__attrs_post_init__()
-        if self.vertex_count == 0 and len(self.positions) > 0:
-            self.vertex_count = len(self.positions)
+        if self.position_count == 0 and len(self.positions) > 0:
+            self.position_count = len(self.positions)
         if self.indices_count == 0 and len(self.indices) > 0:
             if isinstance(self.indices[0], list):
                 self.indices_count = len(self.indices) * len(self.indices[0])
@@ -123,19 +138,19 @@ class Mesh(ResourcesObj):
         return len(self.indices)>0 or self.indices_count>0
     @property
     def has_normals(self):
-        return len(self.normals) > 0
+        return len(self.normals) > 0 or self.normal_count > 0
     @property
     def has_uvs(self):
-        return len(self.uvs) > 0
+        return len(self.uvs) > 0 or self.uv_count > 0
     @property
     def has_tangents(self):
-        return len(self.tangents) > 0
+        return len(self.tangents) > 0 or self.tangent_count > 0
     @property
-    def has_bitangents(self):
-        return len(self.bitangents) > 0
+    def has_bitangents(self):   
+        return len(self.bitangents) > 0 or self.bitangent_count > 0
     @property
     def has_colors(self):
-        return len(self.colors) > 0
+        return len(self.colors) > 0 or self.color_count > 0
 
     def draw(self, target:Optional[int]=None):
         '''
@@ -157,7 +172,7 @@ class Mesh(ResourcesObj):
                 if self.has_indices:
                     gl.glDrawElements(self.draw_mode.value, self.indices_count, gl.GL_UNSIGNED_INT, None)
                 else:
-                    gl.glDrawArrays(self.draw_mode.value, 0, self.vertex_count)
+                    gl.glDrawArrays(self.draw_mode.value, 0, self.position_count)
             else:
                 for i in range(len(self.inner_meshes)):
                     self.draw(i)
@@ -173,7 +188,9 @@ class Mesh(ResourcesObj):
                 gl.glDrawElements(self.draw_mode.value, inner.indices_count, gl.GL_UNSIGNED_INT, ctypes.c_void_p(inner.from_index * 4))
             else:
                 gl.glDrawArrays(self.draw_mode.value, inner.from_vertex, inner.vertex_count)
-    
+
+        gl.glBindVertexArray(0)
+        
     def load(self):
         '''send mesh to OpenGL'''
         if self.loaded:
@@ -197,8 +214,8 @@ class Mesh(ResourcesObj):
             gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indices_data.nbytes, indices_data.data, gl.GL_STATIC_DRAW)
         
         # position (0)
-        if self.vertex_count == 0 and not self.has_indices:
-            self.vertex_count = len(self.positions)
+        if self.position_count == 0 and not self.has_indices:
+            self.position_count = len(self.positions)
         vertices_data = np.array(self.positions, dtype=np.float32).flatten()
         vertex_vbo = gl.glGenBuffers(1)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, vertex_vbo)
@@ -209,6 +226,7 @@ class Mesh(ResourcesObj):
         self.vbos.append(vertex_vbo)
         
         # normal (1)
+        self.normal_count = len(self.normals)
         if self.has_normals:
             normals_data = np.array(self.normals, dtype=np.float32).flatten()
             normal_vbo = gl.glGenBuffers(1)
@@ -220,6 +238,7 @@ class Mesh(ResourcesObj):
             self.vbos.append(normal_vbo)
             
         # tangent (2)
+        self.tangent_count = len(self.tangents)
         if self.has_tangents:
             tangent_data = np.array(self.tangents, dtype=np.float32).flatten()
             tangent_vbo = gl.glGenBuffers(1)
@@ -231,6 +250,7 @@ class Mesh(ResourcesObj):
             self.vbos.append(tangent_vbo)
         
         # bitangent (3)
+        self.bitangent_count = len(self.bitangents)
         if self.has_bitangents:
             bitangent_data = np.array(self.bitangents, dtype=np.float32).flatten()
             bitangent_vbo = gl.glGenBuffers(1)
@@ -243,6 +263,7 @@ class Mesh(ResourcesObj):
         
         # color (4)
         if self.has_colors:
+            self.color_count = len(self.colors)
             color_data = np.array(self.colors, dtype=np.float32).flatten()
             color_vbo = gl.glGenBuffers(1)
             gl.glBindBuffer(gl.GL_ARRAY_BUFFER, color_vbo)
@@ -258,7 +279,7 @@ class Mesh(ResourcesObj):
             if self.has_indices:
                 vertex_ids = indices_data
             else:
-                vertex_ids = np.array([i for i in range(self.vertex_count)], dtype=np.int32).flatten()
+                vertex_ids = np.array([i for i in range(self.position_count)], dtype=np.int32).flatten()
             
             id_vbo = gl.glGenBuffers(1)
             gl.glBindBuffer(gl.GL_ARRAY_BUFFER, id_vbo)
@@ -270,6 +291,7 @@ class Mesh(ResourcesObj):
         
         # uv (start from 8)
         point_offset = 8
+        self.uv_count = len(self.uvs)
         if self.has_uvs:
             for i in range(len(self.uvs)): 
                 uv_data = np.array(self.uvs[i], dtype=np.float32).flatten()
@@ -290,6 +312,10 @@ class Mesh(ResourcesObj):
             self.bitangents.clear()
             self.colors.clear()
             self.indices.clear()
+        
+        gl.glBindVertexArray(0)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, 0)
     
     @classmethod
     def Load(cls,
@@ -369,7 +395,7 @@ class Mesh(ResourcesObj):
             'bitangents': all_bitangents,
             'colors': all_colors,
             'indices':all_indices,
-            'vertex_count': len(all_positions),
+            'position_count': len(all_positions),
             'indices_count': len(all_indices) * 3,
             'materials': all_materials,
             'inner_meshes': inner_meshes,
@@ -407,8 +433,14 @@ class Mesh(ResourcesObj):
         self.indices.clear()
         self.materials.clear()
         self.inner_meshes.clear()
-        self.vertex_count = 0
+        
+        self.position_count = 0
         self.indices_count = 0
+        self.normal_count = 0
+        self.color_count = 0
+        self.tangent_count = 0
+        self.bitangent_count = 0
+        self.uv_count = 0
         self.uv_components_counts = 0
         
     # region default meshes
@@ -465,7 +497,7 @@ class _PlaneMesh(Mesh):
         self.uvs = [uvs]
         self.tangents = tangents
         self.bitangents = bitangents
-        self.vertex_count = len(positions)
+        self.position_count = len(positions)
         self.indices = []
         
         for i in range(self.edge):
@@ -530,7 +562,7 @@ class _SphereMesh(Mesh):
         self.uvs = [uvs]
         self.tangents = tangents
         self.bitangents = bitangents
-        self.vertex_count = len(positions)
+        self.position_count = len(positions)
         self.indices = indices
         self.draw_mode = PrimitiveDrawingType.TRIANGLE_STRIP
         

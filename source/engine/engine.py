@@ -210,11 +210,14 @@ class Engine:
     def IsDebugMode(self, value):
         self._debug = value
 
-    def PrintOpenGLError(self):
+    def CatchOpenGLError(self, raise_err=is_dev_mode()):
         try:
             gl.glGetError() # nothing to do with error, just clear error flag
-        except Exception as e:
-            EngineLogger.error('GL ERROR: ', glu.gluErrorString(e))
+        except gl.error.Error as e:
+            if raise_err:
+                raise e
+            else:
+                EngineLogger.error(f'OpenGL Error: {e}')
     # endregion
 
     # region managers

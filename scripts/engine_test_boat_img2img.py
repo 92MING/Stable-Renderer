@@ -103,9 +103,9 @@ if __name__ == '__main__':
 
     img2img_boat_path = EXAMPLE_WORKFLOWS_DIR / 'boat-img2img-example.json'
     Sample.Run(winSize=(512, 512),
-               mapSavingInternal=1,
+               mapSavingInterval=1,
                needOutputMaps=False,
-               outputCannyMap=False,
+               outputAICannyMap=False,
                saveSDColorOutput=False,
                disableComfyUI=False,
                default_workflow=img2img_boat_path)

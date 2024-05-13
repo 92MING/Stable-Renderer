@@ -3,14 +3,16 @@ from comfyUI.types import *
 from common_utils.debug_utils import ComfyUILogger
 from common_utils.global_utils import is_dev_mode, is_verbose_mode
 if TYPE_CHECKING:
-    from common_utils.stable_render_utils import IDMap, SpriteInfos
-
+    from common_utils.stable_render_utils import SpriteInfos
+    from engine.static.corrmap import IDMap
 
 class EngineDataNode(StableRenderingNode):
     '''
     Nodes providing the runtime data during rendering.
     `EngineData` is a hidden type, which means no input is required for this node,
     the data will be passed during runtime automatically.
+    
+    Note: the shader canny is not good enough(since it is just a simple implementation), it's better not to use.
     '''
     
     def __call__(self, engine_data: EngineData)->Tuple[
@@ -19,6 +21,7 @@ class EngineDataNode(StableRenderingNode):
                         Named[IMAGE, "positions"],    # type: ignore
                         Named[IMAGE, "normals"], # type: ignore
                         Named[IMAGE, "depths"],  # type: ignore
+                        Named[IMAGE, "canny"],  # type: ignore
                         Named[LATENT, "noises"], # type: ignore
                         Named[MASK, "masks"],     # type: ignore
                         Named[CorrespondMaps, 'correspond_maps'],   # type: ignore
@@ -27,13 +30,14 @@ class EngineDataNode(StableRenderingNode):
                 ]:
         
         if engine_data is None:
-                return (None, None, None, None, None, None, None, None, {}, "")
+                return (None, None, None, None, None, None, None, None, None, {}, "")
         
         return (engine_data.color_maps, 
                 engine_data.id_maps, 
                 engine_data.pos_maps, 
                 engine_data.normal_maps,
-                engine_data.depth_maps, 
+                engine_data.depth_maps,
+                engine_data.canny_maps, 
                 engine_data.noise_maps,
                 engine_data.masks,
                 engine_data.correspond_maps,

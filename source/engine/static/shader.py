@@ -497,7 +497,7 @@ class Shader(NamedObj, EngineObj):
             raise ValueError(f'Invalid shader type: {type}, currently only support vertex and fragment shader')
         shaderID = gl.glCreateShader(type.value)
         if shaderID == 0:
-            self.engine.PrintOpenGLError()
+            self.engine.CatchOpenGLError()
             raise RuntimeError(f'Failed to create shader {self.name}')
         gl.glShaderSource(shaderID, source)
         gl.glCompileShader(shaderID)
@@ -512,7 +512,7 @@ class Shader(NamedObj, EngineObj):
     def _init_program(self, v_shaderID, f_shaderID):
         program = gl.glCreateProgram()
         if program == 0:
-            self.engine.PrintOpenGLError()
+            self.engine.CatchOpenGLError()
             raise RuntimeError(f'Failed to create program when initializing shader: {self.name}')
         gl.glAttachShader(program, v_shaderID)
         gl.glAttachShader(program, f_shaderID)
@@ -557,13 +557,10 @@ class Shader(NamedObj, EngineObj):
     # endregion
 
     def useProgram(self):
-        if self.CurrentShader() == self:
-            return
-        if gl.glUseProgram(self._programID):
-            self.engine.PrintOpenGLError()
-            raise RuntimeError(f'Failed to use shader {self.name}')
+        gl.glUseProgram(self._programID)
         Shader._CurrentShader = self
-
+        self.engine.CatchOpenGLError()
+        
     def getUniformID(self, name:str):
         return gl.glGetUniformLocation(self._programID, name)
     

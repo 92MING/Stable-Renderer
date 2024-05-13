@@ -1,10 +1,13 @@
 '''special renderer for AI-Baking'''
 import glm
+import OpenGL.GL as gl
+
 from functools import partial
 from typing import Iterable, Union, TYPE_CHECKING, Optional
 
 from engine.static.mesh import Mesh
 from engine.static.material import Material, DefaultTextureType
+from engine.static.texture import Texture
 from engine.static.enums import RenderOrder, EngineMode, RenderMode
 from .renderer import Renderer
 from ..ai import SpriteInfo
@@ -12,8 +15,8 @@ from common_utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
 from common_utils.debug_utils import EngineLogger
 
 if TYPE_CHECKING:
+    from engine.static.corrmap import CorrespondMap
     from ...gameObj import GameObject
-    from common_utils.stable_render_utils import CorrespondMap
 
 
 _DEFAULT_CORRMAP_MATERIAL: Material = GetOrAddGlobalValue('__DEFAULT_CORRMAP_MATERIAL__', None)   # type: ignore
@@ -43,19 +46,16 @@ class CorrMapRenderer(Renderer):
     This could be both for rendering & baking purpose.
     '''
     
-    RequireComponent = (SpriteInfo, )
-    
     def __init__(self, 
                  gameObj: "GameObject", 
                  enable=True,
                  corrmaps: Union["CorrespondMap", Iterable["CorrespondMap"], None] = None,
                  mesh: Optional["Mesh"] = None,
                  materials:Union["Material", Iterable["Material"], None] = None,
-                 use_texcoord_id: bool = _DEFAULT_USE_TEXCOORD_ID   # type: ignore
+                 use_texcoord_id: bool = _DEFAULT_USE_TEXCOORD_ID,   # type: ignore
+                 spriteID: Optional[int] = None
                  ):
         '''
-        Note: `SpriteInfo` is required for this component's gameobject.
-        
         Args:
             - gameObj: the GameObject that this component belongs to.
             - enable: if this component is enabled.
@@ -69,7 +69,7 @@ class CorrMapRenderer(Renderer):
         '''
         super().__init__(gameObj=gameObj, enable=enable, materials=materials)
         
-        from common_utils.stable_render_utils import CorrespondMap
+        from engine.static.corrmap import CorrespondMap
         
         if corrmaps is None:
             self.corrmaps = []
@@ -80,21 +80,24 @@ class CorrMapRenderer(Renderer):
         else:   # none
             raise ValueError('corrmap should be a CorrespondMap object or a list of CorrespondMap objects.')
         self.mesh = mesh or _get_default_corrmap_mesh()
-        self.use_tex_coord_id = use_texcoord_id
+        self.use_texcoord_id = use_texcoord_id
         if not self.materials:
             self._materials = [_get_default_corrmap_material(), ]
-        if self.use_tex_coord_id == _DEFAULT_USE_TEXCOORD_ID:
-            self.use_tex_coord_id = _DEFAULT_USE_TEXCOORD_ID(self.mesh)
+        if self.use_texcoord_id == _DEFAULT_USE_TEXCOORD_ID:
+            self.use_texcoord_id = _DEFAULT_USE_TEXCOORD_ID(self.mesh)
+        self.force_spriteID = spriteID
   
     @property
-    def sprite(self):
+    def spriteID(self):
         '''the sprite object contained in the `SpriteInfo` component.'''
+        if self.force_spriteID is not None:
+            return self.force_spriteID
         if not (sprite_info:=self.gameObj.getComponent(SpriteInfo)):
             return None
-        return sprite_info.sprite
+        return sprite_info.sprite.spriteID
     
     def start(self):
-        if self.engine.Mode == EngineMode.BAKE:
+        if not self.corrmaps:
             return
         for i, mat in enumerate(self.materials):
             if i>=len(self.corrmaps):
@@ -104,7 +107,7 @@ class CorrMapRenderer(Renderer):
                 mat.addDefaultTexture(self.corrmaps[i], DefaultTextureType.CorrespondMap)
         
     def _drawAvailable(self):
-        return (self.sprite is not None and \
+        return (self.spriteID is not None and \
                 len(self.corrmaps) == len(self.materials) and \
                 self.mesh is not None)
     
@@ -116,24 +119,26 @@ class CorrMapRenderer(Renderer):
                     use_tex_coord_id=True,
                     slot: Optional[int]=None):
         '''For submitting to RenderManager'''
-        if self.sprite is None:
+        if self.spriteID is None:
             return
         
         self.engine.RuntimeManager.UpdateUBO_ModelMatrix(modelM)
-        spriteID = self.sprite.spriteID
+        spriteID = self.spriteID
         
         material.use()  # this will send corrmap's as array texture to shader in baked mode
+        # `hasCorrMap` has been set in `material.use()`
+        self.engine.CatchOpenGLError()
         material.shader.setUniform('spriteID', spriteID)
         material.shader.setUniform('corrmap_k', corrmap.k)
         material.shader.setUniform('useTexcoordAsID', int(use_tex_coord_id and mesh.has_uvs))
-        
         if self.engine.Mode == EngineMode.BAKE:
             material.shader.setUniform('renderMode', int(RenderMode.BAKING.value))
         else:
             material.shader.setUniform('renderMode', int(RenderMode.BAKED.value))
-        
+        self.engine.CatchOpenGLError()
         mesh.draw(target=slot)
-
+        material.unbind()
+       
     def _check_and_get_order_factor(self):
         from ..camera import Camera
         main_cam = Camera.MainCamera()
@@ -152,7 +157,7 @@ class CorrMapRenderer(Renderer):
             return
         transform_matrix = self.transform.globalTransformMatrix
         mesh = self.mesh
-        use_tex_coord_id = self.use_tex_coord_id
+        use_tex_coord_id = self.use_texcoord_id
         
         if not mesh or not self.corrmaps:
             return
@@ -169,11 +174,11 @@ class CorrMapRenderer(Renderer):
                 order = mat.render_order + 1 / main_cam_z   # transparent do from far to near
             
             self.engine.RenderManager.AddGBufferTask(order=order,
-                                                     mesh=self.mesh,
+                                                     mesh=mesh,
                                                      shader=mat.shader,
                                                      task=partial(self._renderTask, transform_matrix, mesh, corrmap, mat, use_tex_coord_id, slot=i))
-            if self.sprite is not None:
-                self.engine.RenderManager.SubmitCorrmap(self.sprite.spriteID, mat.materialID, corrmap)
+            if self.spriteID is not None:
+                self.engine.RenderManager.SubmitCorrmap(self.spriteID, mat.materialID, corrmap)
 
         
 

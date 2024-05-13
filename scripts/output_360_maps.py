@@ -7,9 +7,8 @@ from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
 from engine.runtime.components import CameraController, CorrMapRenderer, SpriteInfo
-from engine.static import Mesh, Material_MTL
+from engine.static import Mesh, Material_MTL, CorrespondMap
 from common_utils.path_utils import *
-from common_utils.stable_render_utils import CorrespondMap
 
 
 if __name__ == '__main__':
