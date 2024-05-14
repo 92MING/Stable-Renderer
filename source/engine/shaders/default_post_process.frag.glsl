@@ -12,8 +12,9 @@ uniform float saturation;
 uniform float brightness;
 uniform float contrast;
 
-// whether StableDiffusion is enabled.
-uniform int usingSD;
+// flags
+uniform int diffusion_disable;  // whether diffusion process is enabled.
+uniform int is_baking;  // whether baking process is enabled.
 
 out vec4 fragColor;
 

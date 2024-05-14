@@ -3,7 +3,7 @@ import glm
 import OpenGL.GL as gl
 
 from functools import partial
-from typing import Iterable, Union, TYPE_CHECKING, Optional
+from typing import Iterable, Union, TYPE_CHECKING, Optional, Callable, Any
 
 from engine.static.mesh import Mesh
 from engine.static.material import Material, DefaultTextureType
@@ -53,7 +53,8 @@ class CorrMapRenderer(Renderer):
                  mesh: Optional["Mesh"] = None,
                  materials:Union["Material", Iterable["Material"], None] = None,
                  use_texcoord_id: bool = _DEFAULT_USE_TEXCOORD_ID,   # type: ignore
-                 spriteID: Optional[int] = None
+                 spriteID: Optional[int] = None,
+                 defer_render_task: Optional[Callable[..., Any]] = None,
                  ):
         '''
         Args:
@@ -66,6 +67,7 @@ class CorrMapRenderer(Renderer):
             - use_tex_coord_id: if True, even the mesh has vertexID, UV texcoord will be used for pixel tracing instead.
                                 Default to be true for sphere mesh mapper.
             - spriteID: force the spriteID in shader to be a specific value. It can be None if it is offered in the `corrmap`.
+            - defer_render_task: the task submitted to RenderManager for defer rendering. It should be a no-arg callable object.
         '''
         super().__init__(gameObj=gameObj, enable=enable, materials=materials)
         
@@ -86,6 +88,7 @@ class CorrMapRenderer(Renderer):
         if self.use_texcoord_id == _DEFAULT_USE_TEXCOORD_ID:
             self.use_texcoord_id = _DEFAULT_USE_TEXCOORD_ID(self.mesh)
         self.force_spriteID = spriteID
+        self.defer_render_task = defer_render_task
   
     @property
     def spriteID(self):
@@ -116,7 +119,7 @@ class CorrMapRenderer(Renderer):
                     mesh: "Mesh", 
                     corrmap: "CorrespondMap",
                     material: "Material", 
-                    use_tex_coord_id=True,
+                    use_texcoord_id=True,
                     slot: Optional[int]=None):
         '''For submitting to RenderManager'''
         if self.spriteID is None:
@@ -130,7 +133,7 @@ class CorrMapRenderer(Renderer):
         self.engine.CatchOpenGLError()
         material.shader.setUniform('spriteID', spriteID)
         material.shader.setUniform('corrmap_k', corrmap.k)
-        material.shader.setUniform('useTexcoordAsID', int(use_tex_coord_id and mesh.has_uvs))
+        material.shader.setUniform('useTexcoordAsID', int(use_texcoord_id and mesh.has_uvs))
         if self.engine.Mode == EngineMode.BAKE:
             material.shader.setUniform('renderMode', int(RenderMode.BAKING.value))
         else:
@@ -179,6 +182,9 @@ class CorrMapRenderer(Renderer):
                                                      task=partial(self._renderTask, transform_matrix, mesh, corrmap, mat, use_tex_coord_id, slot=i))
             if self.spriteID is not None:
                 self.engine.RenderManager.SubmitCorrmap(self.spriteID, mat.materialID, corrmap)
+        
+        if self.defer_render_task is not None:
+            self.engine.RenderManager.AddDeferRenderTask(self.defer_render_task)
 
         
 

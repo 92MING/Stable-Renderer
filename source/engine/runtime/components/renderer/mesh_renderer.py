@@ -1,7 +1,7 @@
 import glm
 
 from functools import partial
-from typing import Iterable, Union, Sequence, Optional, TYPE_CHECKING
+from typing import Iterable, Union, Sequence, Optional, TYPE_CHECKING, Callable, Any
 from .renderer import Renderer
 from engine.static.enums import RenderOrder, RenderMode
 from common_utils.stable_render_utils import get_new_spriteID
@@ -21,7 +21,8 @@ class MeshRenderer(Renderer):
                  materials: Union["Material", Iterable["Material"], None] = None,
                  mesh: Optional["Mesh"] = None,
                  use_texcoord_id: bool = False,
-                 spriteID: Optional[int] = None
+                 spriteID: Optional[int] = None,
+                 defer_render_task: Optional[Callable[..., Any]] = None,
                  ):
         '''
         Args:
@@ -32,11 +33,13 @@ class MeshRenderer(Renderer):
             - use_tex_coord_id: if True, even the mesh has vertexID, UV texcoord will be used for pixel tracing instead.
                                 Default to be true for sphere mesh mapper.
             - spriteID: force the spriteID in shader to be a specific value. It can be None if it is offered in the `corrmap`.
+            - defer_render_task: a callable object that will be called when rendering. It should have the same signature as `_renderTask`.
         '''
         super().__init__(gameObj=gameObj, enable=enable, materials=materials)
         self.mesh = mesh
         self.use_texcoord_id = use_texcoord_id
         self.force_spriteID = spriteID if spriteID is not None else get_new_spriteID()
+        self.defer_render_task = defer_render_task
     
     @property
     def spriteID(self):
@@ -117,6 +120,9 @@ class MeshRenderer(Renderer):
                                                      shader=mat.shader,
                                                      task=partial(self._renderTask, transform_matrix, mat, mesh, slot=i)
                                                      )
+        
+        if self.defer_render_task is not None:
+            self.engine.RenderManager.AddDeferRenderTask(self.defer_render_task)
 
     def _drawAvailable(self):
         return super()._drawAvailable() and self.mesh is not None

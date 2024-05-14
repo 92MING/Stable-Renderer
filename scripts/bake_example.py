@@ -7,7 +7,7 @@ from engine.runtime.gameObj import GameObject
 from engine.runtime.component import Component
 from engine.engine import Engine
 from engine.runtime.components import CameraController, CorrMapRenderer, SpriteInfo
-from engine.static import Mesh, Material_MTL, CorrespondMap
+from engine.static import Mesh, Material_MTL, CorrespondMap, EngineMode
 from common_utils.path_utils import *
 
 
@@ -26,7 +26,6 @@ if __name__ == '__main__':
             # if self.RuntimeManager.FrameCount >= 18:
             #     self.Exit()
             ...
-            
         def beforePrepare(self):
             mikuPath = os.path.join(EXAMPLE_3D_MODEL_DIR, 'miku')
             mikuMesh = Mesh.Load(os.path.join(mikuPath, 'miku.obj'), alias='miku', cullback=False) 
@@ -34,7 +33,7 @@ if __name__ == '__main__':
             
             camera = GameObject('Camera')
             camera.addComponent(Camera, bgPrompt='no background')
-            camera.addComponent(CameraController, defaultPos=[0, 0.68, -2.3], defaultLookAt=[0, 0.68, 0])
+            camera.addComponent(CameraController, defaultPos=[0, 0.68, 2.3], defaultLookAt=[0, 0.68, 0])
 
             miku = GameObject('miku', position=[0, 0.02, 0], scale=0.065)
             meshRenderer = miku.addComponent(MeshRenderer, mesh=mikuMesh)
@@ -48,6 +47,7 @@ if __name__ == '__main__':
             corrmap_obj.addComponent(EqualIntervalRotation, interval=18)    # need to rotate at the same speed as wrapped object
     
     Sample.Run(winSize=(512, 512),
+               mode = EngineMode.BAKE,
                mapSavingInterval=1,
                needOutputMaps=False,
                disableComfyUI=True)

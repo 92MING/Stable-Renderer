@@ -21,34 +21,42 @@ from ..static.mesh import Mesh
 from ..static.corrmap import CorrespondMap
 
 
-def _wrapPostProcessTask(render_manager:'RenderManager', shader: "Shader", task: Optional[Callable] = None):
+def _wrapPostProcessTask(render_manager:'RenderManager', shader: Optional["Shader"], task: Optional[Callable[..., Any]] = None):
     '''`PostProcess` stage'''
-    shader.useProgram()
     gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, 
-                              gl.GL_COLOR_ATTACHMENT0, 
-                              gl.GL_TEXTURE_2D, 
-                              render_manager.CurrentScreenTexture, 
-                              0)
+                                gl.GL_COLOR_ATTACHMENT0, 
+                                gl.GL_TEXTURE_2D, 
+                                render_manager.CurrentScreenTexture, 
+                                0)
     gl.glActiveTexture(gl.GL_TEXTURE0)
     gl.glBindTexture(gl.GL_TEXTURE_2D, render_manager.LastScreenTexture)
-    shader.setUniform("screenTexture", 0)
-    shader.setUniform("usingSD", int(not render_manager.engine.disableComfyUI))
+    gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, 0)
+    
+    if shader is not None:
+        shader.useProgram()
+        shader.setUniform("screenTexture", 0)
+        shader.setUniform("diffusion_disable", int(not render_manager.engine.disableComfyUI))
+        shader.setUniform("is_baking", int(render_manager.engine.Mode == EngineMode.BAKE))
+        
     task() if task is not None else render_manager._draw_quad()
     render_manager.SwapScreenTexture()
 
-def _wrapDeferRenderTask(render_manager:'RenderManager', shader: Optional["Shader"], task: Optional[Callable] = None):
+def _wrapDeferRenderTask(render_manager:'RenderManager', shader: Optional["Shader"], task: Optional[Callable[..., Any]] = None):
     '''`DeferRender` stage'''
-    shader = shader or render_manager._default_defer_render_shader
-    shader.useProgram()
-    shader.setUniform("usingSD", int(not render_manager.engine.disableComfyUI))
-    render_manager.BindGBufferTexToShader(shader)
+    if shader is not None:
+        shader = shader
+        shader.useProgram()
+        shader.setUniform("diffusion_disable", int(not render_manager.engine.disableComfyUI))
+        shader.setUniform("is_baking", int(render_manager.engine.Mode == EngineMode.BAKE))
+        render_manager.BindGBufferTexToShader(shader)
     
     task() if task is not None else render_manager._draw_quad()
 
-def _wrapGBufferTask(render_manager:'RenderManager', task: Optional[Callable], shader: "Shader", mesh: Optional["Mesh"]):
+def _wrapGBufferTask(render_manager:'RenderManager', task: Optional[Callable[..., Any]], shader: Optional["Shader"], mesh: Optional["Mesh"]):
     '''`GBuffer` stage (submit attribute for stable diffusion)'''
-    shader.useProgram()
-    render_manager.BindGBufferTexToShader(shader)
+    if shader is not None:
+        shader.useProgram()
+        render_manager.BindGBufferTexToShader(shader)
     if mesh is not None:
         if not mesh.cullback:
             gl.glDisable(gl.GL_CULL_FACE)
@@ -165,7 +173,7 @@ class RenderManager(Manager):
                  contrast=1.0):
         super().__init__()
         self.engine._renderManager = self # special case, because renderManager is created before engine's assignment
-        
+        self._render_stage = RenderStage.NOT_RENDERING
         self._init_opengl()
         self._init_framebuffers()  # framebuffers for post-processing
         self._init_post_process(enableHDR=enableHDR, 
@@ -384,7 +392,7 @@ class RenderManager(Manager):
             raise Exception("G-Framebuffer is not complete! Some error occurred.")
         
         self.BindFrameBuffer(0)
-        self._default_defer_render_task = partial(_wrapDeferRenderTask, self, None, None)
+        self._default_defer_render_task = partial(_wrapDeferRenderTask, self, self._default_defer_render_shader, None)
         
     def _init_post_process(self, enableHDR=True, enableGammaCorrection=True, gamma=2.2, exposure=1.0, saturation=1.0, brightness=1.0, contrast=1.0):
         '''
@@ -651,7 +659,12 @@ class RenderManager(Manager):
         self._currentScreenTexture = self._screenTexture_1 if self._currentScreenTexture == self._screenTexture_2 else self._screenTexture_2
     
     def DrawScreen(self):
+        '''run the default post process shader to screen'''
         self._draw_quad()
+        
+    @property
+    def RenderStage(self):
+        return self._render_stage
     # endregion
 
     # region diffusion
@@ -838,6 +851,19 @@ class RenderManager(Manager):
         
         self._execute_gbuffer_tasks()
     
+    def _write_temp_fbo_to_real_fbo(self):
+        self.colorFBOTex.set_data(self._color_buffer_temp.flip(0))
+        self.idFBOTex.set_data(self._id_buffer_temp.flip(0))
+        self.posFBOTex.set_data(self._pos_buffer_temp.flip(0))
+        self.noiseFBOTex.set_data(self._noise_buffer_temp.flip(0))
+        self.cannyFBOTex.set_data(self._canny_buffer_temp.flip(0))
+        depth_data = self._depth_buffer_temp.unsqueeze(-1)
+        normal_data = self._normal_buffer_temp
+        normal_and_depth_data = torch.cat([normal_data, depth_data], dim=-1).flip(0)
+        self.normal_and_depth_FBOTex.set_data(normal_and_depth_data)
+        self.depthFBOTex.set_data(1 - depth_data.flip(0))   # depth value is inverted in shader, closer object has larger depth value
+        del depth_data, normal_data, normal_and_depth_data
+    
     def _save_frame_data(self):
         if 'frame_indices' not in self.data_to_be_added_to_engineData:
             self.data_to_be_added_to_engineData['frame_indices'] = []
@@ -883,40 +909,29 @@ class RenderManager(Manager):
         self.BindFrameBuffer(self._gBuffer)
         
         # identical gbuffer tasks
+        self._render_stage = RenderStage.INDIVIDUAL_GBUFFER
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT) # type: ignore
         self._execute_gbuffer_tasks(identical_buffer=True)
         
-        # write back the temp buffer to the real buffer
-        self.colorFBOTex.set_data(self._color_buffer_temp.flip(0))
-        self.idFBOTex.set_data(self._id_buffer_temp.flip(0))
-        self.posFBOTex.set_data(self._pos_buffer_temp.flip(0))
-        self.noiseFBOTex.set_data(self._noise_buffer_temp.flip(0))
-        depth_data = self._depth_buffer_temp.unsqueeze(-1)
-        normal_data = self._normal_buffer_temp
-        normal_and_depth_data = torch.cat([normal_data, depth_data], dim=-1).flip(0)
-        self.normal_and_depth_FBOTex.set_data(normal_and_depth_data)
-        self.depthFBOTex.set_data(1 - depth_data.flip(0))   # depth value is inverted in shader, closer object has larger depth value
-        del depth_data, normal_data, normal_and_depth_data
+        self._write_temp_fbo_to_real_fbo()
         
         # normal gbuffer tasks
+        self._render_stage = RenderStage.GBUFFER
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT) # type: ignore
         self._execute_gbuffer_tasks(identical_buffer=False)  # depth test will be enabled in this function
         
         # output map data for debugging
         if self.engine.DiffusionManager.ShouldOutputFrame:
-            colorData = self.colorFBOTex.numpy_data(flipY=True)
-            idData = self.idFBOTex.numpy_data(flipY=True)
-            posData = self.posFBOTex.numpy_data(flipY=True)
-            cannyData = self.cannyFBOTex.numpy_data(flipY=True)
-            
-            normal_and_depth_data = self.normal_and_depth_FBOTex.numpy_data(flipY=True)
-            # depth data is in the alpha channel of `normal_and_depth_data`
-            
+            colorData = self._colorFboTexForShaderBinding.numpy_data(flipY=True)
+            idData = self._idFboTexForShaderBinding.numpy_data(flipY=True)
+            posData = self._posFboTexForShaderBinding.numpy_data(flipY=True)
+            cannyData = self._cannyFboTexForShaderBinding.numpy_data(flipY=True)
+            normal_and_depth_data = self._normalDepthFboTexForShaderBinding.numpy_data(flipY=True)
             normalData = normal_and_depth_data[:, :, :3]
             depthData = normal_and_depth_data[:, :, 3]
-            noiseData = self.noiseFBOTex.numpy_data(flipY=True)
+            noiseData = self._noiseFboTexForShaderBinding.numpy_data(flipY=True)
             
             diffManager = self.engine.DiffusionManager
             diffManager.OutputMap('color', colorData)
@@ -933,6 +948,7 @@ class RenderManager(Manager):
         
         # refiner process
         if not self.engine.disableComfyUI:
+            self._render_stage = RenderStage.DIFFUSION
             from comfyUI.types import EngineData
             engineData = None
             
@@ -949,20 +965,15 @@ class RenderManager(Manager):
                 inference_result = context.final_output
                 new_color_data: Tensor = inference_result.frame_color
                 if len(new_color_data.shape) == 4:
-                    new_color_data = new_color_data[0]
-                new_color_data = new_color_data.flip(0)
-                self.colorFBOTex.set_data(new_color_data)
+                    new_color_data = new_color_data[0]  # nhwc -> hwc
+                self._colorFboTexForShaderBinding.set_data(new_color_data.flip(0))  # update to the shader bind tex, since the shader will use this tex to render
                 
-                rgba_color_map = self.colorFBOTex.tensor(update=True, flip=True).to(torch.float32)
-                rgba_color_map = rgba_color_map.flip(0)
-                self.colorFBOTex.set_data(rgba_color_map)
-            
                 # clear data cache after diffusion submitted & done
                 self._extra_data.clear()
                 self.data_to_be_added_to_engineData.clear()
             
-            
         # defer rendering
+        self._render_stage = RenderStage.DEFER_RENDER
         gl.glDisable(gl.GL_DEPTH_TEST)
         self.BindFrameBuffer(self._postProcessFBO)  # output to post process FBO
         gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, self.CurrentScreenTexture, 0)
@@ -972,10 +983,12 @@ class RenderManager(Manager):
             self._default_defer_render_task()
 
         # post process
+        self._render_stage = RenderStage.POST_PROCESS
         gl.glDisable(gl.GL_DEPTH_TEST)  # post process don't need depth test
         self.post_process_tasks.execute(ignoreErr=True)
         self._final_draw()  # default post process shader is used here. Will also bind to FBO 0(screen)
         
+        self._render_stage = RenderStage.NOT_RENDERING
 
     def on_frame_end(self):
         glfw.swap_buffers(self.engine.WindowManager.Window)

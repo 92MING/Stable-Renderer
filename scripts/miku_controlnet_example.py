@@ -36,9 +36,7 @@ if __name__ == '__main__':
             miku.addComponent(AutoRotation)
             miku.addComponent(SpriteInfo, auto_spriteID=True, prompt='miku, 1 girl, anime, waifu, long blue hair')
     
-    # workflow_path = EXAMPLE_WORKFLOWS_DIR / 'miku-img2img-example.json'
-    # workflow_path = EXAMPLE_WORKFLOWS_DIR / 'miku-direct-latent.json'
-    workflow_path = EXAMPLE_WORKFLOWS_DIR / 'new-miku-control.json'
+    workflow_path = EXAMPLE_WORKFLOWS_DIR / 'miku-control.json'
     Sample.Run(winSize=(512, 512),
                needOutputMaps=False,
                saveSDColorOutput=False,

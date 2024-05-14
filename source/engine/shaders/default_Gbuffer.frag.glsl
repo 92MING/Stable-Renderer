@@ -5,6 +5,7 @@
 #define MAX_LIGHTS_NUM 256  // this constant will be edit by python script
 #define RUNTIME_UBO_BINDING 0
 #define PI 3.14159265359
+#define NON_AI_OBJ_MAP_INDEX 2048	// non-AI obj map index, since map size=k^2, k usually ~2-3, so 2048 is a safe number
 
 // runtime datastruct contains all runtime-update values
 layout (std140, binding=RUNTIME_UBO_BINDING) uniform Runtime {
@@ -119,11 +120,11 @@ void main() {
 		vec3 real_model_normal = normalize(TBN * normalize(texture(normalTex, uv).rgb * 2.0 - 1.0));
 		real_view_normal = normalize(vec3(MV_IT * vec4(real_model_normal, 0.0)));
 	}
-	out_normal_and_depth = vec4(real_view_normal, depth);
+	out_normal_and_depth = vec4(real_view_normal * 0.5 + 0.5, depth);
 
 	// get id
 	int map_index;
-	int real_vertex_id;
+	uint real_vertex_id;
 	if (useTexcoordAsID == 0){
 		real_vertex_id = vertexID;
 	}
@@ -146,7 +147,7 @@ void main() {
 	}
 
 	if (renderMode == 0){ // normal obj
-		outID = ivec4(spriteID, materialID, 0, real_vertex_id);
+		outID = uvec4(spriteID, materialID, NON_AI_OBJ_MAP_INDEX, real_vertex_id);
 	} 
 	else // AI obj
 	{	
@@ -161,7 +162,7 @@ void main() {
 		int y_index = clamp(int(phi / angle_step), 0, corrmap_k-1);
 		map_index = x_index + (corrmap_k-1-y_index) * corrmap_k;	// from left to right, from top to bottom
 		
-		outID = ivec4(spriteID, materialID, map_index, real_vertex_id);
+		outID = uvec4(spriteID, materialID, map_index, real_vertex_id);
 	}
 
 	// get color
@@ -223,7 +224,17 @@ void main() {
 	// blend
 	vec2 current_pixel_uv_in_ndc =  gl_FragCoord.xy / vec2(textureSize(currentColor, 0));	// normalize to [0, 1]
 	
-	if (outColor.a < 1.0){
+	if (renderMode==2 || (outColor.a == 0.0 && renderMode==1)){
+		// baked AI obj, current fragment is transparent, keep the original data
+		// for baking mode, if it is correspond map, data is always overwrited
+		outColor = texture(currentColor, current_pixel_uv_in_ndc).rgba;	// keep the original color
+		if (renderMode==1)
+			outID = texture(currentIDs, current_pixel_uv_in_ndc);	// only non-baking mode(render mode) will discard the corrmap id
+		outPos = texture(currentPos, current_pixel_uv_in_ndc).rgb;
+		out_normal_and_depth = texture(currentNormalDepth, current_pixel_uv_in_ndc).rgba;
+		outCanny = texture(currentCanny, current_pixel_uv_in_ndc).rgb; 
+	}
+	else if (outColor.a < 1.0){	// normal object, do blending
 		float latest_depth = texture(currentNormalDepth, current_pixel_uv_in_ndc).a;
 		vec4 current_color = texture(currentColor, current_pixel_uv_in_ndc).rgba;
 		vec4 current_noises = texture(currentNoises, current_pixel_uv_in_ndc).rgba;
@@ -242,14 +253,5 @@ void main() {
 			}
 			out_normal_and_depth.a = latest_depth;
 		}
-	}
-
-	if (outColor.a == 0.0 && (renderMode == 1 || (renderMode==2 && hasCorrMap==0))){
-		// baked AI obj, current fragment is transparent, keep the original data
-		// for baking mode, if it is correspond map, data is always overwrited
-		outID = texture(currentIDs, current_pixel_uv_in_ndc);
-		outPos = texture(currentPos, current_pixel_uv_in_ndc).rgb;
-		out_normal_and_depth = texture(currentNormalDepth, current_pixel_uv_in_ndc).rgba;
-		outCanny = texture(currentCanny, current_pixel_uv_in_ndc).rgb; 
 	}
 }

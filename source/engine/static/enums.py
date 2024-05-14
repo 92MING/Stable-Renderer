@@ -238,8 +238,24 @@ class RenderMode(Enum):
     '''baked object getting color from corrmap'''
     BAKING = 2
     '''baking object to corrmap'''
+
+class RenderStage(Enum):
+    '''rendering stage in render manager.'''
+    INDIVIDUAL_GBUFFER = 0
+    '''rendering to individual gbuffer'''
+    GBUFFER = 1
+    '''rendering to global gbuffer'''
+    DIFFUSION = 2
+    '''final drawing command submitted to diffusion model.'''
+    DEFER_RENDER = 3
+    '''deferred rendering'''
+    POST_PROCESS = 4
+    '''post processing, which is the final stage of rendering'''
     
-__all__.extend(['RenderOrder', 'RenderMode', 'DepthFunc'])
+    NOT_RENDERING = 8
+    '''not rendering stage'''
+    
+__all__.extend(['RenderOrder', 'RenderMode', 'DepthFunc', 'RenderStage'])
 # endregion
 
 
