@@ -25,7 +25,7 @@ from common_utils.decorators import Overload
 from common_utils.debug_utils import EngineLogger
 from common_utils.global_utils import GetOrAddGlobalValue, SetGlobalValue, is_dev_mode
 
-from typing import TYPE_CHECKING, Union, Optional, Final, Literal
+from typing import TYPE_CHECKING, Union, Optional, Literal
 
 if TYPE_CHECKING:
     from ..shader import Shader
@@ -38,7 +38,7 @@ else:
     _MAX_ANISOTROPY = None
 
 def __SUPPORT_GL_CUDA_SHARE__():
-    return GetOrAddGlobalValue('__SUPPORT_GL_CUDA_SHARE__', True)
+    return GetOrAddGlobalValue('__SUPPORT_GL_CUDA_SHARE__', False)
 
 @attrs(eq=False, repr=False)
 class Texture(ResourcesObj):
@@ -245,6 +245,8 @@ class Texture(ResourcesObj):
             mapping.unmap()
         else:
             numpy_data = self.numpy_data(flipY=False)
+            if numpy_data.dtype == np.uint32:
+                numpy_data = numpy_data.astype(np.int32)    # torch doesn't support uint32
             self._tensor = torch.from_numpy(numpy_data).to(f"cuda:{self.engine.RenderManager.TargetDevice}")
         
         if flip:

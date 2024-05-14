@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, overload
 
 from common_utils.debug_utils import EngineLogger
-from common_utils.stable_render_utils import Sprite, get_new_spriteID, EnvPrompt
+from common_utils.stable_render_utils import Sprite, get_new_spriteID
 from ...component import Component
 
 if TYPE_CHECKING:

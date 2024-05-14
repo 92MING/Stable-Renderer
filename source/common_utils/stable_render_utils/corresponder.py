@@ -107,7 +107,7 @@ class DefaultCorresponder:
         if layer not in self.layer_range:
             return origin_values
             
-        flatten_id_maps = engine_data.id_maps.tensor    # type: ignore
+        flatten_id_maps = engine_data.id_maps.tensor
         if flatten_id_maps.dim() == 4:
             flatten_id_maps = flatten_id_maps.view(engine_data.frame_count, -1, 4).contiguous()
         new_values = torch.zeros_like(origin_values)
@@ -132,7 +132,7 @@ class DefaultCorresponder:
         corrmaps = engine_data.correspond_maps
         
         if corrmaps:
-            for (spriteID, materialID), corrmap in corrmaps.items():
+            for (spriteID, materialID), corrmap in corrmaps.items():    # but suppose there should be only 1 corrmap in baking mode
                 if masks is not None:
                     this_masks = masks.clone()
                     if spriteID is not None:
