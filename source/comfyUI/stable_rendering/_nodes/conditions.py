@@ -6,8 +6,8 @@ from common_utils.debug_utils import ComfyUILogger
 
 if TYPE_CHECKING:
     from comfyUI.comfy.sd import CLIP
-    from common_utils.stable_render_utils import SpriteInfos, IDMap, Sprite
-
+    from common_utils.stable_render_utils import SpriteInfos, Sprite
+    from engine.static.corrmap import IDMap
 
 def _set_cond_strength(cond, strength: float=1.0):
     cond[1]['strength'] = strength

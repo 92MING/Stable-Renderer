@@ -207,15 +207,15 @@ class PromptServer:
 
             return _validate_response(extensions)
 
-        def get_dir_by_type(dir_type):
-            if dir_type is None:
-                dir_type = "input"
+        def get_dir_by_type(dir_type: str, default_type: str='input'):
+            if not dir_type:
+                dir_type = default_type
 
-            if dir_type == "input":
+            if dir_type in ("input", 'in'):
                 type_dir = folder_paths.get_input_directory()
-            elif dir_type == "temp":
+            elif dir_type in ("temp", "temp_dir", 'tmp', 'cache'):
                 type_dir = folder_paths.get_temp_directory()
-            elif dir_type == "output":
+            elif dir_type in ("output", 'out'):
                 type_dir = folder_paths.get_output_directory()
 
             return type_dir, dir_type

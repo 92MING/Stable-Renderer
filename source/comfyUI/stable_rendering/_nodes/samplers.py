@@ -3,7 +3,8 @@ from functools import partial
 from comfyUI.types import *
 from comfyUI.nodes import custom_ksampler
 from common_utils.type_utils import is_empty_method
-from common_utils.stable_render_utils import UpdateMode, Corresponder, DefaultCorresponder as _DefaultCorresponder
+from common_utils.stable_render_utils import Corresponder, DefaultCorresponder as _DefaultCorresponder
+from engine.static import UpdateMode
 
 _default_sampler = COMFY_SAMPLERS.__args__[0]   # type: ignore
 _default_scheduler = COMFY_SCHEDULERS.__args__[0]   # type: ignore

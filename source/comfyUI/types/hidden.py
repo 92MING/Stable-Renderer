@@ -340,7 +340,8 @@ class EngineData(HIDDEN):
 
     def __attrs_post_init__(self):
         from engine.static import Texture
-        from common_utils.stable_render_utils import IDMap, EnvPrompt
+        from common_utils.stable_render_utils import EnvPrompt
+        from engine.static.corrmap import IDMap
         
         if isinstance(self.env_prompts, str):
             self.env_prompts = [EnvPrompt(prompt=self.env_prompts),]   # type: ignore

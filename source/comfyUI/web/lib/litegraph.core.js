@@ -10266,15 +10266,21 @@ LGraphNode.prototype.executeAction = function(action)
                         ctx.textAlign = "right";
                         ctx.fillStyle = text_color;
                         var path = w.value;
-                        var filename = path.split("\\").pop().split("/").pop();
-                        
-                        let max_filename_length = (widget_width - margin * 2) * 0.6;
-                        let metrics_filename = ctx.measureText(filename);
-                        let filename_width = metrics_filename.width;
-                        if (filename_width > max_filename_length) {
-                            let charWidth = filename_width / Math.max(filename.length, 1);
-                            let maxChars = Math.floor(max_filename_length / charWidth);
-                            filename = filename.substring(0, maxChars-4) + "..." + filename.substring(filename.length-5);
+                        // if ';' in path, shows like "..., file.txt"
+                        if (path.indexOf(";") != -1) {
+                            let img_count = path.split(";").length;
+                            filename = `images (${img_count})`;
+                        } else {
+                            var filename = path.split("\\").pop().split("/").pop();
+                            
+                            let max_filename_length = (widget_width - margin * 2) * 0.6;
+                            let metrics_filename = ctx.measureText(filename);
+                            let filename_width = metrics_filename.width;
+                            if (filename_width > max_filename_length) {
+                                let charWidth = filename_width / Math.max(filename.length, 1);
+                                let maxChars = Math.floor(max_filename_length / charWidth);
+                                filename = filename.substring(0, maxChars-4) + "..." + filename.substring(filename.length-5);
+                            }
                         }
 
                         ctx.fillText(

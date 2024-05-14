@@ -67,7 +67,25 @@ class _UIMeta(type):
         if len(_UI_CLSES) == 0:
             return None
         return _UI_CLSES.get('UI', None)
-    
+
+_SPECIAL_ANNOTATED_INIT_LOGICS:List[Callable[["AnnotatedParam"], Any]] = []
+'''special post init logics being called after an `AnnotatedParam` is created.'''
+
+def _try_find_real_anno_if_annotated(anno):
+    if not get_origin(anno) == Annotated:
+        return anno
+    real = None
+    anno_args = get_args(anno)
+    if not anno_args:
+        return anno
+    for param in anno_args:
+        if isinstance(param, AnnotatedParam):
+            real = param
+            break
+    if not real:
+        return anno_args[0]
+    return real
+
 _anno_param_meta = NameCheckMetaCls()
 class AnnotatedParam(metaclass=_anno_param_meta):
     '''Annotation class for containing parameters' information for ComfyUI's node system.'''
@@ -102,6 +120,11 @@ class AnnotatedParam(metaclass=_anno_param_meta):
     '''
     inner_type: Optional[Union[type, str]] = None
     '''The inner type of this param type. This is for special types, e.g. Array'''
+    
+    @staticmethod
+    def AddSpecialPostInitLogic(func: Callable[["AnnotatedParam"], Any]):
+        '''Add a special post init logic for AnnotatedParam.'''
+        _SPECIAL_ANNOTATED_INIT_LOGICS.append(func) 
     
     def __str__(self):
         return str(self._comfy_name)
@@ -175,20 +198,21 @@ class AnnotatedParam(metaclass=_anno_param_meta):
                     raise TypeError(f'Unexpected type for Union: {origin_args}. Only Support Optional type.')
                 origin = origin_args[0] if origin_args[0] != NoneType else origin_args[1]
                 param_type = 'optional' # force to optional type
+                origin = _try_find_real_anno_if_annotated(origin)
                 if default == Parameter.empty:
                     default = None
                 
-            elif origin_origin == list:
-                origin = get_args(origin)[0]
+            elif origin_origin in (list, set):
+                origin = _try_find_real_anno_if_annotated(get_args(origin)[0])
                 tags.append('list') # treat as array
-            
+        
             elif origin_origin == tuple:
                 origin_args = get_args(origin)
                 if not (len(origin_args) == 2 and origin_args[1] == Ellipsis):
                     raise TypeError(f'Unexpected type for Tuple: {origin_args}. Only Support Tuple[type, ...].')
-                origin = origin_args[0]
+                origin = _try_find_real_anno_if_annotated(origin_args[0])
                 tags.append('list') # treat as array also
-                            
+        
         if isinstance(origin, Parameter):
             param = origin
             annotation = origin.annotation
@@ -215,16 +239,19 @@ class AnnotatedParam(metaclass=_anno_param_meta):
                         if not (len(anno_args)==2 and (NoneType in anno_args)):
                             raise TypeError(f'Unexpected type for Union: {anno_args}. Only Support Optional type.')
                         origin = anno_args[0] if anno_args[0] != NoneType else anno_args[1]
+                        origin = _try_find_real_anno_if_annotated(origin)
                         param_type = 'optional' # force to optional type
                         
                     elif anno_origin == list:
                         origin = anno_args[0]
+                        origin = _try_find_real_anno_if_annotated(origin)
                         tags.append('list') # treat as array
                     
                     elif anno_origin == tuple:
                         if not (len(anno_args) == 2 and anno_args[1] == Ellipsis):
                             raise TypeError(f'Unexpected type for Tuple: {anno_args}. Only Support Tuple[type, ...].')
                         origin = anno_args[0]
+                        origin = _try_find_real_anno_if_annotated(origin)
                         tags.append('list') # treat as array also
                         
                     else:
@@ -308,6 +335,9 @@ class AnnotatedParam(metaclass=_anno_param_meta):
             if UIBaseCls:= _UIMeta._BaseUIClass():
                 if self.origin_type in UIBaseCls._AllUISubclsNames():
                     self.tags.add('ui')
+        
+        for post_init in _SPECIAL_ANNOTATED_INIT_LOGICS:
+            post_init(self)
         
     @property
     def _comfy_type(self)->Union[str, list]:
@@ -485,31 +515,51 @@ def BOOLEAN(label_on: str='True', label_off: str='False')->Annotated:
     return Annotated[bool, AnnotatedParam(origin=bool, extra_params=data, comfy_name='BOOLEAN')]
 globals()['BOOLEAN'] = GetableFunc(BOOLEAN)    # trick for faking IDE to believe BOOLEAN is a function
 
-def PATH(accept_types: Union[List[str], str, Tuple[str, ...], None] = None,
-         accept_folder: bool = False)->Annotated:
+
+def PATH(accept_folder: bool = False,
+         accept_multiple: bool = False,
+         to_folder: Literal['input', 'output', 'temp']='input',
+         accept_types: Union[List[str], str, Tuple[str, ...], None] = None,
+         )->Annotated:
     '''
     Path type. Its actually string, but this will makes ComfyUI to create a button for selecting file/folder.
+    You can also label PATH like `PATH[True, ...]` to put the parameters.
     
     Note:
-        You can also label PATH with `PATH[['.jpg', '.png', '.jpeg', '.bmp', 'image/*'], True]` to put the parameters. It is a alias for `PATH(['.jpg', '.png', '.jpeg', '.bmp', 'image/*'], True)`.
-        
         You can still use `str` for type annotation.
-    
     Args:
+        - accept_folder: Whether to accept folder.
+        - accept_multiple: Whether to accept multiple files. In this case, the return value will be a list of paths.
+        - to_folder: The folder type. It should be one of "input", "output", "temp".
         - accept_types: The file types to accept. e.g. ['.jpg', '.png', '.jpeg', '.bmp'] or 'image/*'.
                         Default = '*' (accept all types)
-        - accept_folder: Whether to accept folder.
     '''
+    
     if not accept_types:
         accept_types = '*'
     else:
         if isinstance(accept_types, (list, tuple)):
             accept_types = ','.join(accept_types)
-    return Annotated[Path, AnnotatedParam(origin=Path, 
-                                         extra_params={'accept_types': accept_types, 'accept_folder': accept_folder}, 
-                                         comfy_name='PATH',
-                                         value_formatter=Path)]
+            
+    def path_formatter(anno, val):
+        if not 'list' in anno.tags:
+            return Path(val)
+        return [Path(v) for v in val.split(';') if v] if val else []
+    anno = AnnotatedParam(origin=Path, 
+                          extra_params={'accept_types': accept_types, 
+                                        'accept_folder': accept_folder, 
+                                        'accept_multiple': accept_multiple, 
+                                        'to_folder': to_folder,},
+                          comfy_name='PATH',
+                          tags=['list'] if accept_multiple else [])
+    anno.value_formatter = partial(path_formatter, anno)
+    return Annotated[Path, anno]
+
 globals()['PATH'] = GetableFunc(PATH)    # trick for faking IDE to believe PATH is a function
+AnnotatedParam.AddSpecialPostInitLogic(
+    lambda param: param.extra_params.update({'accept_multiple': True}) if (param.comfy_name=='PATH' and 'list' in param.tags) else None
+)
+
 
 __all__.extend(['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'PATH'])
 # endregion

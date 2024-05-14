@@ -255,7 +255,12 @@ function createIntWidget(node, inputName, inputData, app, isSeedInput) {
 	};
 }
 
-async function uploadFile(file) {
+/**
+ * Uploads a file to the server and returns the path to the file.
+ * @param {File} file - The file to upload.
+ * @param {string} save_to - The folder to save the file to: ['input', 'output', 'temp']
+*/
+async function uploadFile(file, save_to='input') {
 	try {
 	  // Wrap file in formdata so it includes filename
 	  const body = new FormData();
@@ -264,6 +269,7 @@ async function uploadFile(file) {
 		lastModified: file.lastModified,
 	  });
 	  body.append("data", new_file);
+	  body.append("type", save_to);
 	  const resp = await api.fetchApi("/upload/file", {
 		method: "POST",
 		body,
@@ -298,9 +304,16 @@ function createPathWidget(node, inputName, inputData, app) {
 			var accept_types = inputData[1]?.accept_types;
 			accept_types = accept_types ?? "*";
 			fileInput.accept = accept_types;	// set the accept types for the file input
+			
+			var accept_multiple = inputData[1]?.accept_multiple;
+			accept_multiple = accept_multiple ?? false;
 
 			var accept_folder = inputData[1]?.accept_folder;
 			accept_folder = accept_folder ?? false;
+			
+			var to_folder = inputData[1]?.to_folder;
+			to_folder = to_folder ?? "input";
+			
 			if (accept_folder) {
 				fileInput.setAttribute("webkitdirectory", "");
 				fileInput.setAttribute("directory", "");
@@ -311,18 +324,28 @@ function createPathWidget(node, inputName, inputData, app) {
 				if (fileInput.hasAttribute("directory"))
 					fileInput.removeAttribute("directory");
 			}
+			if (accept_multiple){
+				fileInput.setAttribute("multiple", "");
+			}
 			
 			// add an event listener to the file input element
 			fileInput.onchange = async function() {
-				// get the file from the file input element
-				const file = fileInput.files[0];
-				// if the file is not null, set the value of the path widget to the file name
-				if (file) {
-					var resp = await uploadFile(file);
-					if (!resp || resp.error) return;
-
-					var relative_path = resp.relative_path;
-					this.value = relative_path;
+				if (accept_multiple){
+					let vals = [];
+					var async_upload = async function(file, i) {
+						var resp = await uploadFile(file, to_folder);
+						vals[i] = resp.absolute_path;
+					}
+					await Promise.all(Array.from(fileInput.files).map(async_upload));
+					this.value = vals.join(';');
+				}
+				else {
+					const file = fileInput.files[0];
+					if (file) {
+						var resp = await uploadFile(file, to_folder);
+						var abs_path = resp.absolute_path;
+						this.value = abs_path;
+					}
 				}
 			}.bind(this);
 
