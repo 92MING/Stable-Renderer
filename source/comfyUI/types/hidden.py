@@ -286,14 +286,6 @@ class EngineData(HIDDEN):
     Note: You could also directly pass `Texture` or `tensor` to it.
     '''
     
-    _normal_and_depth_maps: Optional["Texture"] = attrib(default=None, kw_only=True, alias='normal_and_depth_map')
-    '''
-    normal and depth of the origin 3d vertex in each pixels in the current frame(s).
-    Format: (nx, ny, nz, depth)
-    Only pass to this attribute if u want to split normal and depth map.
-    Note: You could also directly pass `Texture` or `tensor` to it.
-    '''
-    
     noise_maps: Optional[LATENT] = attrib(default=None, kw_only=True)
     '''
     Noise of each vertex in each pixels in the current frame
@@ -339,9 +331,7 @@ class EngineData(HIDDEN):
     '''All correspondence maps for the current frame(s).'''
 
     def __attrs_post_init__(self):
-        from engine.static import Texture
         from common_utils.stable_render_utils import EnvPrompt
-        from engine.static.corrmap import IDMap
         
         if isinstance(self.env_prompts, str):
             self.env_prompts = [EnvPrompt(prompt=self.env_prompts),]   # type: ignore
@@ -358,131 +348,6 @@ class EngineData(HIDDEN):
                     raise ValueError(f'Invalid type of env_prompts: {type(prompt)}')
             self.env_prompts = prompts  # type: ignore
         
-        if isinstance(self.color_maps, Texture):
-            rgba_color_maps = self.color_maps.tensor(update=True, flip=True).to(dtype=torch.float32)    # (H, W, 4(or 3))
-            if rgba_color_maps.shape[-1] == 4:
-                self.color_maps = rgba_color_maps[..., :3].unsqueeze(dim=0) # remove alpha channel, # (1, H, W, 3)
-                if self.masks is None:  # only update masks when it is not set
-                    self.masks = 1.0 - rgba_color_maps[..., 3:].squeeze(dim=-1)  # shape = (H, W), invert the alpha channel
-                    self.masks.unsqueeze(dim=0)  # (1, H, W)
-            else:
-                self.color_maps = rgba_color_maps.unsqueeze(dim=0)
-                if self.masks is None:
-                    self.masks = torch.zeros(self.color_maps.shape[1:3], dtype=torch.float32).unsqueeze(dim=0)  # (1, H, W)
-        elif isinstance(self.color_maps, Tensor):
-            if self.color_maps.shape[-1] == 4:
-                self.color_maps = self.color_maps[..., :3].unsqueeze(0)
-                if self.masks is None:
-                    self.masks = 1.0 - self.color_maps[..., 3:].squeeze(dim=-1)
-                    self.masks.unsqueeze(dim=0)
-            else:
-                self.color_maps = self.color_maps.unsqueeze(0)
-                self.masks = torch.zeros(self.color_maps.shape[1:3], dtype=torch.float32).unsqueeze(dim=0)
-            if len(self.color_maps.shape) == 3:
-                self.color_maps = torch.stack([self.color_maps, ] * self.frame_count, dim=0)
-            if self.color_maps[0, 0, 0, 0] > 1.0:   # not yet normalized
-                self.color_maps = self.color_maps / 255.0
-                
-        if isinstance(self.masks, Tensor):
-            if self.masks.shape[-1] == 0:
-                self.masks = torch.zeros(self.color_maps.shape[1:3], dtype=torch.float32).unsqueeze(dim=0)  # (1, H, W)
-            elif len(self.masks.shape) == 2:   
-                self.masks = self.masks.unsqueeze(dim=0)
-            elif len(self.masks.shape) == 3 and self.masks.shape[-1] == 1:
-                self.masks = self.masks.squeeze(dim=-1).unsqueeze(dim=0) # (1, H, W)
-            
-        if isinstance(self.id_maps, (Texture, Tensor)):
-            self.id_maps = IDMap(tensor=self.id_maps, frame_indices=self.frame_indices, masks=self.masks)   # type: ignore
-        
-        if isinstance(self.pos_maps, Texture):
-            self.pos_maps = self.pos_maps.tensor(update=True, flip=True)    # already RGB32F
-        if isinstance(self.pos_maps, Tensor):
-            if len(self.pos_maps.shape) == 3:
-                self.pos_maps = torch.stack([self.pos_maps, ] * self.frame_count, dim=0)
-        
-        if isinstance(self._normal_and_depth_maps, Texture):
-            normal_and_depth_map = self._normal_and_depth_maps.tensor(update=True, flip=True)
-            if self.normal_maps is None:
-                self.normal_maps = normal_and_depth_map[..., :3].unsqueeze(0) # shape = (1, H, W, 3)
-            if self.depth_maps is None:
-                self.depth_maps = normal_and_depth_map[..., 3:]  # shape = (1, H, W)
-            self._normal_and_depth_maps = None
-            del normal_and_depth_map
-        elif isinstance(self._normal_and_depth_maps, Tensor):
-            if len(self._normal_and_depth_maps.shape) in (3, 4):
-                self.normal_maps = self._normal_and_depth_maps[..., :3] # batch will be added later
-                self.depth_maps = self._normal_and_depth_maps[..., 3:]
-            else:
-                raise ValueError(f'Invalid shape of normal_and_depth_maps: {self._normal_and_depth_maps.shape}')
-            self._normal_and_depth_maps = None
-        
-        if isinstance(self.normal_maps, Texture):
-            self.normal_maps = self.normal_maps.tensor(update=True, flip=True).to(dtype=torch.float32)
-        if isinstance(self.normal_maps, Tensor):
-            if len(self.normal_maps.shape) == 3:
-                self.normal_maps = self.normal_maps.unsqueeze(dim=0)    #(1, H, W, 3)
-            self.normal_maps = self.normal_maps.to(dtype=torch.float32)
-            
-        if isinstance(self.depth_maps, Texture):
-            self.depth_maps = self.depth_maps.tensor(update=True, flip=True).squeeze(dim=-1)
-        if isinstance(self.depth_maps, Tensor):
-            self.depth_maps = self.depth_maps.to(dtype=torch.float32)
-            if len(self.depth_maps.shape) == 2:
-                self.depth_maps = self.depth_maps.unsqueeze(dim=0)  #(1, H, W)
-                self.depth_maps = torch.stack([self.depth_maps, ] * 3, dim=-1)  # make it 3 channels to act as IMAGE
-            elif len(self.depth_maps.shape) == 3 and self.depth_maps.shape[-1] == 1:
-                self.depth_maps = self.depth_maps.squeeze(dim=-1).unsqueeze(dim=0)  # (1, H, W)
-                self.depth_maps = torch.stack([self.depth_maps, ] * 3, dim=-1)  # make it 3 channels to act as IMAGE
-            if self.depth_maps.shape[-1] == 0:
-                self.depth_maps = torch.zeros(self.color_maps.shape[1:3], dtype=torch.float32).unsqueeze(dim=0)  # (1, H, W)
-                self.depth_maps = torch.stack([self.depth_maps, ] * 3, dim=-1)  # make it 3 channels to act as IMAGE
-        
-        if isinstance(self.noise_maps, Texture):
-            # get noise tensor from texture
-            self.noise_maps = self.noise_maps.tensor(update=True, flip=True).unsqueeze(0).to(dtype=torch.float32)  # RGBA32F (1, H, W, 4)
-        
-        if isinstance(self.noise_maps, Tensor):
-            if self.noise_maps.shape[-1] == 4:  # not yet rearranged
-                if len(self.noise_maps.shape) == 3:
-                    self.noise_maps = torch.stack([self.noise_maps, ] * self.frame_count, dim=0) # type: ignore
-              
-                # reshape self.mask to have the same shape as noise
-                mask = self.masks.unsqueeze(-1).expand_as(self.noise_maps).to(device=self.noise_maps.device)
-                # fill empty areas with gaussian noise, i.e. the area with alpha=0(equiv. to mask=1)
-                noise = self.noise_maps * (1.0 - mask) + torch.randn_like(self.noise_maps) * mask
-                # merge 8*8 to 1*1
-                height, width = noise.shape[1], noise.shape[2]
-                noise = noise.view(-1, 8, 8, 4).mean(dim=(1, 2)).view(height//8, width//8, 4)
-                if len(noise.shape) == 3:
-                    noise = rearrange(noise, 'h w c ->c h w').contiguous().unsqueeze(0)  # chw
-                else:
-                    noise = rearrange(noise, 'b h w c ->b c h w').contiguous()
-            else:
-                noise = self.noise_maps
-            empty_latent = torch.zeros_like(noise)
-            self.noise_maps = LATENT(samples=empty_latent, noise=noise)
-            #TODO: carry out AdaIN for background noise?
-        
-        if isinstance(self.canny_maps, Texture):
-            self.canny_maps = self.canny_maps.tensor(update=True, flip=True).unsqueeze(0).to(dtype=torch.float32)
-        if isinstance(self.canny_maps, Tensor):
-            if len(self.canny_maps.shape) == 3:
-                self.canny_maps = self.canny_maps.unsqueeze(0)
-            self.canny_maps = self.canny_maps.to(dtype=torch.float32)
-        if self.canny_maps[0, 0, 0, 0] > 1.0:   # not yet normalized
-            self.canny_maps = self.canny_maps / 255.0
-                
-        if is_dev_mode() and is_verbose_mode():
-            ComfyUILogger.debug(f'EngineData is created with the following shapes:')
-            ComfyUILogger.debug('Color maps shape: ' + str(self.color_maps.shape))
-            ComfyUILogger.debug('ID maps shape: ' + str(self.id_maps.tensor.shape))
-            ComfyUILogger.debug('Position maps shape: ' + str(self.pos_maps.shape))
-            ComfyUILogger.debug('Normal maps shape: ' + str(self.normal_maps.shape))
-            ComfyUILogger.debug('Depth maps shape: ' + str(self.depth_maps.shape))
-            ComfyUILogger.debug('Noise maps shape: ' + str(self.noise_maps.samples.shape))
-            ComfyUILogger.debug('Canny maps shape: ' + str(self.canny_maps.shape))
-            ComfyUILogger.debug('Mask shape: ' + str(self.masks.shape))
-    
     @classmethod
     def GetHiddenValue(cls, context):
         return context.engine_data

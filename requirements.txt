@@ -1,8 +1,8 @@
 PyOpenGL
 PyOpenGL_accelerate
 PySide6; python_version > '3.9'
-PySide2; python_version <= '3.9'
 accelerate
+glm
 huggingface-hub
 tokenizers
 transformers

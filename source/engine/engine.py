@@ -96,9 +96,13 @@ class Engine:
                  disableComfyUI: bool = False,
                  diffuse_workflow: Union[Workflow, str, Path, None] = None,
                  verbose: bool=False,
+                 disable_cuda_gl_share: bool=False,
                  **kwargs):
         if verbose:
             os.environ['VERBOSE'] = '1'
+        if disable_cuda_gl_share:
+            os.environ['__SUPPORT_GL_CUDA_SHARE__'] = '0'
+        
         self._stage = EngineStage.INIT
         self._exit = False
         '''flag to exit the engine loop.'''

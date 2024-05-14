@@ -4,7 +4,7 @@ import torch
 import ctypes
 import OpenGL.GL as gl
 import numpy as np
-
+from einops import rearrange
 from torch import Tensor
 from functools import partial
 from typing import Union, Optional, Callable, TypeAlias, Any
@@ -12,6 +12,7 @@ from common_utils.cuda_utils import *
 from common_utils.debug_utils import EngineLogger
 from common_utils.stable_render_utils import Sprite, EnvPrompt
 from common_utils.data_struct.event import AutoSortTask
+from engine.static.corrmap import IDMap
 from .manager import Manager
 from .runtimeManager import RuntimeManager
 from ..static.shader import Shader
@@ -869,42 +870,70 @@ class RenderManager(Manager):
             self.data_to_be_added_to_engineData['frame_indices'] = []
         self.data_to_be_added_to_engineData['frame_indices'].append(self.engine.RuntimeManager.FrameCount)
         
+        color_data = self.colorFBOTex.tensor(update=True, flip=True).clone().unsqueeze(0)   # 1,h,w,4
+        mask_data = 1.0 - color_data[..., 3].squeeze(-1)  # 1,h,w
+        color_data = color_data[..., :3]  # 1,h,w,3
         if 'color_maps' not in self.data_to_be_added_to_engineData:
-            self.data_to_be_added_to_engineData['color_maps'] = self.colorFBOTex.tensor(update=True, flip=True).clone()
+            self.data_to_be_added_to_engineData['color_maps'] = color_data
         else:
-            self.data_to_be_added_to_engineData['color_maps'] = torch.cat([self.data_to_be_added_to_engineData['color_maps'], 
-                                                                            self.colorFBOTex.tensor(update=True, flip=True)], dim=0)
+            self.data_to_be_added_to_engineData['color_maps'] = torch.cat([self.data_to_be_added_to_engineData['color_maps'], color_data], dim=0)
+        if 'masks' not in self.data_to_be_added_to_engineData:
+            self.data_to_be_added_to_engineData['masks'] = mask_data
+        else:
+            self.data_to_be_added_to_engineData['masks'] = torch.cat([self.data_to_be_added_to_engineData['masks'], mask_data], dim=0)
+        del color_data  # mask data is not deleted here, since it will be used for noise in the following code
         
+        id_data = self.idFBOTex.tensor(update=True, flip=True).clone().unsqueeze(0)
         if 'id_maps' not in self.data_to_be_added_to_engineData:
-            self.data_to_be_added_to_engineData['id_maps'] = self.idFBOTex.tensor(update=True, flip=True).clone()
+            self.data_to_be_added_to_engineData['id_maps'] = id_data
         else:
-            self.data_to_be_added_to_engineData['id_maps'] = torch.cat([self.data_to_be_added_to_engineData['id_maps'], 
-                                                                            self.idFBOTex.tensor(update=True, flip=True)], dim=0)
-            
+            self.data_to_be_added_to_engineData['id_maps'] = torch.cat([self.data_to_be_added_to_engineData['id_maps'], id_data], dim=0)
+        del id_data
+        
+        pos_data = self.posFBOTex.tensor(update=True, flip=True).clone().unsqueeze(0)
         if 'pos_maps' not in self.data_to_be_added_to_engineData:
-            self.data_to_be_added_to_engineData['pos_maps'] = self.posFBOTex.tensor(update=True, flip=True).clone()
+            self.data_to_be_added_to_engineData['pos_maps'] = pos_data
         else:
-            self.data_to_be_added_to_engineData['pos_maps'] = torch.cat([self.data_to_be_added_to_engineData['pos_maps'], 
-                                                                            self.posFBOTex.tensor(update=True, flip=True)], dim=0)    
+            self.data_to_be_added_to_engineData['pos_maps'] = torch.cat([self.data_to_be_added_to_engineData['pos_maps'], pos_data], dim=0)    
+        del pos_data
         
-        if 'normal_and_depth_map' not in self.data_to_be_added_to_engineData:
-            self.data_to_be_added_to_engineData['normal_and_depth_map'] = self.normal_and_depth_FBOTex.tensor(update=True, flip=True).clone()
+        normal_and_depth_data = self.normal_and_depth_FBOTex.tensor(update=True, flip=True).clone().unsqueeze(0)
+        normal_data = normal_and_depth_data[..., :3]
+        depth_data = normal_and_depth_data[..., 3].unsqueeze(-1)  # (1,h,w,1)
+        depth_data = torch.cat([depth_data,] * 3, dim=-1)  # (1,h,w,3)
+        del normal_and_depth_data 
+        if 'normal_maps' not in self.data_to_be_added_to_engineData:
+            self.data_to_be_added_to_engineData['normal_maps'] = normal_data
         else:
-            self.data_to_be_added_to_engineData['normal_and_depth_map'] = torch.cat([self.data_to_be_added_to_engineData['normal_and_depth_map'], 
-                                                                                        self.normal_and_depth_FBOTex.tensor(update=True, flip=True)], dim=0)
-            
+            self.data_to_be_added_to_engineData['normal_maps'] = torch.cat([self.data_to_be_added_to_engineData['normal_maps'], normal_data], dim=0)
+        if 'depth_maps' not in self.data_to_be_added_to_engineData:
+            self.data_to_be_added_to_engineData['depth_maps'] = depth_data
+        else:
+            self.data_to_be_added_to_engineData['depth_maps'] = torch.cat([self.data_to_be_added_to_engineData['depth_maps'], depth_data], dim=0)
+        del normal_data, depth_data
+        
+        noise = self.noiseFBOTex.tensor(update=True, flip=True).clone().unsqueeze(0) # 1,h,w,4
+        mask = mask_data.unsqueeze(-1).expand_as(noise).to(device=noise.device) # 1,h,w,4
+        # fill empty areas with gaussian noise, i.e. the area with alpha=0(equiv. to mask=1)
+        noise = noise * (1.0 - mask) + torch.randn_like(noise) * mask
+        height, width = noise.shape[1], noise.shape[2]
+        # merge every 8*8 to 1*1 (mean)
+        # e.g. 1*512*512*4 -> 1*64*64*4 
+        noise = noise.view(-1, 8, 8, 4).mean(dim=(1, 2)).view(height//8, width//8, 4)   # h//8,w//8,4 
+        noise = rearrange(noise, 'h w c -> c h w').contiguous().unsqueeze(0)    # 1,4,h//8,w//8
         if 'noise_maps' not in self.data_to_be_added_to_engineData:
-            self.data_to_be_added_to_engineData['noise_maps'] = self.noiseFBOTex.tensor(update=True, flip=True).clone()
+            self.data_to_be_added_to_engineData['noise_maps'] = noise   # 1,4,h//8,w//8
         else:
-            self.data_to_be_added_to_engineData['noise_maps'] = torch.cat([self.data_to_be_added_to_engineData['noise_maps'], 
-                                                                            self.noiseFBOTex.tensor(update=True, flip=True)], dim=0)
+            self.data_to_be_added_to_engineData['noise_maps'] = torch.cat([self.data_to_be_added_to_engineData['noise_maps'], noise], dim=0)
+        del noise, mask, mask_data
         
+        canny_data = self.cannyFBOTex.tensor(update=True, flip=True).clone().unsqueeze(0)
         if 'canny_maps' not in self.data_to_be_added_to_engineData:
-            self.data_to_be_added_to_engineData['canny_maps'] = self.cannyFBOTex.tensor(update=True, flip=True).clone()
+            self.data_to_be_added_to_engineData['canny_maps'] = canny_data
         else:
-            self.data_to_be_added_to_engineData['canny_maps'] = torch.cat([self.data_to_be_added_to_engineData['canny_maps'], 
-                                                                            self.cannyFBOTex.tensor(update=True, flip=True)], dim=0)
-            
+            self.data_to_be_added_to_engineData['canny_maps'] = torch.cat([self.data_to_be_added_to_engineData['canny_maps'], canny_data], dim=0)
+        del canny_data 
+        
     def on_frame_run(self):
         self.BindFrameBuffer(self._gBuffer)
         
@@ -955,6 +984,16 @@ class RenderManager(Manager):
             self._save_frame_data()          
             if self.engine.Mode != EngineMode.BAKE or \
                 (self.engine.Mode == EngineMode.BAKE and self.engine.DiffusionManager.ShouldSubmitBake):   
+                if 'id_maps' in self.data_to_be_added_to_engineData:
+                    if not isinstance(self.data_to_be_added_to_engineData['id_maps'], IDMap):
+                        self.data_to_be_added_to_engineData['id_maps'] = IDMap(frame_indices=self.data_to_be_added_to_engineData['frame_indices'], 
+                                                                               tensor=self.data_to_be_added_to_engineData['id_maps'],
+                                                                               masks=self.data_to_be_added_to_engineData['masks'])
+                from comfyUI.types import LATENT
+                if 'noise_maps' in self.data_to_be_added_to_engineData:
+                    if not isinstance(self.data_to_be_added_to_engineData['noise_maps'], LATENT):
+                        self.data_to_be_added_to_engineData['noise_maps'] = LATENT(samples=torch.zeros_like(self.data_to_be_added_to_engineData['noise_maps']), 
+                                                                                   noise=self.data_to_be_added_to_engineData['noise_maps'])
                 engineData = EngineData(**self.data_to_be_added_to_engineData)
             
             if engineData is not None:

@@ -38,7 +38,7 @@ else:
     _MAX_ANISOTROPY = None
 
 def __SUPPORT_GL_CUDA_SHARE__():
-    return GetOrAddGlobalValue('__SUPPORT_GL_CUDA_SHARE__', False)
+    return GetOrAddGlobalValue('__SUPPORT_GL_CUDA_SHARE__', defaultValue=True)
 
 @attrs(eq=False, repr=False)
 class Texture(ResourcesObj):

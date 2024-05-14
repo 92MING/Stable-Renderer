@@ -52,4 +52,5 @@ if __name__ == '__main__':
                winSize=(512, 512),
                mapSavingInterval=4,
                disableComfyUI=True,
-               needOutputMaps=False,)
+               needOutputMaps=False,
+               disable_cuda_gl_share=True)

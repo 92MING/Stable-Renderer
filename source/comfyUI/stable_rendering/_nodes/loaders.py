@@ -99,6 +99,6 @@ class NoiseSequenceLoader(StableRenderingNode):
         t = torch.cat(tensors, dim=0)
         return LATENT(samples=torch.zeros_like(t), latents=t)
 
-    
+
     
 __all__ = ['ImageSequenceLoader', 'NoiseSequenceLoader']
