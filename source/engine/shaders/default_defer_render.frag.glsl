@@ -3,7 +3,7 @@
 #define BAKING_VISUAL_VAL 512  // just for visiualize the baking correspondmap, for better debug
 
 uniform sampler2D currentColor;   // vec4, rgba
-uniform usampler2D currentIDs;      // ivec4 (spriteID, material id, vertexID, 3D pixel index)
+uniform isampler2D currentIDs;      // ivec4 (spriteID, material id, vertexID, 3D pixel index)
 uniform sampler2D currentPos;     // vec3, world space position
 uniform sampler2D currentNormalDepth; // vec4, (vec3(view space normal), depth)
 uniform sampler2D currentNoises; // vec4, latent noise
@@ -22,7 +22,7 @@ void main() {
     FragColor = texture(currentColor, uv).rgba;
 
     if (is_baking == 1) {
-        uvec4 current_id = texture(currentIDs, uv);
+        ivec4 current_id = texture(currentIDs, uv);
         if (current_id.x + current_id.y + current_id.z + current_id.w > 0) {    // object exists
             if (current_id.z != NON_AI_OBJ_MAP_INDEX) {    // AI object
                 float ratio = 1.0 - clamp(current_id.w / float(BAKING_VISUAL_VAL * BAKING_VISUAL_VAL), 0.0, 1.0);

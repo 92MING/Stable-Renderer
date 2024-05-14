@@ -236,8 +236,8 @@ class RenderManager(Manager):
                                 t_wrap=TextureWrap.CLAMP_TO_EDGE,
                                 min_filter=TextureFilter.NEAREST,
                                 mag_filter=TextureFilter.NEAREST,
-                                internal_format=TextureInternalFormat.RGBA_32UI,  # (spriteID, material id, map_index, vertexID)
-                                data_type=TextureDataType.UNSIGNED_INT,
+                                internal_format=TextureInternalFormat.RGBA_32I,  # (spriteID, material id, map_index, vertexID)
+                                data_type=TextureDataType.INT,
                                 share_to_torch=True)
         '''texture for saving every pixels' vertex ID in each frame'''
         self.idFBOTex.load()
@@ -250,8 +250,8 @@ class RenderManager(Manager):
                                                 t_wrap=TextureWrap.CLAMP_TO_EDGE,
                                                 min_filter=TextureFilter.NEAREST,
                                                 mag_filter=TextureFilter.NEAREST,
-                                                internal_format=TextureInternalFormat.RGBA_32UI,  # (spriteID, material id, map_index, vertexID)
-                                                data_type=TextureDataType.UNSIGNED_INT,
+                                                internal_format=TextureInternalFormat.RGBA_32I,  # (spriteID, material id, map_index, vertexID)
+                                                data_type=TextureDataType.INT,
                                                 share_to_torch=False)
         '''texture for binding to shader, since the idFBOTex is used for saving the output from identical gbuffer, it can't be bound to shader directly.'''
         

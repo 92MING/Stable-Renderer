@@ -42,7 +42,7 @@ layout (location = 5) out vec3 outCanny; // canny edge detection, should be chan
 
 // FBO textures
 uniform sampler2D currentColor;	// 0
-uniform usampler2D currentIDs;	// 1
+uniform isampler2D currentIDs;	// 1
 uniform sampler2D currentPos;	// 2
 uniform sampler2D currentNormalDepth;	// 3
 uniform sampler2D currentNoises;	// 4
@@ -124,7 +124,7 @@ void main() {
 
 	// get id
 	int map_index;
-	uint real_vertex_id;
+	int real_vertex_id;
 	if (useTexcoordAsID == 0){
 		real_vertex_id = vertexID;
 	}
