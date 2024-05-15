@@ -115,7 +115,7 @@ class BaseModel(torch.nn.Module):
                 if extra.dtype != torch.int and extra.dtype != torch.long:
                     extra = extra.to(dtype)
             extra_conds[o] = extra
-
+        
         model_output = self.diffusion_model(xc, 
                                             t, 
                                             context=context, 

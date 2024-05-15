@@ -414,7 +414,7 @@ class AdvancedNodeBase(ABC):
         
     @classmethod
     def _InitRealComfyUINode(cls):
-        '''Return the real registration node class for ComfyUI'''
+        '''create the real registration node class for ComfyUI'''
         if cls._IsAbstract:
             raise TypeError(f'Abstract node {cls} cannot be registered. `_RealComfyUINode` should not be called on abstract nodes.')
         
@@ -513,6 +513,16 @@ class AdvancedNodeBase(ABC):
         cls._RealComfyUINodeCls = newcls
     
     def __init_subclass__(cls):
+        cls._cls_init()
+    
+    @staticmethod
+    def ReloadAllAdvanceClasses():
+        '''this method is for reloading all advanced node classes when `reload` is called on web UI.'''
+        for cls in AdvancedNodeBase._AllSubclasses():
+            cls._cls_init()
+    
+    @classmethod
+    def _cls_init(cls):
         cls._IsAbstract = False
         if cls.IsAbstract is not None:
             cls._IsAbstract = cls.IsAbstract
@@ -536,7 +546,7 @@ class AdvancedNodeBase(ABC):
         else:
             cls._HasServerModeCall = False
         if is_dev_mode() and is_verbose_mode():
-            ComfyUILogger.debug(f'Node {cls.__qualname__} IsAbstract={cls._IsAbstract}, HasServerModeCall={cls._HasServerModeCall}')
+            ComfyUILogger.debug(f'Creating Advanced Node: {cls.__qualname__} IsAbstract={cls._IsAbstract}, HasServerModeCall={cls._HasServerModeCall}')
         
         cls._InitBasicInfo()
         
@@ -559,7 +569,6 @@ class AdvancedNodeBase(ABC):
                 cls._HasValidateInputMethod = not is_empty_method(cls.ValidateInput)
             
             cls._InitTypesForComfy()
-            
             cls._InitRealComfyUINode()
     
     # region internal use

@@ -73,6 +73,8 @@ class DiffusionManager(Manager):
             self._diffuse_workflow = diffuse_workflow
         else:
             self._diffuse_workflow = None
+        if self._diffuse_workflow is not None and not self._diffuse_workflow.has_output_node:   # type: ignore
+            raise ValueError('The workflow should have at least one output node.')
     
     def release(self):
         # wait until all task finished

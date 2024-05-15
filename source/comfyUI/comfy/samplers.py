@@ -1,7 +1,7 @@
 import torch
 import collections
 import math
-
+import inspect
 from inspect import signature
 from abc import ABC, abstractmethod
 from deprecated import deprecated
@@ -282,7 +282,7 @@ def sampling_function(model: model_base.BaseModel,
         uncond_ = None
     else:
         uncond_ = uncond
-
+    
     cond_pred, uncond_pred = calc_cond_uncond_batch(model, 
                                                     cond, 
                                                     uncond_, 
@@ -657,13 +657,15 @@ def _call_1_arg_callback(callback, total_steps, timesteps, sigmas: torch.Tensor,
     from comfyUI.types import SamplingCallbackContext
     if isinstance(sigmas, torch.Tensor):
         sigmas = sigmas.squeeze().tolist()  # type: ignore
-    context = SamplingCallbackContext(step_index=dict_data_from_upper.pop("i"), 
-                                      denoised=dict_data_from_upper.pop("denoised"), 
-                                      noise=dict_data_from_upper.pop("x"), 
+    context = SamplingCallbackContext(step_index=dict_data_from_upper["i"], 
+                                      denoised=dict_data_from_upper["denoised"], 
+                                      noise=dict_data_from_upper["x"], 
                                       total_steps=total_steps,
                                       timesteps=timesteps,
                                       sigmas=sigmas)    # type: ignore
     for key, val in dict_data_from_upper.items():
+        if key in dir(context):
+            continue
         setattr(context, key, val)
     return callback(context)
 
@@ -674,7 +676,7 @@ def _call_4_arg_callback(callback, total_steps, dict_data_from_upper: dict):
 class KSAMPLER_METHOD(Sampler):
     '''wrapper for sampling methods'''
     def __init__(self, 
-                 sampler_function: Callable, 
+                 sampler_function: Callable,
                  extra_options={}, 
                  inpaint_options={}):
         self.sampler_function = sampler_function
@@ -721,14 +723,15 @@ class KSAMPLER_METHOD(Sampler):
                 else:
                     assert False, f"Invalid callback function signature: {callback.__name__}"
 
-        extra_options = {**self.extra_options, **kwargs}
+        extra_options = extra_args.copy()
+        extra_options.update(self.extra_options)
+        extra_options.update(kwargs)
         samples = self.sampler_function(model_k, 
                                         noise, 
                                         sigmas, 
-                                        extra_args=extra_args, 
+                                        extra_args=extra_options, 
                                         callbacks=k_callbacks, 
-                                        disable=disable_pbar,
-                                        **extra_options)
+                                        disable=disable_pbar)
         return samples
 
 @deprecated # `KSAMPLER` is the old name of `KSAMPLER_METHOD`, now deprecated.

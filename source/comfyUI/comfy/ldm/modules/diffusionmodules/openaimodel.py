@@ -844,7 +844,7 @@ class UNetModel(nn.Module):
                 context=None, 
                 y=None, 
                 control=None, 
-                transformer_options={}, 
+                transformer_options={},
                 **kwargs):
         """
         Apply the model to an input batch.
@@ -854,9 +854,6 @@ class UNetModel(nn.Module):
             - timesteps: a 1-D batch of timesteps.
             - context: conditioning plugged in via crossattn
             - y: an [N] Tensor of labels, if class-conditional.
-            
-            - extra_args: Any extra arguments to pass to layers' `forward` method. 
-                          This is only available when your layer accepts `**extra_args`.
         Return: 
             an [N x C x ...] Tensor of outputs.
         """
@@ -864,11 +861,10 @@ class UNetModel(nn.Module):
         transformer_options["transformer_index"] = 0
         transformer_patches = transformer_options.get("patches", {})
 
-        num_video_frames = kwargs.get("num_video_frames", self.default_num_video_frames)
-        image_only_indicator = kwargs.get("image_only_indicator", None)
-        time_context = kwargs.get("time_context", None)
-        extra_args = kwargs.get("extra_args", {})
-
+        num_video_frames = kwargs.pop("num_video_frames", self.default_num_video_frames)
+        image_only_indicator = kwargs.pop("image_only_indicator", None)
+        time_context = kwargs.pop("time_context", None)
+        
         assert (y is not None) == (
             self.num_classes is not None
         ), "must specify y if and only if the model is class-conditional"
@@ -891,7 +887,7 @@ class UNetModel(nn.Module):
                                        time_context=time_context, 
                                        num_video_frames=num_video_frames, 
                                        image_only_indicator=image_only_indicator,
-                                       **extra_args)
+                                       **kwargs)
             h = apply_control(h, control, 'input')
             if "input_block_patch" in transformer_patches:
                 patch = transformer_patches["input_block_patch"]
@@ -914,7 +910,7 @@ class UNetModel(nn.Module):
                                        time_context=time_context, 
                                        num_video_frames=num_video_frames, 
                                        image_only_indicator=image_only_indicator,
-                                        **extra_args)
+                                        **kwargs)
         h = apply_control(h, control, 'middle')
 
 
@@ -942,7 +938,7 @@ class UNetModel(nn.Module):
                                        time_context=time_context,
                                        num_video_frames=num_video_frames, 
                                        image_only_indicator=image_only_indicator,
-                                       **extra_args)
+                                       **kwargs)
         h = h.type(x.dtype)
         if self.predict_codebook_ids:
             return self.id_predictor(h)

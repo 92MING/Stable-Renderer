@@ -91,13 +91,13 @@ class SceneTextEncode(StableRenderingNode):
         sprite_id = sprite.spriteID
         if len(idmap) >1:
             if is_dev_mode():
-                ComfyUILogger.warn("The idmap has more than 1 element, which is not expected.")
+                ComfyUILogger.warning("The idmap has more than 1 element, which is not expected.")
             idmap_tensor = idmap.tensor[0] if len(idmap.tensor.shape)==4 else idmap.tensor
         else:
             idmap_tensor = idmap.tensor
-        mask = torch.zeros(1, *idmap_tensor.shape[-3:-1], dtype=torch.float32) # 0 means exclude area
+        mask = torch.zeros(*idmap_tensor.shape[-3:-1], dtype=torch.float32) # 0 means exclude area
         mask[idmap_tensor[..., 0] == sprite_id] = 1 # 1 means include area
-        return mask
+        return mask.unsqueeze(0)
     
     def __call__(self, 
                  clip: 'CLIP',

@@ -649,12 +649,7 @@ def _DynamicLiteral(*args: Union[str, int, float, bool]):
         literal_args=tuple(args[0])
     else:
         literal_args = tuple(args)
-    for option in literal_args:
-        if not isinstance(option, (str, int, float, bool)):
-            raise TypeError(f'Unexpected type: {option}. It should be one of str, int, float, bool.')
-    t = Literal[""]
-    t.__args__ = literal_args  # type: ignore
-    return t    # type: ignore
+    return Literal[literal_args]    # type: ignore
 globals()['DynamicLiteral'] = GetableFunc(_DynamicLiteral)    # trick for faking IDE to believe DynamicLiteral is Literal
 
 

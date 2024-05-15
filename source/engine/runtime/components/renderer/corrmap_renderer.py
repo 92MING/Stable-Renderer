@@ -55,6 +55,7 @@ class CorrMapRenderer(Renderer):
                  use_texcoord_id: bool = _DEFAULT_USE_TEXCOORD_ID,   # type: ignore
                  spriteID: Optional[int] = None,
                  defer_render_task: Optional[Callable[..., Any]] = None,
+                 auto_noise_map_if_not_exist: bool = True
                  ):
         '''
         Args:
@@ -68,6 +69,7 @@ class CorrMapRenderer(Renderer):
                                 Default to be true for sphere mesh mapper.
             - spriteID: force the spriteID in shader to be a specific value. It can be None if it is offered in the `corrmap`.
             - defer_render_task: the task submitted to RenderManager for defer rendering. It should be a no-arg callable object.
+            - auto_noise_map_if_not_exist: create noise maps for those materials that do not have noise maps.
         '''
         super().__init__(gameObj=gameObj, enable=enable, materials=materials)
         
@@ -89,6 +91,7 @@ class CorrMapRenderer(Renderer):
             self.use_texcoord_id = _DEFAULT_USE_TEXCOORD_ID(self.mesh)
         self.force_spriteID = spriteID
         self.defer_render_task = defer_render_task
+        self.auto_noise_map_if_not_exist = auto_noise_map_if_not_exist
   
     @property
     def spriteID(self):
@@ -108,6 +111,8 @@ class CorrMapRenderer(Renderer):
                 break
             if not mat.hasDefaultTexture(DefaultTextureType.CorrespondMap):
                 mat.addDefaultTexture(self.corrmaps[i], DefaultTextureType.CorrespondMap)
+            if not mat.hasDefaultTexture(DefaultTextureType.NoiseTex) and self.auto_noise_map_if_not_exist:
+                mat.addDefaultTexture(Texture.CreateNoiseTex(), DefaultTextureType.NoiseTex)
         
     def _drawAvailable(self):
         return (self.spriteID is not None and \

@@ -70,7 +70,7 @@ def _mult_values(values: ti.types.ndarray(),  # original values
 
 @ti.func
 def _cell_values_overlap(id_flatten_maps: ti.types.ndarray(),                            # (b, h*w, 4), pixel space
-                         values: ti.types.ndarray(),                             # e.g. (b, 4096, 320) for post-atten, (b, 4096, 1) for latent
+                         origin_values: ti.types.ndarray(),                             # e.g. (b, 4096, 320) for post-atten, (b, 4096, 1) for latent
                          new_values: ti.types.ndarray(),                        # for containing the summed up values, same shape as values
                          index_ivec2: ti.math.ivec2,    # target cell's pos ((b, i) ,cell space)
                          cell_contains_pixel: int,   # how many pixels in a cell
@@ -82,14 +82,14 @@ def _cell_values_overlap(id_flatten_maps: ti.types.ndarray(),                   
     # final latent value = sigma(similarity * latent_value) / sigma(similarity)
     total_sim = 1.0
     
-    _sum_up_values(values, 
+    _sum_up_values(origin_values, 
                    new_values, 
-                   values.shape[-1],
+                   origin_values.shape[-1],
                    index_ivec2, 
                    index_ivec2, 
                    1.0) 
     
-    for b, i in ti.ndrange(values.shape[0], values.shape[1]):
+    for b, i in ti.ndrange(origin_values.shape[0], origin_values.shape[1]):
         if b==index_ivec2[0] and i == index_ivec2[1]:
             continue    # skip the target cell
         
@@ -99,18 +99,18 @@ def _cell_values_overlap(id_flatten_maps: ti.types.ndarray(),                   
                               cell_contains_pixel,
                               contributions)
         total_sim += sim
-        _sum_up_values(values, 
+        _sum_up_values(origin_values, 
                        new_values, 
-                       values.shape[-1],
+                       origin_values.shape[-1],
                        ti.math.ivec2([b, i]), 
                        index_ivec2, 
                        sim)
     
-    _mult_values(new_values, index_ivec2, values.shape[-1], 1.0 / total_sim)
+    _mult_values(new_values, index_ivec2, origin_values.shape[-1], 1.0 / total_sim)
 
 @ti.kernel
 def cells_value_overlap(id_flatten_maps: ti.types.ndarray(),    # (b, h*w, 4), pixel space
-                        values: ti.types.ndarray(),             # e.g. (b, 4096, 320) for post-atten, (b, 4096, 1) for latent
+                        origin_values: ti.types.ndarray(),             # e.g. (b, 4096, 320) for post-atten, (b, 4096, 1) for latent
                         new_values: ti.types.ndarray(),         # placeholder for the new values
                         contributions: ti.types.ndarray(),       # (b, h*w), e.g. 1/64, pixel space
                         ):
@@ -125,10 +125,10 @@ def cells_value_overlap(id_flatten_maps: ti.types.ndarray(),    # (b, h*w, 4), p
         - contributions: (b, h*w), e.g. 1/64, pixel space. This defines each pixels' contribution to its cell,
                           so as to calculate the similarity between cells.
     '''
-    cell_contains_pixel = id_flatten_maps.shape[1] // values.shape[1]
-    for b, i in ti.ndrange(values.shape[0], values.shape[1]):
+    cell_contains_pixel = id_flatten_maps.shape[1] // origin_values.shape[1]
+    for b, i in ti.ndrange(origin_values.shape[0], origin_values.shape[1]):
         _cell_values_overlap(id_flatten_maps, 
-                             values, 
+                             origin_values, 
                              new_values, 
                              ti.math.ivec2([b, i]), 
                              cell_contains_pixel, 

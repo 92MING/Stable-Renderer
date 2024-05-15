@@ -3,6 +3,8 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Protocol, Any
 from .corr_utils import cells_value_overlap
 from attr import attrs, attrib
+from common_utils.global_utils import is_dev_mode
+from common_utils.debug_utils import EngineLogger
 
 if TYPE_CHECKING:
     from comfyUI.types import SamplingCallbackContext, IMAGE, EngineData
@@ -104,10 +106,13 @@ class DefaultCorresponder:
                           layer: int)->torch.Tensor:
         '''the general correspond function that uses the equal contribution method, 
         i.e. assume each pixel contributes equally to the cell it belongs to.'''
+        return origin_values
         if layer not in self.layer_range:
             return origin_values
+        
+        EngineLogger.info(f'doing post attn inject on layer {layer} with ratio {self.post_attn_inject_ratio}')
             
-        flatten_id_maps = engine_data.id_maps.tensor
+        flatten_id_maps = engine_data.id_maps.tensor.clone()
         if flatten_id_maps.dim() == 4:
             flatten_id_maps = flatten_id_maps.view(engine_data.frame_count, -1, 4).contiguous()
         new_values = torch.zeros_like(origin_values)
@@ -115,7 +120,7 @@ class DefaultCorresponder:
         contributions = torch.ones_like(flatten_id_maps[..., 0]).float() / pixels_per_cell
         
         cells_value_overlap(flatten_id_maps, origin_values, new_values, contributions)
-        new_values = self.post_attn_inject_ratio * origin_values + (1 - self.post_attn_inject_ratio) * new_values
+        new_values = self.post_attn_inject_ratio * new_values + (1 - self.post_attn_inject_ratio) * origin_values
         return new_values
     
     def finished(self, engine_data: "EngineData", images: "IMAGE"):
@@ -125,7 +130,7 @@ class DefaultCorresponder:
         '''
         if not self.update_corrmap or images is None or engine_data.id_maps is None:
             return
-        
+        exit()
         id_maps = engine_data.id_maps
         final_colors = images
         masks = engine_data.masks
@@ -136,9 +141,9 @@ class DefaultCorresponder:
                 if masks is not None:
                     this_masks = masks.clone()
                     if spriteID is not None:
-                        this_masks[id_maps.tensor[0, ...] != spriteID] = 1 # 1 means should not include
+                        this_masks[:, id_maps.tensor[0, ...] != spriteID] = 1 # 1 means should not include
                     if materialID is not None:
-                        this_masks[id_maps.tensor[0, ...] != materialID] = 1
+                        this_masks[:, id_maps.tensor[0, ...] != materialID] = 1
                 else:
                     this_masks = None
                 

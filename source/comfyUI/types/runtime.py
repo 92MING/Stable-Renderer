@@ -580,11 +580,6 @@ class SamplingCallbackContext:
         '''return the ratio of current progress regarding to the initial timestep=1000, i.e. self.timestep/1000.'''
         return self.timestep / 1000
     
-    def __getitem__(self, item):
-        return getattr(self, item)
-    
-    def __setitem__(self, item, value):
-        setattr(self, item, value)
 
 SamplerCallback: TypeAlias = Union[
     Callable[[], Any],  # no arguments

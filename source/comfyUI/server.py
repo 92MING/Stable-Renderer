@@ -33,6 +33,7 @@ from comfy.cli_args import args
 from app.user_manager import UserManager
 
 from comfyUI.types._utils import get_comfy_type_definition, get_unique_node_types
+
 if TYPE_CHECKING:
     from execution import PromptQueue
     from comfyUI.types import ComfyUINode
@@ -49,6 +50,8 @@ def reload_nodes():
     SetGlobalValue("__COMFYUI_NODE_DISPLAY_NAME_MAPPINGS__", None)
     SetGlobalValue("__COMFYUI_EXTENSION_WEB_DIRS__", None)
     SetGlobalValue('__COMFY_GET_INPUT_TYPE_NAME_CACHE__', {})
+    from comfyUI.types.node_base import AdvancedNodeBase
+    AdvancedNodeBase.ReloadAllAdvanceClasses()
     nodes_module_spec.loader.exec_module(nodes)  # type: ignore
     nodes.init_custom_nodes(True)
     ComfyUILogger.debug('Nodes reloaded.')

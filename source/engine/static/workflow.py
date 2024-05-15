@@ -348,9 +348,9 @@ class WorkflowNodeInfo(Dict[str, Any]):
                 # e.g a useless node but forgot to delete it. So we just skip it.
                 if 'type' in info:
                     node_type = info['type']
-                    EngineLogger.warning(f'Node {info["id"]}({node_type}) is not a valid node, reason: {str(e)}. Skipped.')
+                    EngineLogger.warning(f'Node {info["id"]}({node_type}) is not a valid node, reason: {str(e)}')
                 else:
-                    EngineLogger.warning(f'Node {info["id"]} is not a valid node, reason: {str(e)}. Skipped.')
+                    EngineLogger.warning(f'Node {info["id"]} is not a valid node, reason: {str(e)}')
                 try:
                     del datas[info['id']]
                 except KeyError:
@@ -413,6 +413,20 @@ class Workflow(Dict[str, Any]):
     original_data: dict
     '''the original dict data of the workflow.'''
 
+    @property
+    def has_output_node(self)->bool:
+        '''
+        Check if the workflow has an output node.
+        Workflows with no output node is not valid for execution. 
+        
+        Usually if your workflow doesn't have an output node, it's probably because the workflow loading is wrong.
+        Check your workflow file and make sure it's correct.
+        '''
+        for node in self.nodes.values():
+            if hasattr(node.cls_type, 'OUTPUT_NODE') and node.cls_type.OUTPUT_NODE:
+                return True
+        return False
+    
     @property
     def name(self)->Optional[str]:
         '''Get the name of the workflow. This is only for printing on log to debug'''

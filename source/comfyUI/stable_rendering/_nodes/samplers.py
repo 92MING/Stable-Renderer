@@ -1,9 +1,12 @@
 from typing import Optional
 from functools import partial
+
 from comfyUI.types import *
 from comfyUI.nodes import custom_ksampler
 from common_utils.type_utils import is_empty_method
 from common_utils.stable_render_utils import Corresponder, DefaultCorresponder as _DefaultCorresponder
+from common_utils.global_utils import is_dev_mode, is_engine_looping
+from common_utils.debug_utils import ComfyUILogger
 from engine.static import UpdateMode
 
 _default_sampler = COMFY_SAMPLERS.__args__[0]   # type: ignore
@@ -48,7 +51,14 @@ class DefaultCorresponder(StableRenderingNode):
                                             post_attn_inject_ratio=post_attn_inject_ratio)
         
         if hasattr(corresponder, "finished") and not is_empty_method(corresponder.finished):
-            vae_callback = partial(corresponder.finished, engine_data=engine_data)
+            if is_dev_mode() and is_engine_looping():
+                def vae_callback(images: "IMAGE"):
+                    UIImage(images, force_saving=True, animated=True)  
+                    # for debug, since the output is not saved in the engine loop
+                    # this will save the gifs to the output folder
+                    corresponder.finished(engine_data, images)
+            else:
+                vae_callback = partial(corresponder.finished, engine_data)
         else:
             vae_callback = lambda *args, **kwargs: None # do nothing
         return corresponder, vae_callback   # type: ignore
@@ -64,6 +74,7 @@ class CorrespondSampler(StableRenderingNode):
                  negative: "CONDITIONING", 
                  corresponder: Corresponder,
                  engine_data: EngineData,   # this is hidden value, will hide on UI
+                 latent: Optional[LATENT] = None, # if none, data will comes from `engine_data.noise_maps`
                  steps: INT(1, 10000)=20, # type: ignore
                  cfg: FLOAT(0.0, 100.0, 0.01, round=0.01)=8.0, # type: ignore
                  sampler_name: COMFY_SAMPLERS=_default_sampler,
@@ -78,6 +89,7 @@ class CorrespondSampler(StableRenderingNode):
             positive: The positive conditioning.
             negative: The negative conditioning. This is optional.
             corresponder: The corresponder for stable-rendering
+            latent: The latent image. When None, it will be taken from `engine_data.noise_maps`.
             steps: The number of steps. Defaults to 20.
             cfg: The cfg value. Defaults to 8.0.
             sampler_name: The sampler name. Default = euler.
@@ -95,8 +107,13 @@ class CorrespondSampler(StableRenderingNode):
                 corresponder.step_finished(engine_data, context)
             callback = [partial(on_1_step_finished, engine_data),]
         else:
-            callback = None
-
+            callback = []
+        if is_dev_mode() and is_engine_looping():
+            def print_progress(context: SamplingCallbackContext):
+                ComfyUILogger.info(f"Step {context.step_index+1}/{context.total_steps} finished.")
+            callback.append(print_progress) # type: ignore
+            
+        latent = latent if latent is not None else engine_data.noise_maps
         return custom_ksampler(model=model,
                                seed=None,
                                steps=steps,
@@ -105,9 +122,10 @@ class CorrespondSampler(StableRenderingNode):
                                scheduler=scheduler,
                                positive=positive,
                                negative=negative,
-                               latent=engine_data.noise_maps,   # type: ignore
+                               latent=latent,   # type: ignore
                                denoise=denoise,
-                               noise_option='disable',
+                               noise_option='incoming',
+                               #noise_option='random',
                                engine_data=engine_data, # kwargs for attention layers to use
                                corresponder=corresponder,   # kwargs for attention layers to use
                                callbacks=callback)[0]   # type: ignore

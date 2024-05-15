@@ -1417,7 +1417,7 @@ def common_ksampler(model: "ModelPatcher",
         else:
             batch_inds: Optional[List[int]] = latent["batch_index"] if "batch_index" in latent else None
             noise = comfy.sample.prepare_noise(latent_image, seed, batch_inds)
-
+    
     noise_mask = None
     if "noise_mask" in latent:
         noise_mask = latent["noise_mask"]
@@ -1470,7 +1470,7 @@ def custom_ksampler(model: "ModelPatcher",
                 noise = comfy.sample.prepare_noise(latent_image, seed, batch_inds)
         case _:
             raise ValueError(f"Invalid noise option: {noise_option}")
-   
+
     noise_mask = None
     if "noise_mask" in latent:
         noise_mask = latent["noise_mask"]

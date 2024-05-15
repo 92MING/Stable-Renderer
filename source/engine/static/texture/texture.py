@@ -507,7 +507,6 @@ class Texture(ResourcesObj):
     def CreateNoiseTex(name:Optional[str]=None,
                        height: int = 512,
                        width: int = 512,
-                       sigma: float = 1.0,
                        channel_count = 4,   # same as latent size
                        data_size: Literal[16, 32] = 32,
                        min_filter:TextureFilter=TextureFilter.NEAREST,
@@ -540,8 +539,8 @@ class Texture(ResourcesObj):
             raise Exception(f'Invalid channel count: {channel_count}. It should be in [1, 4].')
         
         assert data_size in (16, 32), 'Invalid data size: {}'.format(data_size)
-        dtype = {16: np.float16, 32: np.float32}[data_size]
-        data = np.random.normal(0, sigma, (height, width, channel_count)).astype(dtype)
+        dtype = {16: torch.float16, 32: torch.float32}[data_size]
+        data = torch.randn((height, width, channel_count), dtype=dtype).numpy()
         
         if not internal_format:
             if channel_count == 1:

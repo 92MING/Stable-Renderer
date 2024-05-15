@@ -12,6 +12,7 @@ from common_utils.cuda_utils import *
 from common_utils.debug_utils import EngineLogger
 from common_utils.stable_render_utils import Sprite, EnvPrompt
 from common_utils.data_struct.event import AutoSortTask
+from common_utils.math_utils import adaptive_instance_normalization
 from engine.static.corrmap import IDMap
 from .manager import Manager
 from .runtimeManager import RuntimeManager
@@ -920,9 +921,12 @@ class RenderManager(Manager):
         # merge every 8*8 to 1*1 (mean)
         # e.g. 1*512*512*4 -> 1*64*64*4 
         noise = noise.view(-1, 8, 8, 4).mean(dim=(1, 2)).view(height//8, width//8, 4)   # h//8,w//8,4 
-        noise = rearrange(noise, 'h w c -> c h w').contiguous().unsqueeze(0)    # 1,4,h//8,w//8
+        noise = adaptive_instance_normalization(noise.unsqueeze(0), 
+                                                self.noiseFBOTex.tensor(flip=True, update=False).unsqueeze(0),
+                                                mode='NHWC')    # here the shape changed to 1,4,h//8,w//8
+        noise = noise.contiguous()
         if 'noise_maps' not in self.data_to_be_added_to_engineData:
-            self.data_to_be_added_to_engineData['noise_maps'] = noise   # 1,4,h//8,w//8
+            self.data_to_be_added_to_engineData['noise_maps'] = noise
         else:
             self.data_to_be_added_to_engineData['noise_maps'] = torch.cat([self.data_to_be_added_to_engineData['noise_maps'], noise], dim=0)
         del noise, mask, mask_data

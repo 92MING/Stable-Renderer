@@ -126,11 +126,11 @@ class BrownianTreeNoiseSampler:
 
 
 @torch.no_grad()
-def sample_euler(model, x, sigmas, extra_args=None, callbacks=[], disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
+def sample_euler(model, x, sigmas, extra_args=None, callbacks=[], disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.0):
     """Implements Algorithm 2 (Euler steps) from Karras et al. (2022)."""
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
-    
+  
     for i in trange(len(sigmas) - 1, disable=disable):
         gamma = min(s_churn / (len(sigmas) - 1), 2 ** 0.5 - 1) if s_tmin <= sigmas[i] <= s_tmax else 0.
         sigma_hat = sigmas[i] * (gamma + 1)
@@ -159,7 +159,7 @@ def sample_euler_ancestral(model, x, sigmas, extra_args=None, callbacks=[], disa
         sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
         if callbacks:
             for callback in callbacks:
-                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+                callback(data = {'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         d = to_d(x, sigmas[i], denoised)
         # Euler method
         dt = sigma_down - sigmas[i]
@@ -184,7 +184,7 @@ def sample_heun(model, x, sigmas, extra_args=None, callbacks=[], disable=None, s
         d = to_d(x, sigma_hat, denoised)
         if callbacks:
             for callback in callbacks:
-                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
+                callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         dt = sigmas[i + 1] - sigma_hat
         if sigmas[i + 1] == 0:
             # Euler method
@@ -410,7 +410,8 @@ class DPMSolver(nn.Module):
             eps, eps_cache = self.eps(eps_cache, 'eps', x, t)
             denoised = x - self.sigma(t) * eps
             for info_callback in self.info_callbacks:
-                info_callback({'x': x, 'i': i, 't': ts[i], 't_up': t, 'denoised': denoised})
+                data = {'x': x, 'i': i, 't': ts[i], 't_up': t, 'denoised': denoised}
+                info_callback(data)
 
             if orders[i] == 1:
                 x, eps_cache = self.dpm_solver_1_step(x, t, t_next_, eps_cache=eps_cache)

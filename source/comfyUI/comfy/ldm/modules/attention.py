@@ -14,7 +14,7 @@ if model_management.xformers_enabled():
     import xformers
     import xformers.ops
 from common_utils.debug_utils import ComfyUILogger
-from common_utils.type_utils import check_func_has_kwarg, is_empty_method
+from common_utils.type_utils import is_empty_method
 from common_utils.stable_render_utils import Corresponder
 from comfy.cli_args import args
 import comfy.ops
@@ -62,7 +62,7 @@ class GEGLU(nn.Module):
         super().__init__()
         self.proj = operations.Linear(dim_in, dim_out * 2, dtype=dtype, device=device)
 
-    def forward(self, x, **kwargs):
+    def forward(self, x):
         x, gate = self.proj(x).chunk(2, dim=-1)
         return x * F.gelu(gate)
 
@@ -80,10 +80,10 @@ class FeedForward(nn.Module):
         self.net = nn.Sequential(
             project_in,
             nn.Dropout(dropout),
-            operations.Linear(inner_dim, dim_out, dtype=dtype, device=device)
+            operations.Linear(inner_dim, dim_out, dtype=dtype, device=device)   # type: ignore
         )
 
-    def forward(self, x, **kwargs):
+    def forward(self, x):
         return self.net(x)
 
 def Normalize(in_channels, dtype=None, device=None):
@@ -113,17 +113,17 @@ def attention_basic(q, k, v, heads, mask=None):
     del q, k
 
     if exists(mask):
-        if mask.dtype == torch.bool:
+        if mask.dtype == torch.bool:    # type: ignore
             mask = rearrange(mask, 'b ... -> b (...)') #TODO: check if this bool part matches pytorch attention
             max_neg_value = -torch.finfo(sim.dtype).max
             mask = repeat(mask, 'b j -> (b h) () j', h=h)
-            sim.masked_fill_(~mask, max_neg_value)
+            sim.masked_fill_(~mask, max_neg_value)  # type: ignore
         else:
-            if len(mask.shape) == 2:
+            if len(mask.shape) == 2:    # type: ignore
                 bs = 1
             else:
-                bs = mask.shape[0]
-            mask = mask.reshape(bs, -1, mask.shape[-2], mask.shape[-1]).expand(b, heads, -1, -1).reshape(-1, mask.shape[-2], mask.shape[-1])
+                bs = mask.shape[0]  # type: ignore
+            mask = mask.reshape(bs, -1, mask.shape[-2], mask.shape[-1]).expand(b, heads, -1, -1).reshape(-1, mask.shape[-2], mask.shape[-1])    # type: ignore
             sim.add_(mask)
 
     # attention, what we cannot get enough of
@@ -159,7 +159,7 @@ def attention_sub_quad(query, key, value, heads, mask=None):
     _, _, k_tokens = key.shape
     qk_matmul_size_bytes = batch_x_heads * bytes_per_token * q_tokens * k_tokens
 
-    mem_free_total, mem_free_torch = model_management.get_free_memory(query.device, True)
+    mem_free_total, mem_free_torch = model_management.get_free_memory(query.device, True)   # type: ignore
 
     kv_chunk_size_min = None
     kv_chunk_size = None
@@ -236,9 +236,9 @@ def attention_split(q, k, v, heads, mask=None):
         #      f"torch free:{mem_free_torch/gb:0.1f} total:{mem_free_total/gb:0.1f} steps:{steps}")
 
     if steps > 64:
-        max_res = math.floor(math.sqrt(math.sqrt(mem_free_total / 2.5)) / 8) * 64
+        max_res = math.floor(math.sqrt(math.sqrt(mem_free_total / 2.5)) / 8) * 64   # type: ignore
         raise RuntimeError(f'Not enough memory, use lower resolution (max approx. {max_res}x{max_res}). '
-                            f'Need: {mem_required/64/gb:0.1f}GB free, Have:{mem_free_total/gb:0.1f}GB free')
+                            f'Need: {mem_required/64/gb:0.1f}GB free, Have:{mem_free_total/gb:0.1f}GB free')    # type: ignore
 
     if mask is not None:
         if len(mask.shape) == 2:
@@ -256,7 +256,7 @@ def attention_split(q, k, v, heads, mask=None):
             for i in range(0, q.shape[1], slice_size):
                 end = i + slice_size
                 if _ATTN_PRECISION =="fp32":
-                    with torch.autocast(enabled=False, device_type = 'cuda'):
+                    with torch.autocast(enabled=False, device_type = 'cuda'):   # type: ignore
                         s1 = einsum('b i d, b j d -> b i j', q[:, i:end].float(), k.float()) * scale
                 else:
                     s1 = einsum('b i d, b j d -> b i j', q[:, i:end], k) * scale
@@ -274,7 +274,7 @@ def attention_split(q, k, v, heads, mask=None):
                 r1[:, i:end] = einsum('b i j, b j d -> b i d', s2, v)
                 del s2
             break
-        except model_management.OOM_EXCEPTION as e:
+        except model_management.OOM_EXCEPTION as e: # type: ignore
             if first_op_done == False:
                 model_management.soft_empty_cache(True)
                 if cleared_cache == False:
@@ -283,10 +283,10 @@ def attention_split(q, k, v, heads, mask=None):
                     continue
                 steps *= 2
                 if steps > 64:
-                    raise e
+                    raise e # type: ignore
                 ComfyUILogger.warn("out of memory error, increasing steps and trying again", steps)
             else:
-                raise e
+                raise e # type: ignore
 
     del q, k, v
 
@@ -402,7 +402,7 @@ class CrossAttention(nn.Module):
 
         self.to_out = nn.Sequential(operations.Linear(inner_dim, query_dim, dtype=dtype, device=device), nn.Dropout(dropout))
 
-    def forward(self, x, context=None, value=None, mask=None, **kwargs):
+    def forward(self, x, context=None, value=None, mask=None):
         q = self.to_q(x)
         context = default(context, x)
         k = self.to_k(context)
@@ -460,14 +460,13 @@ class BasicTransformerBlock(nn.Module):
         self.d_head = d_head
         self.switch_temporal_ca_to_sa = switch_temporal_ca_to_sa
 
-    def forward(self, x, context=None, transformer_options={}, **kwargs):
+    def forward(self, x, context=None, transformer_options={}):
         return checkpoint(self._forward, 
                           (x, context, transformer_options), 
                           self.parameters(), 
-                          self.checkpoint, 
-                          **kwargs)
+                          self.checkpoint)
 
-    def _forward(self, x, context: Optional[torch.Tensor]=None, transformer_options={}, **kwargs):
+    def _forward(self, x, context: Optional[torch.Tensor]=None, transformer_options={}):
         # x possible shapes: (2, 4096, 320), (2, 1024, 640), (2, 256, 1280), (2, 64, 1280)...
         # context: prompt embedding, shape: (2, 77, 768)
         extra_options = {}
@@ -506,13 +505,13 @@ class BasicTransformerBlock(nn.Module):
         
         transformer_index: int = transformer_options.get("transformer_index", None)
         cond_or_uncond: list[int] = transformer_options.get('cond_or_uncond', [])
-        engine_data: 'EngineData' = kwargs.get('engine_data', None)
-        corresponder: 'Corresponder' = kwargs.get('corresponder', None)
+        engine_data: 'EngineData' = transformer_options.get('engine_data', None)
+        corresponder: 'Corresponder' = transformer_options.get('corresponder', None)
         do_stable_rendering = transformer_index is not None and \
                                 cond_or_uncond and \
                                 engine_data is not None and \
                                 corresponder is not None and \
-                                kwargs.get('do_stable_rendering', True) # can skip stable rendering if needed
+                                transformer_options.get('do_stable_rendering', True) # can skip stable rendering if needed
         
         if "attn1_patch" in transformer_patches:
             patch = transformer_patches["attn1_patch"]
@@ -538,6 +537,7 @@ class BasicTransformerBlock(nn.Module):
             n = self.attn1.to_q(n)
             context_attn1 = self.attn1.to_k(context_attn1)
             value_attn1 = self.attn1.to_v(value_attn1)
+            
             if do_stable_rendering:
                 if corresponder is not None and hasattr(corresponder, 'pre_atten_inject') and not is_empty_method(corresponder.pre_atten_inject):
                     n, context_attn1, value_attn1 = corresponder.pre_atten_inject(self, engine_data, n, context_attn1, value_attn1, transformer_index)
@@ -564,9 +564,15 @@ class BasicTransformerBlock(nn.Module):
         if do_stable_rendering:
             if corresponder is not None and hasattr(corresponder, 'post_atten_inject') and not is_empty_method(corresponder.post_atten_inject):
                 positive_batches_attns = [n[i] for i, cond in enumerate(cond_or_uncond) if cond == COND]
-                positive_batches_attns = torch.stack(positive_batches_attns)    # pack into a tensor again
-                n = corresponder.post_atten_inject(self, engine_data, positive_batches_attns, transformer_index)
-
+                if len(positive_batches_attns) > 0:
+                    positive_batches_attns = torch.stack(positive_batches_attns)    # pack into a tensor again
+                    positive_n = corresponder.post_atten_inject(self, engine_data, positive_batches_attns, transformer_index)
+                    cond_idx = 0
+                    for i, cond in enumerate(cond_or_uncond):
+                        if cond == COND:
+                            n[i] = positive_n[cond_idx]
+                            cond_idx += 1
+                
         if "attn1_output_patch" in transformer_patches:
             patch = transformer_patches["attn1_output_patch"]
             for p in patch:
@@ -619,7 +625,7 @@ class BasicTransformerBlock(nn.Module):
         x = self.ff(self.norm3(x))
         if self.is_res:
             x += x_skip
-
+            
         return x
 
 
@@ -652,7 +658,7 @@ class SpatialTransformer(nn.Module):
             self.proj_in = operations.Linear(in_channels, inner_dim, dtype=dtype, device=device)
 
         self.transformer_blocks = nn.ModuleList(
-            [BasicTransformerBlock(inner_dim, n_heads, d_head, dropout=dropout, context_dim=context_dim[d],
+            [BasicTransformerBlock(inner_dim, n_heads, d_head, dropout=dropout, context_dim=context_dim[d], # type: ignore
                                    disable_self_attn=disable_self_attn, checkpoint=use_checkpoint, dtype=dtype, device=device, operations=operations)
                 for d in range(depth)]
         )
@@ -679,17 +685,11 @@ class SpatialTransformer(nn.Module):
         x = rearrange(x, 'b c h w -> b (h w) c').contiguous()   # flatten
         if self.use_linear:
             x = self.proj_in(x)
-            
+        
+        transformer_options.update(extra_args)  # all other extra args are passed to `transformer_options`
         for i, block in enumerate(self.transformer_blocks):
             transformer_options["block_index"] = i
-            forward_sig, has_kwarg = check_func_has_kwarg(block.forward, return_sig=True)
-            if has_kwarg:
-                x = block(x, context=context[i], transformer_options=transformer_options, **extra_args)
-            else:
-                proper_kwargs = {k: v for i, (k, v) in enumerate(extra_args.items()) if i!=0 and k in forward_sig.parameters}
-                proper_kwargs.pop("context", None)
-                proper_kwargs.pop("transformer_options", None)
-                x = block(x, context=context[i], transformer_options=transformer_options, **proper_kwargs)
+            x = block(x, context=context[i], transformer_options=transformer_options)
        
         if self.use_linear:
             x = self.proj_out(x)
@@ -792,8 +792,7 @@ class SpatialVideoTransformer(SpatialTransformer):
         time_context: Optional[torch.Tensor] = None,
         timesteps: Optional[int] = None,
         image_only_indicator: Optional[torch.Tensor] = None,
-        transformer_options={},
-        **extra_args
+        transformer_options={}
     ) -> torch.Tensor:
         _, _, h, w = x.shape
         x_in = x
@@ -803,12 +802,12 @@ class SpatialVideoTransformer(SpatialTransformer):
 
         if self.use_spatial_context:
             assert (
-                context.ndim == 3
-            ), f"n dims of spatial context should be 3 but are {context.ndim}"
+                context.ndim == 3   # type: ignore
+            ), f"n dims of spatial context should be 3 but are {context.ndim}"  # type: ignore
 
             if time_context is None:
                 time_context = context
-            time_context_first_timestep = time_context[::timesteps]
+            time_context_first_timestep = time_context[::timesteps] # type: ignore
             time_context = repeat(
                 time_context_first_timestep, "b ... -> (b n) ...", n=h * w
             )
@@ -824,8 +823,8 @@ class SpatialVideoTransformer(SpatialTransformer):
         if self.use_linear:
             x = self.proj_in(x)
 
-        num_frames = torch.arange(timesteps, device=x.device)
-        num_frames = repeat(num_frames, "t -> b t", b=x.shape[0] // timesteps)
+        num_frames = torch.arange(timesteps, device=x.device)   # type: ignore
+        num_frames = repeat(num_frames, "t -> b t", b=x.shape[0] // timesteps)  # type: ignore
         num_frames = rearrange(num_frames, "b t -> (b t)")
         t_emb = timestep_embedding(num_frames, self.in_channels, repeat_only=False, max_period=self.max_time_embed_period).to(x.dtype)
         emb = self.time_pos_embed(t_emb)

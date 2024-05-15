@@ -1,137 +1,7 @@
 {
   "last_node_id": 47,
-  "last_link_id": 87,
+  "last_link_id": 89,
   "nodes": [
-    {
-      "id": 31,
-      "type": "ControlNetLoader",
-      "pos": [
-        351,
-        670
-      ],
-      "size": {
-        "0": 315,
-        "1": 58
-      },
-      "flags": {},
-      "order": 0,
-      "mode": 0,
-      "outputs": [
-        {
-          "name": "CONTROL_NET",
-          "type": "CONTROL_NET",
-          "links": [
-            43
-          ],
-          "shape": 3,
-          "label": "CONTROL_NET",
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "ControlNetLoader"
-      },
-      "widgets_values": [
-        "control_v11p_sd15_normalbae_fp16.safetensors"
-      ],
-      "widget_kw_values": {
-        "control_net_name": "control_v11p_sd15_normalbae_fp16.safetensors"
-      }
-    },
-    {
-      "id": 32,
-      "type": "ControlNetApply",
-      "pos": [
-        349,
-        532
-      ],
-      "size": {
-        "0": 317.4000244140625,
-        "1": 98
-      },
-      "flags": {},
-      "order": 7,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "conditioning",
-          "type": "CONDITIONING",
-          "link": 66,
-          "label": "conditioning"
-        },
-        {
-          "name": "control_net",
-          "type": "CONTROL_NET",
-          "link": 43,
-          "label": "control_net"
-        },
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "link": 70,
-          "label": "image",
-          "shape": 1
-        }
-      ],
-      "outputs": [
-        {
-          "name": "CONDITIONING",
-          "type": "CONDITIONING",
-          "links": [
-            46
-          ],
-          "shape": 3,
-          "label": "CONDITIONING",
-          "slot_index": 0
-        }
-      ],
-      "title": "Apply ControlNet(normal)",
-      "properties": {
-        "Node name for S&R": "ControlNetApply(normal)"
-      },
-      "widgets_values": [
-        1
-      ],
-      "widget_kw_values": {
-        "strength": 1
-      }
-    },
-    {
-      "id": 29,
-      "type": "ControlNetLoader",
-      "pos": [
-        685,
-        670
-      ],
-      "size": {
-        "0": 315,
-        "1": 58
-      },
-      "flags": {},
-      "order": 1,
-      "mode": 0,
-      "outputs": [
-        {
-          "name": "CONTROL_NET",
-          "type": "CONTROL_NET",
-          "links": [
-            39
-          ],
-          "shape": 3,
-          "label": "CONTROL_NET",
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "ControlNetLoader"
-      },
-      "widgets_values": [
-        "control_v11f1p_sd15_depth_fp16.safetensors"
-      ],
-      "widget_kw_values": {
-        "control_net_name": "control_v11f1p_sd15_depth_fp16.safetensors"
-      }
-    },
     {
       "id": 38,
       "type": "EngineData",
@@ -144,7 +14,7 @@
         "1": 240.89999389648438
       },
       "flags": {},
-      "order": 2,
+      "order": 0,
       "mode": 0,
       "outputs": [
         {
@@ -174,9 +44,7 @@
         {
           "name": "normals",
           "type": "IMAGE",
-          "links": [
-            70
-          ],
+          "links": [],
           "shape": 1,
           "label": "normals",
           "slot_index": 3
@@ -184,9 +52,7 @@
         {
           "name": "depths",
           "type": "IMAGE",
-          "links": [
-            69
-          ],
+          "links": [],
           "shape": 1,
           "label": "depths",
           "slot_index": 4
@@ -248,131 +114,6 @@
       }
     },
     {
-      "id": 39,
-      "type": "SceneTextEncode",
-      "pos": [
-        257,
-        256
-      ],
-      "size": {
-        "0": 322.29998779296875,
-        "1": 86
-      },
-      "flags": {},
-      "order": 6,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "clip",
-          "type": "CLIP",
-          "link": 86,
-          "label": "clip"
-        },
-        {
-          "name": "sprite_infos",
-          "type": "SPRITEINFOS",
-          "link": 73,
-          "label": "sprite_infos"
-        },
-        {
-          "name": "env_prompts",
-          "type": "ENVPROMPTS",
-          "link": 72,
-          "label": "env_prompts"
-        },
-        {
-          "name": "idmap",
-          "type": "IDMAP",
-          "link": 71,
-          "label": "idmap",
-          "shape": 1
-        }
-      ],
-      "outputs": [
-        {
-          "name": "pos",
-          "type": "CONDITIONING",
-          "links": [
-            66
-          ],
-          "shape": 3,
-          "label": "pos",
-          "slot_index": 0
-        },
-        {
-          "name": "neg",
-          "type": "CONDITIONING",
-          "links": [
-            82
-          ],
-          "shape": 3,
-          "label": "neg",
-          "slot_index": 1
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "SceneTextEncode"
-      }
-    },
-    {
-      "id": 30,
-      "type": "ControlNetApply",
-      "pos": [
-        684,
-        533
-      ],
-      "size": {
-        "0": 317.4000244140625,
-        "1": 98
-      },
-      "flags": {},
-      "order": 8,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "conditioning",
-          "type": "CONDITIONING",
-          "link": 46,
-          "label": "conditioning"
-        },
-        {
-          "name": "control_net",
-          "type": "CONTROL_NET",
-          "link": 39,
-          "label": "control_net"
-        },
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "link": 69,
-          "label": "image",
-          "shape": 1
-        }
-      ],
-      "outputs": [
-        {
-          "name": "CONDITIONING",
-          "type": "CONDITIONING",
-          "links": [
-            83
-          ],
-          "shape": 3,
-          "label": "CONDITIONING",
-          "slot_index": 0
-        }
-      ],
-      "title": "Apply ControlNet(depth)",
-      "properties": {
-        "Node name for S&R": "ControlNetApply"
-      },
-      "widgets_values": [
-        1
-      ],
-      "widget_kw_values": {
-        "strength": 1
-      }
-    },
-    {
       "id": 11,
       "type": "LoraLoaderModelOnly",
       "pos": [
@@ -384,7 +125,7 @@
         "1": 82
       },
       "flags": {},
-      "order": 5,
+      "order": 3,
       "mode": 0,
       "inputs": [
         {
@@ -431,7 +172,7 @@
         "1": 66
       },
       "flags": {},
-      "order": 10,
+      "order": 6,
       "mode": 0,
       "inputs": [
         {
@@ -482,7 +223,7 @@
         "1": 270
       },
       "flags": {},
-      "order": 11,
+      "order": 7,
       "mode": 0,
       "inputs": [
         {
@@ -524,7 +265,7 @@
         "1": 126
       },
       "flags": {},
-      "order": 3,
+      "order": 1,
       "mode": 0,
       "outputs": [
         {
@@ -574,7 +315,7 @@
         "1": 98
       },
       "flags": {},
-      "order": 4,
+      "order": 2,
       "mode": 0,
       "outputs": [
         {
@@ -628,7 +369,7 @@
         "1": 234
       },
       "flags": {},
-      "order": 9,
+      "order": 5,
       "mode": 0,
       "inputs": [
         {
@@ -641,7 +382,7 @@
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 83,
+          "link": 89,
           "label": "positive"
         },
         {
@@ -693,6 +434,73 @@
         "scheduler": "sgm_uniform",
         "denoise": 1
       }
+    },
+    {
+      "id": 39,
+      "type": "SceneTextEncode",
+      "pos": [
+        310,
+        279
+      ],
+      "size": {
+        "0": 322.29998779296875,
+        "1": 86
+      },
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 86,
+          "label": "clip"
+        },
+        {
+          "name": "sprite_infos",
+          "type": "SPRITEINFOS",
+          "link": 73,
+          "label": "sprite_infos"
+        },
+        {
+          "name": "env_prompts",
+          "type": "ENVPROMPTS",
+          "link": 72,
+          "label": "env_prompts"
+        },
+        {
+          "name": "idmap",
+          "type": "IDMAP",
+          "link": 71,
+          "label": "idmap",
+          "shape": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pos",
+          "type": "CONDITIONING",
+          "links": [
+            89
+          ],
+          "shape": 3,
+          "label": "pos",
+          "slot_index": 0
+        },
+        {
+          "name": "neg",
+          "type": "CONDITIONING",
+          "links": [
+            82
+          ],
+          "shape": 3,
+          "label": "neg",
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SceneTextEncode"
+      }
     }
   ],
   "links": [
@@ -710,54 +518,6 @@
       0,
       23,
       0,
-      "IMAGE"
-    ],
-    [
-      39,
-      29,
-      0,
-      30,
-      1,
-      "CONTROL_NET"
-    ],
-    [
-      43,
-      31,
-      0,
-      32,
-      1,
-      "CONTROL_NET"
-    ],
-    [
-      46,
-      32,
-      0,
-      30,
-      0,
-      "CONDITIONING"
-    ],
-    [
-      66,
-      39,
-      0,
-      32,
-      0,
-      "CONDITIONING"
-    ],
-    [
-      69,
-      38,
-      4,
-      30,
-      2,
-      "IMAGE"
-    ],
-    [
-      70,
-      38,
-      3,
-      32,
-      2,
       "IMAGE"
     ],
     [
@@ -817,14 +577,6 @@
       "CONDITIONING"
     ],
     [
-      83,
-      30,
-      0,
-      47,
-      1,
-      "CONDITIONING"
-    ],
-    [
       84,
       11,
       0,
@@ -855,6 +607,14 @@
       11,
       0,
       "MODEL"
+    ],
+    [
+      89,
+      39,
+      0,
+      47,
+      1,
+      "CONDITIONING"
     ]
   ],
   "groups": [],
