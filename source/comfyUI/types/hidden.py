@@ -443,7 +443,7 @@ class InferenceContext(HIDDEN): # InferenceContext is also a hidden value
             node_id = value.ID
             node_type_name = self.prompt[node_id]['class_type']
             if node_type_name != value.NAME:
-                raise ValueError(f'The given node is not the same as the node in the prompt: {node_type_name} != {value.NAME}')
+                ComfyUILogger.warn(f'The given node is not the same as the node in the prompt: {node_type_name} != {value.NAME}')
             value = node_id
             
         if isinstance(value, str):
