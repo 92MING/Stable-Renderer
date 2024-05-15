@@ -14,6 +14,7 @@ from common_utils.path_utils import *
 if __name__ == '__main__':
 
     class Sample(Engine):
+        
         def beforePrepare(self):
             mikuPath = os.path.join(EXAMPLE_3D_MODEL_DIR, 'miku')
             mikuMesh = Mesh.Load(os.path.join(mikuPath, 'miku.obj'), alias='miku', cullback=False) 
@@ -35,17 +36,23 @@ if __name__ == '__main__':
             corrmap_obj.addComponent(CorrMapRenderer, corrmaps=self.corrmap)
             corrmap_obj.addComponent(EqualIntervalRotation, interval=18)
             
+        def beforeFrameBegin(self):    
+            if self.RuntimeManager.FrameCount == 18:
+                self.Exit()
+        
         def beforeRelease(self):
-            self.corrmap.dump(OUTPUT_DIR, name='miku_corrmap')
-    
+            # self.corrmap.dump(OUTPUT_DIR, name='miku_corrmap')
+            ...
+            
     #baking_workflow = EXAMPLE_WORKFLOWS_DIR / 'bake.json'
     #baking_workflow = EXAMPLE_WORKFLOWS_DIR / 'no-normal-bake.json'
     #baking_workflow = EXAMPLE_WORKFLOWS_DIR / 'no-control-bake.json'
     baking_workflow = EXAMPLE_WORKFLOWS_DIR / 'no-mask-prompt-bake.json'
     Sample.Run(winSize=(512, 512),
-               mode = EngineMode.BAKE,
+               #mode = EngineMode.BAKE,
+               mode = EngineMode.GAME,
                mapSavingInterval=1,
-               baking_interval= 8,
-               needOutputMaps=False,
-               disableComfyUI=False,
+               #baking_interval= 8,
+               needOutputMaps=True,
+               disableComfyUI=True,
                diffuse_workflow=baking_workflow)

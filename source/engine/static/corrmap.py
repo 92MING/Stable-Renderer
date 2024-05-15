@@ -1,5 +1,6 @@
+import os
 if __name__ == '__main__': # for debugging
-    import sys, os
+    import sys
     proj_path = os.path.join(os.path.dirname(__file__), '..', '..')
     sys.path.insert(0, proj_path)
     __package__ = 'common_utils.stable_render_utils'
