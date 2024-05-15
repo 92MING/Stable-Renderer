@@ -8,6 +8,7 @@ from einops import rearrange
 from comfyUI.types import *
 from engine.static.corrmap import IDMap
 
+
 class ImageSequenceLoader(StableRenderingNode):
     
     Category = "loader"
@@ -53,6 +54,7 @@ class ImageSequenceLoader(StableRenderingNode):
             return None # type: ignore
         return torch.cat(tensor_images, dim=0) 
 
+
 class NoiseSequenceLoader(StableRenderingNode):
     
     Category = "loader"
@@ -97,8 +99,57 @@ class NoiseSequenceLoader(StableRenderingNode):
         if not tensors:
             return None
         t = torch.cat(tensors, dim=0)
-        return LATENT(samples=torch.zeros_like(t), latents=t)
+        return LATENT(samples=torch.zeros_like(t), noise=t)
 
+
+class IDSequenceLoader(StableRenderingNode):
+
+    Category = "loader"
+
+    def __call__(self,
+                data_paths: List[PATH(accept_folder=False, 
+                                 accept_multiple=True, 
+                                 to_folder='temp',
+                                 accept_types=[".jpeg", ".png", ".bmp", ".jpg", '.npy'])],  # type: ignore
+                ) -> IDMap:
+        file_filter = lambda fname: fname.endswith((".jpeg", ".png", ".bmp", ".jpg", '.npy'))
+        
+        def extract_index(data_path, i):
+            filename = os.path.basename(data_path)
+            if filename.split('.')[0].split('_')[-1].isdigit():  # e.g. ..._0.npy
+                return int(filename.split('.')[0].split('_')[-1])
+            elif filename.split('_')[0].isdigit():   # e.g. 0_....npy
+                return int(filename.split('_')[0])
+            return i    # default to the original order
+        reordered_data_paths = sorted(data_paths, key=lambda x: extract_index(x, data_paths.index(x)))
+
+        frame_indices = list(map(extract_index, reordered_data_paths))
+        print("[DEBUG]: ", frame_indices)
+
+        id_tensors = [] 
+        for data_path in reordered_data_paths:
+            if not os.path.exists(data_path) or not file_filter(os.path.basename(data_path)):
+                continue
+            if data_path.endswith('.npy'):
+                id_tensor = torch.from_numpy(np.load(data_path)).squeeze()
+                if not len(id_tensor.shape) == 3:
+                    raise ValueError(f"Invalid shape of id tensor: {id_tensor.shape}.")
+                if not (id_tensor.shape[-1] == 4 or id_tensor.shape[1] == 4): # not chw or hwc
+                    raise ValueError(f"Invalid id tensor shape: {id_tensor.shape}.")
+                if id_tensor.shape[-1] == 4:
+                    id_tensor = rearrange(id_tensor, 'h w c -> c h w')
+            else:
+                id_tensor = read_image(data_path, mode=ImageReadMode.RGB_ALPHA) / 255.0
+            id_tensors.append(id_tensor)
+
+        for t in id_tensors:
+            if t.shape != id_tensors[0].shape:
+                raise ValueError(f"Tensor data has inconsistent shapes: {t.shape} and {id_tensors[0].shape}.")
+        if not id_tensors:
+            return None
+        t = torch.cat(id_tensors, dim=0)
+
+        return IDMap(frame_indices=frame_indices, tensor=t)
 
     
 __all__ = ['ImageSequenceLoader', 'NoiseSequenceLoader']
