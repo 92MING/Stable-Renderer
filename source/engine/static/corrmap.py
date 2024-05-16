@@ -201,6 +201,12 @@ class CorrespondMap(ResourcesObj):
     texID: Optional[int] = attrib(default=None, init=False)
     '''sampler2DArray's texture id in OpenGL. This is for rendering purpose.'''
 
+    vertex_screen_poses: dict[int, dict[int, list[tuple[float, float]]]] = attrib(factory=dict)
+    '''
+    for runtime baking.
+    {vertexID: {map_index: [(x ratio, y ratio), ...]}}
+    '''
+    
     def __attrs_post_init__(self):
         self._values = torch.zeros(self.k*self.k, self.height * self.width, self.channel_count, dtype=torch.float16)
         self._writtens = torch.zeros(self.k*self.k, self.height * self.width, dtype=torch.bool)
@@ -215,6 +221,17 @@ class CorrespondMap(ResourcesObj):
         This is an alias of `self._values[index]`.
         '''
         return self._values[index]
+    
+    # region runtime
+    def _calc_screen_poses_by_ID(self, vertexID: int)->tuple[float, float]:
+        # since vertexID = y * width * height + x * width, we can get x, y directly from vertexID
+        x = vertexID % self.width
+        y = vertexID // self.width
+        return x / self.width, y / self.height
+    
+    def save_vertex_screen_poses(self, vertexID: int, map_index: int, screen_poses: list[tuple[float, float]]):
+        ...
+    # endregion
     
     # region gl texture related
     def clear(self):

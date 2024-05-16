@@ -42,15 +42,18 @@ def calc_map_mean_std(feat:torch.Tensor, eps=1e-5):
     return feat_mean, feat_std
 
 # from https://github.com/naoto0804/pytorch-AdaIN/blob/master/function.py
-def adaptive_instance_normalization(content_feat: torch.Tensor, style_feat: torch.Tensor, eps=1e-5, mode: Literal['NCHW', 'NHWC']='NCHW'):
+def adaptive_instance_normalization(content_feat: torch.Tensor, 
+                                    style_feat: torch.Tensor, 
+                                    eps: float=1e-5,
+                                    mode: Literal['NCHW', 'NHWC']='NCHW'):
     '''
     Calculate the adaptive instance normalization of the content feature tensor with the style feature tensor.
     
     Args:
-        - content_feat: the content feature tensor with shape (N, C, H, W)
-        - style_feat: the style feature tensor with shape (N, C, H, W)
+        - content_feat: the content feature tensor
+        - style_feat: the style feature tensor
         - eps: a small value added to the variance to avoid divide-by-zero.
-        - mode: the mode of the input tensor, 'NCHW' or 'NHWC'
+        - mode: the mode of the two tensors, 'NCHW' or 'NHWC'
     '''
     if mode == 'NCHW':
         assert (content_feat.size()[:2] == style_feat.size()[:2])   # N, C

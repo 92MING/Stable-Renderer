@@ -540,8 +540,34 @@ class BasicTransformerBlock(nn.Module):
             
             if do_stable_rendering:
                 if corresponder is not None and hasattr(corresponder, 'pre_atten_inject') and not is_empty_method(corresponder.pre_atten_inject):
-                    n, context_attn1, value_attn1 = corresponder.pre_atten_inject(self, engine_data, n, context_attn1, value_attn1, transformer_index)
-            
+                    batch_size = n.shape[0] // len(cond_or_uncond)
+                    positive_qs = []
+                    positive_ks = []
+                    positive_vs = []
+                    for i, cond in enumerate(cond_or_uncond):
+                        if cond == COND:
+                            positive_qs.append(n[i*batch_size:(i+1)*batch_size])
+                            positive_ks.append(context_attn1[i*batch_size:(i+1)*batch_size])
+                            positive_vs.append(value_attn1[i*batch_size:(i+1)*batch_size])
+                    
+                    if len(positive_qs) > 0:
+                        positive_qs = torch.cat(positive_qs)
+                        positive_ks = torch.cat(positive_ks)
+                        positive_vs = torch.cat(positive_vs)
+                        positive_qs, positive_ks, positive_vs = corresponder.pre_atten_inject(self, 
+                                                                                              engine_data, 
+                                                                                              positive_qs, 
+                                                                                              positive_ks, 
+                                                                                              positive_vs, 
+                                                                                              transformer_index)
+                        cond_idx = 0
+                        for i, cond in enumerate(cond_or_uncond):
+                            if cond == COND:
+                                n[i*batch_size:(i+1)*batch_size] = positive_qs[cond_idx:(cond_idx+batch_size)]
+                                context_attn1[i*batch_size:(i+1)*batch_size] = positive_ks[cond_idx:(cond_idx+batch_size)]
+                                value_attn1[i*batch_size:(i+1)*batch_size] = positive_vs[cond_idx:(cond_idx+batch_size)]
+                                cond_idx += 1
+                                
             n = attn1_replace_patch[block_attn1](n, context_attn1, value_attn1, extra_options)
             n = self.attn1.to_out(n)
         else:
@@ -556,21 +582,54 @@ class BasicTransformerBlock(nn.Module):
             
             if do_stable_rendering:
                 if corresponder is not None and hasattr(corresponder, 'pre_atten_inject') and not is_empty_method(corresponder.pre_atten_inject):
-                    q, k, v = corresponder.pre_atten_inject(self, engine_data, q, k, v, transformer_index)
+                    batch_size = n.shape[0] // len(cond_or_uncond)
+                    positive_qs = []
+                    positive_ks = []
+                    positive_vs = []
+                    for i, cond in enumerate(cond_or_uncond):
+                        if cond == COND:
+                            positive_qs.append(q[i*batch_size:(i+1)*batch_size])
+                            positive_ks.append(k[i*batch_size:(i+1)*batch_size])
+                            positive_vs.append(v[i*batch_size:(i+1)*batch_size])
+                    
+                    if len(positive_qs) > 0:
+                        positive_qs = torch.cat(positive_qs)
+                        positive_ks = torch.cat(positive_ks)
+                        positive_vs = torch.cat(positive_vs)
+                        positive_qs, positive_ks, positive_vs = corresponder.pre_atten_inject(self, 
+                                                                                              engine_data, 
+                                                                                              positive_qs, 
+                                                                                              positive_ks, 
+                                                                                              positive_vs, 
+                                                                                              transformer_index)
+                        cond_idx = 0
+                        for i, cond in enumerate(cond_or_uncond):
+                            if cond == COND:
+                                q[i*batch_size:(i+1)*batch_size] = positive_qs[cond_idx:(cond_idx+batch_size)]
+                                k[i*batch_size:(i+1)*batch_size] = positive_ks[cond_idx:(cond_idx+batch_size)]
+                                v[i*batch_size:(i+1)*batch_size] = positive_vs[cond_idx:(cond_idx+batch_size)]
+                                cond_idx += 1
 
             out = optimized_attention(q, k, v, self.attn1.heads)
             n = self.attn1.to_out(out)
         
         if do_stable_rendering:
             if corresponder is not None and hasattr(corresponder, 'post_atten_inject') and not is_empty_method(corresponder.post_atten_inject):
-                positive_batches_attns = [n[i] for i, cond in enumerate(cond_or_uncond) if cond == COND]
-                if len(positive_batches_attns) > 0:
-                    positive_batches_attns = torch.stack(positive_batches_attns)    # pack into a tensor again
-                    positive_n = corresponder.post_atten_inject(self, engine_data, positive_batches_attns, transformer_index)
+                batch_size = n.shape[0] // len(cond_or_uncond)
+
+                positive_attns = []
+                for i, cond in enumerate(cond_or_uncond):
+                    if cond == COND:
+                        positive_attns.append(n[i*batch_size:(i+1)*batch_size])
+                
+                if len(positive_attns) > 0:
+                    positive_attns = torch.cat(positive_attns)
+                    positive_n = corresponder.post_atten_inject(self, engine_data, positive_attns, transformer_index)
+
                     cond_idx = 0
                     for i, cond in enumerate(cond_or_uncond):
                         if cond == COND:
-                            n[i] = positive_n[cond_idx]
+                            n[i*batch_size:(i+1)*batch_size] = positive_n[cond_idx:(cond_idx+batch_size)]
                             cond_idx += 1
                 
         if "attn1_output_patch" in transformer_patches:

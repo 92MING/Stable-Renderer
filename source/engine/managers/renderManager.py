@@ -866,6 +866,14 @@ class RenderManager(Manager):
         self.depthFBOTex.set_data(1 - depth_data.flip(0))   # depth value is inverted in shader, closer object has larger depth value
         del depth_data, normal_data, normal_and_depth_data
     
+    _bg_noise = None
+    @property
+    def GlobalBGNoise(self):
+        '''1, H, W, 4, float16, cuda'''
+        if self._bg_noise is None:
+            self._bg_noise = torch.randn((1, self.engine.WindowManager.WindowSize[1], self.engine.WindowManager.WindowSize[0], 4), dtype=torch.float32, device='cuda')
+        return self._bg_noise
+    
     def _save_frame_data(self):
         if 'frame_indices' not in self.data_to_be_added_to_engineData:
             self.data_to_be_added_to_engineData['frame_indices'] = []
@@ -916,7 +924,8 @@ class RenderManager(Manager):
         noise = self.noiseFBOTex.tensor(update=True, flip=True).clone().unsqueeze(0) # 1,h,w,4
         mask = mask_data.unsqueeze(-1).expand_as(noise).to(device=noise.device) # 1,h,w,4
         # fill empty areas with gaussian noise, i.e. the area with alpha=0(equiv. to mask=1)
-        noise = noise * (1.0 - mask) + torch.randn_like(noise) * mask
+        # noise = noise * (1.0 - mask) + torch.randn_like(noise) * mask
+        noise = noise * (1.0 - mask) + self.GlobalBGNoise * mask
         height, width = noise.shape[1], noise.shape[2]
         # merge every 8*8 to 1*1 (mean)
         # e.g. 1*512*512*4 -> 1*64*64*4 
