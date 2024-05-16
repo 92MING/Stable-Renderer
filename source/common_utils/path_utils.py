@@ -168,3 +168,15 @@ def get_sd_color_result_dir(time: Optional[datetime] = None, create: Optional[bo
         return _sd_color_result_dir
 
 __all__.extend(['get_new_map_output_dir', 'get_map_output_dir', 'get_comfyUI_output_dir', 'get_sd_color_result_dir'])
+
+
+def extract_index(file_path, i):
+    file_name = os.path.basename(file_path)
+    if file_name.split('.')[0].split('_')[-1].isdigit():  # e.g. depth_0.png
+        return int(file_name.split('.')[0].split('_')[-1])
+    elif file_name.split('_')[0].isdigit():   # e.g. 0_depth.png
+        return int(file_name.split('_')[0])
+    return i    # default to the original orderimg
+
+
+__all__.extend(['extract_index'])

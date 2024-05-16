@@ -78,7 +78,7 @@ def _remove_background(image: torch.Tensor) -> torch.Tensor:
 
     
 class RemoveBGNode(StableRenderingNode):
-    Category = "Processing"
+    Category = "processing"
 
     def __call__(self, image:IMAGE) -> IMAGE:
         """
@@ -99,7 +99,7 @@ class RemoveBGNode(StableRenderingNode):
 
 
 class RGBAToRGB(StableRenderingNode):
-    Category = "Processing"
+    Category = "processing"
 
     def __call__(self,
                  image: IMAGE,
@@ -130,7 +130,7 @@ class RGBAToRGB(StableRenderingNode):
 
 
 class RGBAThreshold(StableRenderingNode):
-    Category = "Processing"
+    Category = "processing"
 
     def __call__(self,
                  image: IMAGE,

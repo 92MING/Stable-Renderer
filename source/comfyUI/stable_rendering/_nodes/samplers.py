@@ -112,8 +112,13 @@ class CorrespondSampler(StableRenderingNode):
             def print_progress(context: SamplingCallbackContext):
                 ComfyUILogger.info(f"Step {context.step_index+1}/{context.total_steps} finished.")
             callback.append(print_progress) # type: ignore
-            
-        latent = latent if latent is not None else engine_data.noise_maps
+
+        if latent is None:
+            if engine_data is not None:
+                latent = engine_data.noise_maps
+            else:
+                raise ValueError("Input latent is None and engine_data is also None.")
+
         return custom_ksampler(model=model,
                                seed=None,
                                steps=steps,

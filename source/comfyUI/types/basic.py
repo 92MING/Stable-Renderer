@@ -542,6 +542,8 @@ def PATH(accept_folder: bool = False,
             accept_types = ','.join(accept_types)
             
     def path_formatter(anno, val):
+        print("[DEBUG] anno.tags", anno.tags)
+
         if not 'list' in anno.tags:
             return Path(val)
         return [Path(v) for v in val.split(';') if v] if val else []
