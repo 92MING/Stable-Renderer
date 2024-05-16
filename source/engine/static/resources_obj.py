@@ -33,22 +33,19 @@ class ResourcesObjMeta(ABCMeta):
 
     def __new__(cls, *args, **kwargs):
         cls_name = args[0]
-        if cls_name in __ENGINE_RESOURCES_CLSES__:  # prevent duplicate class creation
-            return __ENGINE_RESOURCES_CLSES__[cls_name]
-        else:
-            cls = super().__new__(cls, *args, **kwargs)
-            if cls_name == 'ResourcesObj':
-                return cls
-            if cls.BaseClsName is not None:
-                if cls.BaseClsName not in __ENGINE_FORMAT_SUBCLSES__:
-                    __ENGINE_FORMAT_SUBCLSES__[cls.BaseClsName] = {}
-                if cls.Format is not None and cls.Format not in __ENGINE_FORMAT_SUBCLSES__[cls.BaseClsName]:
-                    format = cls.Format.strip().lower()
-                    if format.startswith('.'):
-                        format = format[1:]
-                    __ENGINE_FORMAT_SUBCLSES__[cls.BaseClsName][format] = cls
-            __ENGINE_RESOURCES_CLSES__[cls_name] = cls
+        cls = super().__new__(cls, *args, **kwargs)
+        if cls_name == 'ResourcesObj':
             return cls
+        if cls.BaseClsName is not None:
+            if cls.BaseClsName not in __ENGINE_FORMAT_SUBCLSES__:
+                __ENGINE_FORMAT_SUBCLSES__[cls.BaseClsName] = {}
+            if cls.Format is not None and cls.Format not in __ENGINE_FORMAT_SUBCLSES__[cls.BaseClsName]:
+                format = cls.Format.strip().lower()
+                if format.startswith('.'):
+                    format = format[1:]
+                __ENGINE_FORMAT_SUBCLSES__[cls.BaseClsName][format] = cls
+        __ENGINE_RESOURCES_CLSES__[cls_name] = cls
+        return cls
 
 _RC = TypeVar('_RC', bound='ResourcesObj')
 

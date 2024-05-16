@@ -1,7 +1,6 @@
 # Legacy loaders read path in string format
 import os
 import numpy as np
-from einops import rearrange
 
 import torch
 import torch.nn.functional as F
@@ -158,44 +157,7 @@ class IDSequenceLoader(StableRenderingNode):
                  num_frames: INT(min=1) = 16,  # type: ignore
     ) -> IDMap:
         '''Load ID files from img or directly from npy.'''
-        assert os.path.exists(directory)
-        assert frame_start >= 0 and num_frames > 0
-
-        file_filter = lambda fname: fname.endswith((".jpeg", ".png", ".bmp", ".jpg", ".npy"))
-
-        filenames = list(filter(file_filter, os.listdir(directory)))
-        reordered_filenames = sorted(
-            filenames, key=lambda x: extract_index(x, filenames.index(x)))
-
-        frame_indices = list(
-            map(extract_index(reordered_filenames, -1), reordered_filenames))
-        assert all(i != -1 for i in frame_indices), "Illegal filename(s) found."
-
-        id_tensors = [] 
-        for filename in reordered_filenames[frame_start: frame_start+num_frames]:
-            data_path = os.path.join(directory, filename)
-            if not os.path.exists(data_path) or not file_filter(os.path.basename(data_path)):
-                continue
-            if data_path.endswith('.npy'):
-                id_tensor = torch.from_numpy(np.load(data_path)).squeeze()
-                if not len(id_tensor.shape) == 3:
-                    raise ValueError(f"Invalid shape of id tensor: {id_tensor.shape}.")
-                if not (id_tensor.shape[-1] == 4 or id_tensor.shape[1] == 4): # not chw or hwc
-                    raise ValueError(f"Invalid id tensor shape: {id_tensor.shape}.")
-                if id_tensor.shape[-1] == 4:
-                    id_tensor = rearrange(id_tensor, 'h w c -> c h w')
-            else:
-                id_tensor = read_image(data_path, mode=ImageReadMode.RGB_ALPHA) / 255.0
-            id_tensors.append(id_tensor)
-
-        for t in id_tensors:
-            if t.shape != id_tensors[0].shape:
-                raise ValueError(f"Tensor data has inconsistent shapes: {t.shape} and {id_tensors[0].shape}.")
-        if not id_tensors:
-            return None
-        t = torch.stack(id_tensors, dim=0)
-
-        return IDMap(frame_indices=frame_indices, tensor=t)
+        return IDMap.from_directory(directory, frame_start, num_frames)
 
 
 __all__ = ["ImageSequenceLoader", "NoiseSequenceLoader", "IDSequenceLoader"]
