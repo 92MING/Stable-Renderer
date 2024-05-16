@@ -10234,6 +10234,7 @@ LGraphNode.prototype.executeAction = function(action)
 						ctx.restore();
                     }
                     break;
+                case "paths":
                 case "path":
                     ctx.textAlign = "left";
                     ctx.strokeStyle = outline_color;
@@ -10484,6 +10485,7 @@ LGraphNode.prototype.executeAction = function(action)
 							event,w.options ? w.options.multiline : false );
 					}
 					break;
+                case "paths":
 				case "path":
                     if (event.type === LiteGraph.pointerevents_method+"down") {
                         if (w.callback) {

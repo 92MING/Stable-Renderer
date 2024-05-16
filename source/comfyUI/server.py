@@ -54,6 +54,8 @@ def reload_nodes():
     AdvancedNodeBase.ReloadAllAdvanceClasses()
     nodes_module_spec.loader.exec_module(nodes)  # type: ignore
     nodes.init_custom_nodes(True)
+    from comfyUI.execution import PromptExecutor
+    PromptExecutor.instance.reload()    # type: ignore
     ComfyUILogger.debug('Nodes reloaded.')
 
 class BinaryEventTypes:
@@ -233,7 +235,6 @@ class PromptServer:
 
             upload_type = post.get("type", 'input')
             upload_dir, upload_type = get_dir_by_type(upload_type)
-            print("[DEBUG] upload dir", upload_dir)
 
             if file_data and file_data.file:
                 filename = file_data.filename
@@ -264,7 +265,6 @@ class PromptServer:
                 if file_save_func is not None:
                     file_save_func(file_data, post, filepath)
                 else:
-                    print("[DEBUG]: Writing to ", filepath)
                     with open(filepath, "wb") as f:
                         f.write(file_data.file.read())
                 

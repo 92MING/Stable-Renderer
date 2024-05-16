@@ -349,6 +349,13 @@ class PromptExecutor:
     def instance(cls_or_ins)->'PromptExecutor':
         return PromptExecutor()   # will get the singleton instance if it's already created
     
+    def reload(self):
+        self.node_pool.clear()
+        self.latest_context = None
+        self.outputs.clear()
+        self.outputs_ui.clear()
+        self.all_prompts.clear()
+    
     server: Optional['PromptServer']
     '''The server that this executor is associated with. If None, the executor'''
     node_pool: NodePool = NodePool()
@@ -939,10 +946,13 @@ class PromptExecutor:
         else:
             ComfyUILogger.log(get_log_level_by_name(level), f"Comfy Execution Msg: {event}, {data}")
 
-    def handle_execution_error(self, prompt_id: str, prompt: dict, current_outputs, executed, error, ex):
+    def handle_execution_error(self, prompt_id: str, prompt: dict, current_outputs, executed, error, ex: Exception):
         node_id = error["node_id"]
         class_type = prompt[node_id]["class_type"]
-
+        
+        if is_dev_mode():
+            ComfyUILogger.error(f"Error during execution of node {class_type}({node_id}). Error info: {error}.")
+        
         # First, send back the status to the frontend depending
         # on the exception type
         if isinstance(ex, comfy.model_management.InterruptProcessingException):
@@ -1064,8 +1074,19 @@ class PromptExecutor:
                 self.node_pool.delete(node_id, node_type)
         
             for node_id in prompt:
-                self._recursive_output_delete_if_changed(current_context, node_id)
-
+                try:
+                    self._recursive_output_delete_if_changed(current_context, node_id)
+                except Exception as ex:
+                    if is_dev_mode() and is_verbose_mode():
+                        raise ex
+                    self.handle_execution_error(prompt_id=prompt_id,
+                                                prompt=prompt,
+                                                current_outputs=context_outputs,
+                                                executed=current_context.executed_node_ids,
+                                                error={"node_id": node_id},
+                                                ex=ex)
+                    return current_context
+                
             current_outputs = set(current_context.outputs.keys())
             for x in list(current_context.outputs_ui.keys()):
                 if x not in current_outputs:
@@ -1089,12 +1110,28 @@ class PromptExecutor:
                 if is_dev_mode() and is_verbose_mode():
                     ComfyUILogger.debug(f"(in executor.execute)Nodes to be executed now: {current_context.to_be_executed}")
                 
-                # This call shouldn't raise anything if there's an error deep in
-                # the actual SD code, instead it will report the node where the
-                # error was raised
-                success, error, ex = self._recursive_execute(current_context, current_context.to_be_executed.pop(0)[-1])
+                try:
+                    success, error, ex = self._recursive_execute(current_context, current_context.to_be_executed.pop(0)[-1])
+                except Exception as e:
+                    if is_dev_mode() and is_verbose_mode():
+                        raise e
+                    ex = e  # creating local variable `ex` for later use
+                    if is_dev_mode() and is_verbose_mode():
+                        raise ex
+                    typ, _, tb = sys.exc_info()
+                    exception_type = _get_full_type_name(typ)
+                    error = {
+                        "node_id": current_context.current_node_id,
+                        "exception_message": str(ex),
+                        "exception_type": exception_type,
+                        "traceback": traceback.format_tb(tb),
+                        "current_inputs": {},
+                        "current_outputs": {}
+                    }
+                    success = False
+                    
                 current_context.success = success
-                if success is not True:
+                if not success:
                     self.handle_execution_error(prompt_id=prompt_id, 
                                                 prompt=prompt, 
                                                 current_outputs=current_outputs, 

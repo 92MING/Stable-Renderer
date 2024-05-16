@@ -271,7 +271,8 @@ class AdvancedNodeBase(ABC):
     @classmethod
     def _InitFields(cls):
         # init input fields
-        cls._InputFields = {param_name: AnnotatedParam(param) for param_name, param in cls._CallSig.parameters.items()}
+        cls._InputFields = {param_name: AnnotatedParam(param) for i, (param_name, param) in enumerate(cls._CallSig.parameters.items())
+                            if i > 0}   # skip `self`
         
         # init return fields
         return_field_names: List[Optional[str]] = []
@@ -381,9 +382,7 @@ class AdvancedNodeBase(ABC):
         optional_types = {}
         hidden_types = {}
         
-        for i, (_, field) in enumerate(cls._InputFields.items()):
-            if i == 0:
-                continue    # skip `self`
+        for field in cls._InputFields.values():
             param_type = field.param_type
             param_info = field._comfyUI_definition
             if param_type == 'required':
@@ -464,6 +463,8 @@ class AdvancedNodeBase(ABC):
 
             packed_params = _pack_param(cls._CallSig, (ins, *args), kwargs)
             for param_name, val in packed_params.items():
+                if param_name not in cls._InputFields:
+                    continue    # e.g. skip `self`
                 packed_params[param_name] = cls._InputFields[param_name].format_value(val)
             return packed_params
         

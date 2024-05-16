@@ -30,8 +30,6 @@ class LegacyImageSequenceLoader(StableRenderingNode):
         Returns:
             IMAGE: a tensor of shape (num_of_imgs, C, H, W), which concatenates all images in the sequence
         """
-        file_filter = lambda fname: fname.endswith((".jpeg", ".png", ".bmp", ".jpg"))
-        
         def extract_index(img_path, i):
             img = os.path.basename(img_path)
             if img.split('.')[0].split('_')[-1].isdigit():  # e.g. depth_0.png
@@ -44,14 +42,12 @@ class LegacyImageSequenceLoader(StableRenderingNode):
         # Read images as tensor from filenames
         tensor_images = []
         for img_path in reordered_imgs:
-            if not os.path.exists(img_path) or not file_filter(os.path.basename(img_path)):
+            if not os.path.exists(img_path):
                 continue
-            tensor_img = read_image(img_path, mode=ImageReadMode.RGB)
+            tensor_img = read_image(str(img_path), mode=ImageReadMode.RGB)
             tensor_img = tensor_img.permute(1, 2, 0).unsqueeze(0) / 255.0
             tensor_images.append(tensor_img)
 
-        if not tensor_images:
-            return None # type: ignore
         return torch.cat(tensor_images, dim=0) 
 
 
@@ -66,7 +62,6 @@ class LegacyNoiseSequenceLoader(StableRenderingNode):
                                  accept_types=[".jpeg", ".png", ".bmp", ".jpg", '.npy'])],    # type: ignore
                  ) -> LATENT:
         '''load sequence of noise from img or directly from npy.'''
-        file_filter = lambda fname: fname.endswith((".jpeg", ".png", ".bmp", ".jpg", '.npy'))
         
         def extract_index(data_path, i):
             filename = os.path.basename(data_path)
@@ -79,7 +74,7 @@ class LegacyNoiseSequenceLoader(StableRenderingNode):
 
         tensors = []
         for data_path in reordered_data_paths:
-            if not os.path.exists(data_path) or not file_filter(os.path.basename(data_path)):
+            if not os.path.exists(data_path):
                 continue
             if data_path.endswith('.npy'):
                 tensor = torch.from_numpy(np.load(data_path)).squeeze()
@@ -90,13 +85,12 @@ class LegacyNoiseSequenceLoader(StableRenderingNode):
                 if tensor.shape[-1] == 4:
                     tensor = rearrange(tensor, 'h w c -> c h w')
             else:
-                tensor = read_image(data_path, mode=ImageReadMode.RGB_ALPHA) / 255.0
+                tensor = read_image(str(data_path), mode=ImageReadMode.RGB_ALPHA) / 255.0
             tensors.append(tensor)
         for t in tensors:
             if t.shape != tensors[0].shape:
                 raise ValueError(f"Tensor data has inconsistent shapes: {t.shape} and {tensors[0].shape}.")
-        if len(tensors) == 0:
-            return None
+
         t = torch.cat(tensors, dim=0)
         return LATENT(samples=torch.zeros_like(t), noise=t)
 
@@ -111,8 +105,6 @@ class LegacyIDSequenceLoader(StableRenderingNode):
                                  to_folder='temp',
                                  accept_types=[".jpeg", ".png", ".bmp", ".jpg", '.npy'])],  # type: ignore
                 ) -> IDMap:
-        file_filter = lambda fname: fname.endswith((".jpeg", ".png", ".bmp", ".jpg", '.npy'))
-        
         def extract_index(data_path, i):
             filename = os.path.basename(data_path)
             if filename.split('.')[0].split('_')[-1].isdigit():  # e.g. ..._0.npy
@@ -126,7 +118,7 @@ class LegacyIDSequenceLoader(StableRenderingNode):
 
         id_tensors = [] 
         for data_path in reordered_data_paths:
-            if not os.path.exists(data_path) or not file_filter(os.path.basename(data_path)):
+            if not os.path.exists(data_path):
                 continue
             if data_path.endswith('.npy'):
                 id_tensor = torch.from_numpy(np.load(data_path)).squeeze()
@@ -137,14 +129,12 @@ class LegacyIDSequenceLoader(StableRenderingNode):
                 if id_tensor.shape[-1] == 4:
                     id_tensor = rearrange(id_tensor, 'h w c -> c h w')
             else:
-                id_tensor = read_image(data_path, mode=ImageReadMode.RGB_ALPHA) / 255.0
+                id_tensor = read_image(str(data_path), mode=ImageReadMode.RGB_ALPHA) / 255.0
             id_tensors.append(id_tensor)
 
         for t in id_tensors:
             if t.shape != id_tensors[0].shape:
                 raise ValueError(f"Tensor data has inconsistent shapes: {t.shape} and {id_tensors[0].shape}.")
-        if not id_tensors:
-            return None
         t = torch.cat(id_tensors, dim=0)
 
         return IDMap(frame_indices=frame_indices, tensor=t)
