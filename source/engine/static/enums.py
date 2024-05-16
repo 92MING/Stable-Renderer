@@ -4,7 +4,6 @@ import glm
 import torch
 import numpy as np
 import OpenGL.GL as gl
-import cupy
 
 from typing import Optional
 from enum import Enum
@@ -475,39 +474,6 @@ class TextureDataTypeItem:
             
             case _:
                 return None
-    
-    @property
-    def cupy_dtype(self):
-        '''return the related dtype in cupy'''
-        match self.numpy_dtype:
-            case np.uint8:
-                return cupy.uint8
-            case np.int8:
-                return cupy.int8
-            
-            case np.uint16:
-                return cupy.uint16
-            case np.int16:  
-                return cupy.int16
-            case np.float16:
-                return cupy.float16
-            
-            case np.uint32:
-                return cupy.uint32
-            case np.int32:
-                return cupy.int32
-            case np.float32:
-                return cupy.float32
-            
-            case np.uint64:
-                return cupy.uint64
-            case np.int64:
-                return cupy.int64
-            case np.float64:
-                return cupy.float64
-            
-            case _:
-                raise ValueError(f'No matching cupy dtype for {self.numpy_dtype}')
     
 class TextureDataType(Enum):
     '''

@@ -8,7 +8,7 @@ from typing import Iterable, Union, TYPE_CHECKING, Optional, Callable, Any
 from engine.static.mesh import Mesh
 from engine.static.material import Material, DefaultTextureType
 from engine.static.texture import Texture
-from engine.static.enums import RenderOrder, EngineMode, RenderMode
+from engine.static.enums import *
 from .renderer import Renderer
 from ..ai import SpriteInfo
 from common_utils.global_utils import GetOrAddGlobalValue, SetGlobalValue
@@ -113,7 +113,7 @@ class CorrMapRenderer(Renderer):
                 mat.addDefaultTexture(self.corrmaps[i], DefaultTextureType.CorrespondMap)
             if not mat.hasDefaultTexture(DefaultTextureType.NoiseTex) and self.auto_noise_map_if_not_exist:
                 mat.addDefaultTexture(Texture.CreateNoiseTex(), DefaultTextureType.NoiseTex)
-        
+                
     def _drawAvailable(self):
         return (self.spriteID is not None and \
                 len(self.corrmaps) == len(self.materials) and \

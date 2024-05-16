@@ -393,16 +393,20 @@ class AnnotatedParam(metaclass=_anno_param_meta):
             return val
         
         need_convert = False
-        if isinstance(self.origin_type, str):
+        my_type = self.origin_type
+        if my_type is None:
+            my_type = self._comfy_name
+        
+        if isinstance(my_type, str):
             self_comfy_name = self._comfy_name
             if self_comfy_name != "COMBO":  # no need to convert combo
                 val_comfy_name = get_comfy_name(val)
                 if val_comfy_name != self_comfy_name:
                     need_convert = True
-        else:
-            if not valueTypeCheck(val, self.origin_type):   # type: ignore
-                need_convert = True
-        
+                    
+        elif not valueTypeCheck(val, my_type):   # type: ignore
+            need_convert = True
+            
         if need_convert:
             return self.value_formatter(val)
         return val
@@ -485,7 +489,6 @@ def STRING(multiline=False, forceInput: bool=False, dynamicPrompts: bool=False)-
     
     Notes:
         You can also label STRING with `STRING[True, True, False]` to put the parameters. It is a alias for `STRING(True, True, False)`.
-        
         You can still use `str` for type annotation.
         
     Args:
@@ -504,7 +507,6 @@ def BOOLEAN(label_on: str='True', label_off: str='False')->Annotated:
     
     Note:
         You can also label BOOLEAN with `BOOLEAN['Yes', 'No']` to put the parameters. It is a alias for `BOOLEAN('Yes', 'No')`.
-    
         You can still use `bool` for type annotation.
     
     Args:
@@ -515,7 +517,6 @@ def BOOLEAN(label_on: str='True', label_off: str='False')->Annotated:
     return Annotated[bool, AnnotatedParam(origin=bool, extra_params=data, comfy_name='BOOLEAN')]
 globals()['BOOLEAN'] = GetableFunc(BOOLEAN)    # trick for faking IDE to believe BOOLEAN is a function
 
-
 def PATH(accept_folder: bool = False,
          accept_multiple: bool = False,
          to_folder: Literal['input', 'output', 'temp']='input',
@@ -525,11 +526,46 @@ def PATH(accept_folder: bool = False,
     Path type. Its actually string, but this will makes ComfyUI to create a button for selecting file/folder.
     You can also label PATH like `PATH[True, ...]` to put the parameters.
     
-    Note:
-        You can still use `str` for type annotation.
     Args:
         - accept_folder: Whether to accept folder.
         - accept_multiple: Whether to accept multiple files. In this case, the return value will be a list of paths.
+        - to_folder: The folder type. It should be one of "input", "output", "temp".
+        - accept_types: The file types to accept. e.g. ['.jpg', '.png', '.jpeg', '.bmp'] or 'image/*'.
+                        Default = '*' (accept all types)
+    '''
+    if accept_multiple:
+        return PATHS(accept_folder, to_folder, accept_types)
+    
+    if not accept_types:
+        accept_types = '*'
+    else:
+        if isinstance(accept_types, (list, tuple)):
+            accept_types = ','.join(accept_types)
+            
+    def path_formatter(val: str):
+        if isinstance(val, list) and len(val)==1:
+            val = val[0]
+        if ';' in val:
+            val = val.split(';')[0]
+        return Path(val)
+    anno = AnnotatedParam(origin='PATH', 
+                          extra_params={'accept_types': accept_types, 
+                                        'accept_folder': accept_folder, 
+                                        'accept_multiple': accept_multiple, 
+                                        'to_folder': to_folder,},
+                          value_formatter=path_formatter)
+    return Annotated[Path, anno]
+globals()['PATH'] = GetableFunc(PATH)    # trick for faking IDE to believe PATH is a function
+
+def PATHS(accept_folder: bool = False,
+          to_folder: Literal['input', 'output', 'temp']='input',
+          accept_types: Union[List[str], str, Tuple[str, ...], None] = None,
+          )->Annotated:
+    '''
+    list[path] version of PATH. Default to accept multiple files.
+    
+    Args:
+        - accept_folder: Whether to accept folder.
         - to_folder: The folder type. It should be one of "input", "output", "temp".
         - accept_types: The file types to accept. e.g. ['.jpg', '.png', '.jpeg', '.bmp'] or 'image/*'.
                         Default = '*' (accept all types)
@@ -541,27 +577,31 @@ def PATH(accept_folder: bool = False,
         if isinstance(accept_types, (list, tuple)):
             accept_types = ','.join(accept_types)
             
-    def path_formatter(anno, val):
-        print("[DEBUG] anno.tags", anno.tags)
-
-        if not 'list' in anno.tags:
-            return Path(val)
+    def path_formatter(val: str):
+        if isinstance(val, list) and len(val)==1 and ';' in val[0]:
+            val = val[0]
+        if not ';' in val:
+            return [Path(val),]
         return [Path(v) for v in val.split(';') if v] if val else []
-    anno = AnnotatedParam(origin=Path, 
+    anno = AnnotatedParam(origin='PATHS', 
                           extra_params={'accept_types': accept_types, 
                                         'accept_folder': accept_folder, 
-                                        'accept_multiple': accept_multiple, 
+                                        'accept_multiple': True, 
                                         'to_folder': to_folder,},
-                          comfy_name='PATH',
-                          tags=['list'] if accept_multiple else [])
-    anno.value_formatter = partial(path_formatter, anno)
+                          value_formatter=path_formatter)
     return Annotated[Path, anno]
+globals()['PATHS'] = GetableFunc(PATHS)    # trick for faking IDE to believe PATHS is a function
 
-globals()['PATH'] = GetableFunc(PATH)    # trick for faking IDE to believe PATH is a function
-AnnotatedParam.AddSpecialPostInitLogic(
-    lambda param: param.extra_params.update({'accept_multiple': True}) if (param.comfy_name=='PATH' and 'list' in param.tags) else None
-)
-
+def _check_list_path_type_and_modify(anno: AnnotatedParam):
+    if anno._comfy_name == 'PATH':
+        if 'list' in anno.tags:
+            anno.tags.remove('list')
+            anno.extra_params.update({'accept_multiple': True})
+            anno.comfy_name = 'PATHS'
+    elif anno._comfy_name == 'PATHS':
+        if 'list' in anno.tags:
+            anno.tags.remove('list')    # just remove the tag, not necessary to use for path type
+AnnotatedParam.AddSpecialPostInitLogic(_check_list_path_type_and_modify)
 
 __all__.extend(['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'PATH'])
 # endregion
@@ -1085,27 +1125,6 @@ class Lazy(Generic[_T]):
             
         return self._value  # type: ignore
     
-class Array(list, Generic[_T]):
-    '''
-    Mark the type as array, to allow the param accept multiple values and pack as a list.
-    This could only be used in input parameters.
-    
-    TODO: this type is not yet finished
-    '''
-    
-    def __class_getitem__(cls, tp: Union[type, TypeAlias, AnnotatedParam]) -> Annotated:
-        '''
-        Mark the type as array, to allow the param accept multiple values and pack as a list.
-        This could only be used in input parameters.
-        '''
-        real_type = tp.origin_type if isinstance(tp, AnnotatedParam) else tp
-        return Annotated[real_type, AnnotatedParam('ARRAY', inner_type=tp, tags=['list'])]    # type: ignore
 
-    @classmethod
-    def __ComfyValueFormatter__(cls, value):
-        '''Convert the value to array type.'''
-        raise NotImplementedError   # TODO: implement this
-
-
-__all__.extend(['Lazy', 'Array'])
+__all__.extend(['Lazy'])
 # endregion

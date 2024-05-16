@@ -285,9 +285,9 @@ async function uploadFile(file, save_to='input') {
 	}
   }
 
-function createPathWidget(node, inputName, inputData, app) {
+function createPathWidget(node, inputName, inputData, app, widgetTypeName="path") {
 	var widget = node.addWidget(
-		"path", 
+		widgetTypeName, 
 		inputName, 
 		"", 
 		function (canvas, node){
@@ -355,6 +355,9 @@ function createPathWidget(node, inputName, inputData, app) {
 		{}
 	);
 	return { widget };
+}
+function createPathsWidget(node, inputName, inputData, app){
+	return createPathWidget(node, inputName, inputData, app, "paths");
 }
 
 function addMultilineWidget(node, name, opts, app) {
@@ -652,4 +655,7 @@ export const ComfyWidgets = {
 	PATH(node, inputName, inputData, app) {
 		return createPathWidget(node, inputName, inputData, app);
 	},
+	PATHS(node, inputName, inputData, app) {
+		return createPathsWidget(node, inputName, inputData, app);
+	}
 };
