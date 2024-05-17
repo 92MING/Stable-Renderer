@@ -696,9 +696,13 @@ CONDITIONING: TypeAlias = Annotated[
     AnnotatedParam(origin=List[List[Tuple[Tensor, Dict[str, Any]]]], comfy_name='CONDITIONING')
 ]
 """
-The Conditioning datatype is a list of tuples, where the first element in the 
-tuple is the regular Tensor output from a node, and the second element is a dictionary containing
-other non-tensor outputs from the node. Refer to the docstrings of convert_cond() for more information.
+This the the type hints for the origin conditioning type in comfyUI.
+CONDITIONING is a list of tuples, each means a single condition,
+i.e. (condition_tensor, output_dict). 
+
+Since the origin code is a bit messy, the detail of CONDITIONING is still not clear.
+For more information, check `convert_cond` in comfyUI/comfy/sample.py
+
 An example structure of conditioning
 [
     [cond_tensor_a, {"some_output_a": Any}],

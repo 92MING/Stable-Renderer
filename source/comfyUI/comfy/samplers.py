@@ -1,26 +1,59 @@
 import torch
 import collections
 import math
-import inspect
+
 from inspect import signature
+from torch import Tensor
 from abc import ABC, abstractmethod
 from deprecated import deprecated
 from typing import (List, Dict, Any, Tuple, Optional, Callable, Literal, TYPE_CHECKING, Sequence, Union)
-from types import MethodType
 from functools import partial
 
 from common_utils.debug_utils import ComfyUILogger
-from common_utils.global_utils import GetOrCreateGlobalValue, is_engine_looping, is_dev_mode, is_verbose_mode
+from common_utils.global_utils import is_engine_looping, is_dev_mode, is_verbose_mode
 from .k_diffusion import sampling as k_diffusion_sampling
 from .extra_samplers import uni_pc
 from comfy import model_management, model_base
+from comfy.conds import CONDRegular
 
 if TYPE_CHECKING:
-    from comfyUI.types import ConvertedConditioning, SamplerCallback
+    from comfyUI.types import ConvertedCondition, SamplerCallback
     from comfy.model_sampling import ModelSamplingProtocol
+    from comfy.controlnet import ControlBase
 
 
-def get_area_and_mult(conds, x_in, timestep_in):
+cond_obj = collections.namedtuple('cond_obj', ['input_x', 'mult', 'conditioning', 'area', 'control', 'patches', 'condition_type'])
+
+class ConditionObj(cond_obj):
+    '''
+    Type hinting class for the namedtuple `cond_obj` in comfyUI's original code. 
+    This obj basically acts as a container for 1 single condition for a latent.
+    '''
+    
+    input_x: Tensor
+    '''the latent'''
+    mult: Tensor
+    
+    conditioning: Dict[str, CONDRegular]
+    '''
+    Conditions for this latent. Though this obj is for 1 single latent, it can have multiple condition values, e.g. for different layers.
+    e.g. {'c_crossattn': <comfy.conds.CONDCrossAttn object...}
+    '''
+    area: Tuple[int, int, int, int]
+    '''
+    Area of this condition to be applied on the latent.
+    '''
+    control: Optional[Any]
+    patches: Optional[Dict[str, Any]]
+    condition_type: Literal['pos', 'neg']
+    
+def get_area_and_mult(conds: "ConvertedCondition",
+                      x_in: Tensor, 
+                      timestep_in: Tensor,
+                      condition_type: Literal['pos', 'neg'] = 'pos',
+                      repeat_to_batch=True): # though timestep is a tensor, it is has just 1 value
+    if len(x_in.shape) == 3:
+        x_in = x_in.unsqueeze(0)
     area = (x_in.shape[2], x_in.shape[3], 0, 0)
     strength = 1.0
 
@@ -71,8 +104,11 @@ def get_area_and_mult(conds, x_in, timestep_in):
     conditioning = {}
     model_conds = conds["model_conds"]
     for c in model_conds:
-        conditioning[c] = model_conds[c].process_cond(batch_size=x_in.shape[0], device=x_in.device, area=area)
-
+        if is_dev_mode() and is_verbose_mode():
+            ComfyUILogger.debug(f'(comfy.samplers.get_area_and_mult) processing condition `{c}`...')
+        conditioning[c] = model_conds[c].process_cond(batch_size=x_in.shape[0], device=x_in.device, area=area, repeat=repeat_to_batch)
+        # condition size will be repeated to batch_size here(if repeat=True), e.g. [1, 77, 768] -> [4, 77, 768] for batch_size=4
+    
     control = conds.get('control', None)
 
     patches = None
@@ -88,10 +124,9 @@ def get_area_and_mult(conds, x_in, timestep_in):
 
         patches['middle_patch'] = [gligen_patch]
 
-    cond_obj = collections.namedtuple('cond_obj', ['input_x', 'mult', 'conditioning', 'area', 'control', 'patches'])
-    return cond_obj(input_x, mult, conditioning, area, control, patches)
+    return ConditionObj(input_x, mult, conditioning, area, control, patches, condition_type)
 
-def cond_equal_size(c1, c2):
+def cond_equal_size(c1: dict[str, CONDRegular], c2: dict[str, CONDRegular]):
     if c1 is c2:
         return True
     if c1.keys() != c2.keys():
@@ -101,11 +136,11 @@ def cond_equal_size(c1, c2):
             return False
     return True
 
-def can_concat_cond(c1, c2):
+def can_concat_cond(c1: ConditionObj, c2: ConditionObj):
     if c1.input_x.shape != c2.input_x.shape:
         return False
 
-    def objects_concatable(obj1, obj2):
+    def objects_contactable(obj1, obj2):
         if (obj1 is None) != (obj2 is None):
             return False
         if obj1 is not None:
@@ -113,45 +148,52 @@ def can_concat_cond(c1, c2):
                 return False
         return True
 
-    if not objects_concatable(c1.control, c2.control):
+    if not objects_contactable(c1.control, c2.control):
         return False
 
-    if not objects_concatable(c1.patches, c2.patches):
+    if not objects_contactable(c1.patches, c2.patches):
         return False
 
     return cond_equal_size(c1.conditioning, c2.conditioning)
 
-def cond_cat(c_list):
-    c_crossattn = []
-    c_concat = []
-    c_adm = []
-    crossattn_max_len = 0
-
-    temp = {}
-    for x in c_list:
-        for k in x:
-            cur = temp.get(k, [])
-            cur.append(x[k])
-            temp[k] = cur
-
+def cond_cat(c_list: list[dict[str, "CONDRegular"]]):
+    temp: dict[str, list["CONDRegular"]] = {}
+    for condition in c_list:
+        for condition_name in condition:
+            if condition_name not in temp:
+                temp[condition_name] = []
+            temp[condition_name].append(condition[condition_name])  
+            # e.g. if 1 pos prompt, 2 neg prompt, then temp['c_crossattn'] = [pos, neg1, neg2]
+            # for batch_size=3, then each prompt's shape=[3, 77, 768]
+            
     out = {}
-    for k in temp:
-        conds = temp[k]
-        out[k] = conds[0].concat(conds[1:])
-
+    for condition_name in temp:
+        conds = temp[condition_name]
+        out[condition_name] = conds[0].concat(conds[1:])
+    
     return out
 
 def calc_cond_uncond_batch(model: model_base.BaseModel, 
-                           cond, 
-                           uncond, 
-                           x_in, 
-                           timestep, 
-                           model_options, 
+                           cond: list["ConvertedCondition"], 
+                           uncond: list["ConvertedCondition"], 
+                           x_in: Tensor, 
+                           timestep: Tensor,    # e.g. Tensor([0.7297]), the ratio of the current timestep to the total timesteps
+                           model_options: dict,     # e.g. {'transformer_options': ...}
                            **kwargs):
     '''
     This method concat the cond & uncond's inference input as a batch, i.e. (2*4*64*64),
     and return both's result(latent space)
     '''
+    
+    # here, cond[0]['model_conds']['c_crossattn'].cond.shape is still [1, 77, 768]
+    if is_dev_mode() and is_verbose_mode():
+        pos_cross_attn_shapes = [c['model_conds']['c_crossattn'].cond.shape for c in cond]
+        neg_cross_attn_shapes = [c['model_conds']['c_crossattn'].cond.shape for c in uncond]
+        ComfyUILogger.debug(f'(comfy.samplers.calc_cond_uncond_batch) pos_cross_attn_shapes={pos_cross_attn_shapes}')
+        ComfyUILogger.debug(f'(comfy.samplers.calc_cond_uncond_batch) neg_cross_attn_shapes={neg_cross_attn_shapes}')
+    cond = cond or []
+    uncond = uncond or []
+    
     out_cond = torch.zeros_like(x_in)
     out_count = torch.ones_like(x_in) * 1e-37
 
@@ -160,68 +202,79 @@ def calc_cond_uncond_batch(model: model_base.BaseModel,
 
     COND = 0
     UNCOND = 1
-    has_uncond = False
-
-    to_run = []
-    for x in cond:
-        p = get_area_and_mult(x, x_in, timestep)
+    to_run: list[tuple[ConditionObj, Literal[0, 1]]] = []
+    
+    for i in cond:
+        p = get_area_and_mult(i, x_in, timestep, condition_type='pos')
+        # in normal case, `get_area_and_mult` will make the origin condition tensor repeated to batch_size
         if p is None:
             continue
         to_run += [(p, COND)]
         
-    if uncond is not None:
-        for x in uncond:
-            p = get_area_and_mult(x, x_in, timestep)
-            if p is None:
-                continue
-            to_run += [(p, UNCOND)]
-            has_uncond = True
-            
+    for i in uncond:
+        p = get_area_and_mult(i, x_in, timestep, condition_type='neg')
+        if p is None:
+            continue
+        to_run += [(p, UNCOND)]
+        
     while len(to_run) > 0:
-        first = to_run[0]
-        first_shape = first[0][0].shape
-        to_batch_temp = []
-        for x in range(len(to_run)):
-            if can_concat_cond(to_run[x][0], first[0]):
-                to_batch_temp += [x]
+        first_cond = to_run[0]
+        first_latent_shape = first_cond[0].input_x.shape
+        
+        to_batch_indices: list[int] = []   # can contains both pos or neg jobs
+        
+        for i in range(len(to_run)):
+            if can_concat_cond(to_run[i][0], first_cond[0]):
+                to_batch_indices += [i]
 
-        to_batch_temp.reverse()
-        to_batch = to_batch_temp[:1]
+        to_batch_indices.reverse()
+        to_batch = to_batch_indices[:1] # start from last one
 
         free_memory = model_management.get_free_memory(x_in.device)
-        for i in range(1, len(to_batch_temp) + 1):
-            batch_amount = to_batch_temp[:len(to_batch_temp)//i]
-            input_shape = [len(batch_amount) * first_shape[0]] + list(first_shape)[1:]
-            if model.memory_required(input_shape) < free_memory:
-                to_batch = batch_amount
+        for i in range(1, len(to_batch_indices) + 1):   # from 1 to len(to_batch_indices), test the max possible batch size can be run
+            possible_batch_indices = to_batch_indices[:len(to_batch_indices)//i]
+            input_shape = [len(possible_batch_indices) * first_latent_shape[0]] + list(first_latent_shape)[1:]    # e.g. [2,] + [4, 64, 64] = [2, 4, 64, 64]
+            if model.memory_required(input_shape) < free_memory:    # type: ignore
+                to_batch = possible_batch_indices
                 break
 
-        input_x = []
+        all_input_x = []    # all latents
         mult = []
-        c = []
-        cond_or_uncond = []
-        area = []
-        control = None
-        patches = None
-        for x in to_batch:
-            o = to_run.pop(x)
-            p = o[0]
-            input_x.append(p.input_x)
-            mult.append(p.mult)
-            c.append(p.conditioning)
-            area.append(p.area)
-            cond_or_uncond.append(o[1])
-            control = p.control
-            patches = p.patches
-
-        batch_chunks = len(cond_or_uncond)
-        input_x = torch.cat(input_x)
-        c = cond_cat(c)
-        timestep_ = torch.cat([timestep] * batch_chunks)
+        conditions: list[dict[str, "CONDRegular"]] = []
+        cond_or_uncond: list[Literal[0, 1]] = []    # e.g. [COND, UNCOND, COND, COND, UNCOND, ...]
+        positive_cond_indices: list[int] = []
+        area: list[tuple[int,int,int,int]] = []
+        control: Optional["ControlBase"] = None
+        patches: Optional[dict[str, Any]] = None    # the data for modifying the model's patches
+        
+        for i in to_batch:
+            cond_obj, condition_type = to_run.pop(i)
+            
+            if condition_type == COND:
+                positive_cond_indices.extend(list(range(len(all_input_x), len(all_input_x) + cond_obj.input_x.shape[0])))
+            
+            all_input_x.append(cond_obj.input_x)
+            mult.append(cond_obj.mult)
+            conditions.append(cond_obj.conditioning)
+            area.append(cond_obj.area)
+            control = cond_obj.control
+            patches = cond_obj.patches
+            cond_or_uncond.append(condition_type)
+        
+        batch_chunks = len(cond_or_uncond)	 
+        batch_chunk_indices: list[list[int]] = []
+        offset = 0
+        for inp in all_input_x:
+            batch_chunk_indices.append(list(range(offset, offset+inp.shape[0])))
+            offset += inp.shape[0]
+        
+        input_x = torch.cat(all_input_x)
+        c = cond_cat(conditions)    # e.g. for 1 pos, 2 neg, batch_size=3, here c['c_crossattn'].shape = [9, 77, 768], 9=3*(1+2)
+        timestep_ = torch.cat([timestep] * len(cond_or_uncond))[:len(input_x)] # for case existing individual conditions, timestep should be duplicated, so need to slice it
 
         if control is not None:
             c['control'] = control.get_control(input_x, timestep_, c, len(cond_or_uncond))
-
+  
         transformer_options = {}
         if 'transformer_options' in model_options:
             transformer_options = model_options['transformer_options'].copy()
@@ -239,6 +292,7 @@ def calc_cond_uncond_batch(model: model_base.BaseModel,
                 transformer_options["patches"] = patches
 
         transformer_options["cond_or_uncond"] = cond_or_uncond[:]
+        transformer_options['positive_cond_indices'] = positive_cond_indices
         transformer_options["sigmas"] = timestep
 
         c['transformer_options'] = transformer_options
@@ -249,7 +303,7 @@ def calc_cond_uncond_batch(model: model_base.BaseModel,
         else:
             output = model.apply_model(input_x, timestep_, **c).chunk(batch_chunks) # basemodel apply_model
         del input_x
-
+        
         for o in range(batch_chunks):
             if cond_or_uncond[o] == COND:
                 out_cond[:,:,area[o][2]:area[o][0] + area[o][2],area[o][3]:area[o][1] + area[o][3]] += output[o] * mult[o]
@@ -258,13 +312,14 @@ def calc_cond_uncond_batch(model: model_base.BaseModel,
                 out_uncond[:,:,area[o][2]:area[o][0] + area[o][2],area[o][3]:area[o][1] + area[o][3]] += output[o] * mult[o]
                 out_uncond_count[:,:,area[o][2]:area[o][0] + area[o][2],area[o][3]:area[o][1] + area[o][3]] += mult[o]
         del mult
-
+        
     out_cond /= out_count
     del out_count
     out_uncond /= out_uncond_count
     del out_uncond_count
     return out_cond, out_uncond
 
+# region REAL SAMPLING ENTRY FUNCTION
 def sampling_function(model: model_base.BaseModel,
                       x, 
                       timestep, 
@@ -272,20 +327,18 @@ def sampling_function(model: model_base.BaseModel,
                       cond, 
                       cond_scale, 
                       model_options={}, 
-                      seed=None,
                       **kwargs):
     '''
-    The main sampling function shared by all the samplers.
-    Returns denoised image.
+    The real, main sampling function shared by all the samplers, for sampling 1 step.
+    Returns denoised latent.
     '''
     if math.isclose(cond_scale, 1.0) and model_options.get("disable_cfg1_optimization", False) == False:
         uncond_ = None
     else:
         uncond_ = uncond
-    
     cond_pred, uncond_pred = calc_cond_uncond_batch(model, 
                                                     cond, 
-                                                    uncond_, 
+                                                    uncond_,  # type: ignore
                                                     x, 
                                                     timestep, 
                                                     model_options,
@@ -304,8 +357,13 @@ def sampling_function(model: model_base.BaseModel,
 
     return cfg_result
 
+# endregion
+
+# region model wrapper classes
 class CFGNoisePredictor(torch.nn.Module):
-    def __init__(self, model):
+    '''Real wrapper of `BaseModel`'''
+    
+    def __init__(self, model: model_base.BaseModel):
         super().__init__()
         self.inner_model = model
         
@@ -327,6 +385,10 @@ class CFGNoisePredictor(torch.nn.Module):
         return self.apply_model(*args, **kwargs)
 
 class KSamplerX0Inpaint(torch.nn.Module):
+    '''
+    `KSamplerX0Inpaint is the wrapper of `CFGNoisePredictor`, and
+    `CFGNoisePredictor` is the wrapper of the model.
+    '''
     def __init__(self,
                  model: CFGNoisePredictor,
                  sigmas: torch.Tensor):
@@ -346,8 +408,9 @@ class KSamplerX0Inpaint(torch.nn.Module):
         
         out = self.inner_model(x, sigma, cond=cond, uncond=uncond, cond_scale=cond_scale, model_options=model_options, seed=seed, **kwargs)
         if denoise_mask is not None:
-            out = out * denoise_mask + self.latent_image * latent_mask
+            out = out * denoise_mask + self.latent_image * latent_mask  # type: ignore
         return out
+# endregion
 
 def simple_scheduler(model, steps):
     s = model.model_sampling
@@ -426,7 +489,7 @@ def get_mask_aabb(masks: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     return bounding_boxes, is_empty
 
 def resolve_areas_and_cond_masks(
-        conditions: "ConvertedConditioning", h: int, w: int, device: str
+        conditions: list["ConvertedCondition"], h: int, w: int, device: str
     ):
     # Modifies the conditions in-place
     # We need to decide on an area outside the sampling loop in order to properly generate opposite areas of equal sizes.
@@ -514,7 +577,7 @@ def create_cond_with_same_area_if_none(conds, c):
 
 def calculate_start_end_timesteps(
         model: model_base.BaseModel,
-        conds: "ConvertedConditioning"):
+        conds: list["ConvertedCondition"]):
     """
     Add 'timestep_start' and 'timestep_end' to each conditioning
     if 'start_percent' or 'end_percent' is present.
@@ -538,7 +601,7 @@ def calculate_start_end_timesteps(
                 n['timestep_end'] = timestep_end
             conds[t] = n
 
-def pre_run_control(model: model_base.BaseModel, conds: "ConvertedConditioning"):
+def pre_run_control(model: model_base.BaseModel, conds: list["ConvertedCondition"]):
     """
     Modifies the conds in-place
     Preruns the controlnets in the conds
@@ -591,11 +654,13 @@ def apply_empty_x_to_equal_area(conds, uncond, name, uncond_fill_func):
                 uncond[temp[1]] = n
 
 def encode_model_conds(model_function: Callable[[Dict[str, Any]], Dict[str, Any]],
-                       conds: "ConvertedConditioning",
+                       conds: list["ConvertedCondition"],
                        noise: torch.Tensor,
                        device: str,
                        prompt_type: Literal["positive", "negative"],
                        **kwargs):
+    # possible kwargs: `latent_image`, `denoise_mask`, `seed`,...
+
     for t in range(len(conds)):
         x = conds[t]
         params = x.copy()
@@ -619,7 +684,21 @@ def encode_model_conds(model_function: Callable[[Dict[str, Any]], Dict[str, Any]
         x['model_conds'] = model_conds
         conds[t] = x
     
+    # e.g. for 2 neg prompt, [cond['model_conds']['c_crossattn'].cond.shape for cond in conds] = [[1, 77, 768], [1, 77, 768]]
     return conds
+
+
+# region K-sampler method wrappers
+KSAMPLER_NAMES = ["euler", "euler_ancestral", "heun", "heunpp2","dpm_2", "dpm_2_ancestral",
+                  "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral", "dpmpp_sde", "dpmpp_sde_gpu",
+                  "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_2m_sde_gpu", "dpmpp_3m_sde", "dpmpp_3m_sde_gpu", "ddpm", "lcm",]
+'''all possible ksampler types'''
+
+SAMPLER_NAMES = KSAMPLER_NAMES + ["ddim", "uni_pc", "uni_pc_bh2"]
+'''all possible sampler types. This is the full list of samplers that can be used in the UI.'''
+
+SCHEDULER_NAMES = ["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform"]
+'''all possible schedulers'''
 
 class Sampler(ABC):
     '''Base class of samplers.'''
@@ -633,25 +712,14 @@ class Sampler(ABC):
         sigma = float(sigmas[0])
         return math.isclose(max_sigma, sigma, rel_tol=1e-05) or sigma > max_sigma
 
-KSAMPLER_NAMES = ["euler", "euler_ancestral", "heun", "heunpp2","dpm_2", "dpm_2_ancestral",
-                  "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral", "dpmpp_sde", "dpmpp_sde_gpu",
-                  "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_2m_sde_gpu", "dpmpp_3m_sde", "dpmpp_3m_sde_gpu", "ddpm", "lcm",]
-'''all possible ksampler types'''
-
-SAMPLER_NAMES = KSAMPLER_NAMES + ["ddim", "uni_pc", "uni_pc_bh2"]
-'''all possible sampler types. This is the full list of samplers that can be used in the UI.'''
-
-SCHEDULER_NAMES = ["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform"]
-'''all possible schedulers'''
-
 def _get_method_param_count(method: Callable) -> int:
     param_count = len(signature(method).parameters)
     return param_count
 
+# callbacks for sampling
 def _call_no_arg_callback(c, data_form_upper):
     '''calling no-arg callback'''
     return c()
-
 def _call_1_arg_callback(callback, total_steps, timesteps, sigmas: torch.Tensor, dict_data_from_upper: dict):
     '''when callbacks with only 1 arg accepted is given, the `SamplingCallbackContext` is passed as the only arg.'''
     from comfyUI.types import SamplingCallbackContext
@@ -668,12 +736,11 @@ def _call_1_arg_callback(callback, total_steps, timesteps, sigmas: torch.Tensor,
             continue
         setattr(context, key, val)
     return callback(context)
-
 def _call_4_arg_callback(callback, total_steps, dict_data_from_upper: dict):
     '''This is the origin callback format for sampling methods: (i, denoised, x, total_steps)'''
     return callback(dict_data_from_upper["i"], dict_data_from_upper["denoised"], dict_data_from_upper["x"], total_steps)
 
-class KSAMPLER_METHOD(Sampler):
+class SAMPLER_METHOD(Sampler):
     '''wrapper for sampling methods'''
     def __init__(self, 
                  sampler_function: Callable,
@@ -726,6 +793,7 @@ class KSAMPLER_METHOD(Sampler):
         extra_options = extra_args.copy()
         extra_options.update(self.extra_options)
         extra_options.update(kwargs)
+        
         samples = self.sampler_function(model_k, 
                                         noise, 
                                         sigmas, 
@@ -734,22 +802,24 @@ class KSAMPLER_METHOD(Sampler):
                                         disable=disable_pbar)
         return samples
 
-@deprecated # `KSAMPLER` is the old name of `KSAMPLER_METHOD`, now deprecated.
-class KSAMPLER(KSAMPLER_METHOD):
+@deprecated # `KSAMPLER` is the old name of `SAMPLER_METHOD`, now deprecated.
+class KSAMPLER(SAMPLER_METHOD):
     '''
-    The origin name of `KSAMPLER_METHOD` is `KSAMPLER` actually, but it makes things very messy.
+    The origin name of `KSAMPLER_METHOD` is `KSAMPLER` actually, but it makes the code a bit messy (since there are 2 `KSampler` classes in the same file),
+    For long term consideration, I decided to change the name to `KSAMPLER_METHOD`(which act as a wrapper of a sampler function) here.
+    
     For the sake of compatibility, `KSAMPLER` is still available as an alias of `KSAMPLER_METHOD`.
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-def get_ksampler_method(sampler_name, extra_options={}, inpaint_options={})->KSAMPLER_METHOD:
+def get_sampler_method(sampler_name, extra_options={}, inpaint_options={})->SAMPLER_METHOD:
     if sampler_name == "uni_pc":
-        return KSAMPLER_METHOD(uni_pc.sample_unipc)
+        return SAMPLER_METHOD(uni_pc.sample_unipc)
     elif sampler_name == "uni_pc_bh2":
-        return KSAMPLER_METHOD(uni_pc.sample_unipc_bh2)
+        return SAMPLER_METHOD(uni_pc.sample_unipc_bh2)
     elif sampler_name == "ddim":
-        return get_ksampler_method("euler", extra_options=extra_options, inpaint_options={"random": True})
+        return get_sampler_method("euler", extra_options=extra_options, inpaint_options={"random": True})
     elif sampler_name == "dpm_fast":
         def dpm_fast_function(model, noise, sigmas, extra_args, callbacks, disable, timesteps, **kwargs):
             sigma_min = sigmas[-1]
@@ -776,33 +846,30 @@ def get_ksampler_method(sampler_name, extra_options={}, inpaint_options={})->KSA
     else:
         sampler_function = getattr(k_diffusion_sampling, "sample_{}".format(sampler_name))
 
-    return KSAMPLER_METHOD(sampler_function, extra_options, inpaint_options)
+    return SAMPLER_METHOD(sampler_function, extra_options, inpaint_options)
 
-@deprecated # `ksampler` is the old name of `get_ksampler_method`, now deprecated.
+@deprecated # `ksampler` is the old name of `get_sampler_method`, now deprecated.
 def ksampler(sampler_name, extra_options={}, inpaint_options={}):
     '''
     Deprecated cuz the old one makes code very messy. 
     Use `get_ksampler_method` instead.
     '''
-    return get_ksampler_method(sampler_name, extra_options, inpaint_options)
+    return get_sampler_method(sampler_name, extra_options, inpaint_options)
 
-@deprecated
+@deprecated # `sampler_object` is the old name of `get_sampler_method`, now deprecated.
 def sampler_object(name: str):
     '''!!DEPRECATED!! Use `get_ksampler_method` instead.'''
-    return get_ksampler_method(name)
+    return get_sampler_method(name)
+# endregion
 
-
-def wrap_model(model: model_base.BaseModel) -> CFGNoisePredictor:
-    model_denoise = CFGNoisePredictor(model)
-    return model_denoise
 
 def sample(model: model_base.BaseModel,
            noise: torch.Tensor,
-           positive: "ConvertedConditioning",
-           negative: "ConvertedConditioning",
+           positive: list["ConvertedCondition"],
+           negative: list["ConvertedCondition"],
            cfg: float,
            device: str,
-           sampler: KSAMPLER_METHOD,
+           sampler_method: SAMPLER_METHOD, # the real sampler method, e.g. sample_euler, usually under k_diffusion.py
            sigmas: torch.Tensor,
            model_options: Dict = {},
            latent_image: torch.Tensor = None,
@@ -812,6 +879,10 @@ def sample(model: model_base.BaseModel,
            seed: Optional[int] = None,
            timesteps: List[int]=None,
            **kwargs):
+    '''
+    This function is the function after `KSampler.sample` is called.
+    Seems it is split for sharing some common operations.
+    '''
     
     positive = positive[:]
     negative = negative[:]
@@ -819,7 +890,7 @@ def sample(model: model_base.BaseModel,
     resolve_areas_and_cond_masks(positive, noise.shape[2], noise.shape[3], device)
     resolve_areas_and_cond_masks(negative, noise.shape[2], noise.shape[3], device)
 
-    model_wrap = wrap_model(model)
+    model_wrap = CFGNoisePredictor(model)
 
     calculate_start_end_timesteps(model, negative)
     calculate_start_end_timesteps(model, positive)
@@ -831,6 +902,9 @@ def sample(model: model_base.BaseModel,
         positive = encode_model_conds(model.extra_conds, positive, noise, device, "positive", latent_image=latent_image, denoise_mask=denoise_mask, seed=seed)
         negative = encode_model_conds(model.extra_conds, negative, noise, device, "negative", latent_image=latent_image, denoise_mask=denoise_mask, seed=seed)
 
+    if is_dev_mode() and is_verbose_mode():
+        ComfyUILogger.debug(f"(comfy.samplers.sample) positive count={len(positive)}, negative count={len(negative)}")
+    
     #make sure each cond area has an opposite one with the same area
     for c in positive:
         create_cond_with_same_area_if_none(negative, c)
@@ -838,7 +912,7 @@ def sample(model: model_base.BaseModel,
         create_cond_with_same_area_if_none(positive, c)
 
     pre_run_control(model, negative + positive)
-
+    
     apply_empty_x_to_equal_area(list(filter(lambda c: c.get('control_apply_to_uncond', False) == True, positive)), negative, 'control', lambda cond_cnets, x: cond_cnets[x])
     apply_empty_x_to_equal_area(positive, negative, 'gligen', lambda cond_cnets, x: cond_cnets[x])
 
@@ -846,16 +920,16 @@ def sample(model: model_base.BaseModel,
 
     if is_engine_looping():
         disable_pbar = True
-    samples = sampler.sample(model_wrap=model_wrap, 
-                             sigmas=sigmas, 
-                             extra_args=extra_args, 
-                             noise=noise, 
-                             callbacks=callbacks, 
-                             latent_image=latent_image, 
-                             denoise_mask=denoise_mask, 
-                             disable_pbar=disable_pbar,
-                             timesteps=timesteps,
-                             **kwargs)
+    samples = sampler_method.sample(model_wrap=model_wrap, 
+                                    sigmas=sigmas, 
+                                    extra_args=extra_args, 
+                                    noise=noise, 
+                                    callbacks=callbacks, 
+                                    latent_image=latent_image, 
+                                    denoise_mask=denoise_mask, 
+                                    disable_pbar=disable_pbar,
+                                    timesteps=timesteps,
+                                    **kwargs)
     return model.process_latent_out(samples.to(torch.float32))
 
 
@@ -930,8 +1004,8 @@ class KSampler:
 
     def sample(self,
                noise: torch.Tensor,
-               positive: "ConvertedConditioning",
-               negative: "ConvertedConditioning",
+               positive: list["ConvertedCondition"],
+               negative: list["ConvertedCondition"],
                cfg: float,
                latent_image: Optional[torch.Tensor] = None,
                start_step: Optional[int] = None,
@@ -948,8 +1022,8 @@ class KSampler:
 
         Args:
             noise (torch.Tensor): The input noise tensor.
-            positive (ConvertedConditioning): The converted positive condition.
-            negative (ConvertedConditioning): The converted negative condition.
+            positive (list[ConvertedCondition]): The converted positive condition.
+            negative (list[ConvertedCondition]): The converted negative condition.
             cfg (float): Classifier Free Guidance value.
             latent_image (Optional[torch.Tensor], optional): The latent image tensor. Defaults to None.
             start_step (Optional[int], optional): The starting step. Defaults to None.

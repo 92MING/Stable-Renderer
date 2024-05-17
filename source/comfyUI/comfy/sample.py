@@ -2,8 +2,7 @@ import torch
 import math
 import numpy as np
 
-from typing import List, Tuple, Optional, Callable, Any
-from comfyUI.types import CONDITIONING as Conditioning, ConvertedConditioning
+from typing import List, Tuple, Optional, Callable, Any, TYPE_CHECKING
 from common_utils.debug_utils import ComfyUILogger
 import comfy.model_management
 import comfy.model_patcher
@@ -11,6 +10,10 @@ import comfy.samplers
 import comfy.conds
 import comfy.utils
 
+if TYPE_CHECKING:
+    from comfyUI.types import CONDITIONING as Conditioning, ConvertedCondition
+    from comfy.model_base import BaseModel
+    
 SelfDefinedModelPatcher = Any
 
 def prepare_noise(latent_image: torch.Tensor, seed: int|None, noise_indexes=None):
@@ -42,24 +45,24 @@ def prepare_mask(noise_mask, shape, device):
     noise_mask = noise_mask.to(device)
     return noise_mask
 
-def get_models_from_cond(cond: Conditioning, model_type):
+def get_models_from_cond(cond: "Conditioning", model_type):
     models = []
     for c in cond:
         if model_type in c:
             models += [c[model_type]]
     return models
 
-def convert_cond(cond: Conditioning) -> ConvertedConditioning:
+def convert_cond(cond: "Conditioning", extra_params: dict|None=None) -> list["ConvertedCondition"]:
     """
     Transforms the conditioning to a format that can be used by the model.
 
     Original format:
     [
-        [cond_tensor_a, {"some_output_a": Any}],
-        [cond_tensor_b, {"some_output_b": Any}], 
+        [cond_tensor_a, {"some_output_a": Any, ...}],
+        [cond_tensor_b, {"some_output_b": Any, ...}], 
         ...
     ] 
-
+    
     Transformed format:
     [
         {
@@ -68,26 +71,30 @@ def convert_cond(cond: Conditioning) -> ConvertedConditioning:
             "model_conds": {
                 "c_crossattn": comfy.conds.CONDCrossAttn(cond_tensor_a)
             }
+            ...extra_params
         },
-        {
-            "some_output_b": Any, 
-            "cross_attn": cond_tensor_b,
-            "model_conds": {
-                "c_crossattn": comfy.conds.CONDCrossAttn(cond_tensor_b)
-            }
-        },  
+        ...
     ]
+    
+    Args:
+        cond: The original conditioning.
+        extra_params: Extra parameters to be added to the transformed conditioning.
     """
     out = []
     for c in cond:
         temp = c[1].copy()
         model_conds = temp.get("model_conds", {})
+        
         if c[0] is not None:
             model_conds["c_crossattn"] = comfy.conds.CONDCrossAttn(c[0]) #TODO: remove
             temp["cross_attn"] = c[0]
+            
         temp["model_conds"] = model_conds
+        temp.update(extra_params or {})
         out.append(temp)
-    return out
+        
+    from comfyUI.types import ConvertedCondition
+    return [ConvertedCondition(o) for o in out]
 
 def get_additional_models(positive, negative, dtype):
     """loads additional models in positive and negative conditioning"""
@@ -112,29 +119,29 @@ def cleanup_additional_models(models):
 
 def prepare_sampling(model: comfy.model_patcher.ModelPatcher,
                      noise_shape: torch.Size,
-                     positive: Conditioning,
-                     negative: Conditioning,
-                     noise_mask: Optional[torch.Tensor]
+                     positive: "Conditioning",
+                     negative: "Conditioning",
+                     noise_mask: Optional[torch.Tensor],
     ) -> Tuple[
-        comfy.model_base.BaseModel,
-        Conditioning,
-        Conditioning,
+        "BaseModel",
+        list["ConvertedCondition"],
+        list["ConvertedCondition"],
         Optional[torch.Tensor],
         List[comfy.model_patcher.ModelPatcher | SelfDefinedModelPatcher]
     ]:
     device = model.load_device
-    positive = convert_cond(positive)
-    negative = convert_cond(negative)
+    converted_positive = convert_cond(positive)
+    converted_negative = convert_cond(negative)
 
     if noise_mask is not None:
         noise_mask = prepare_mask(noise_mask, noise_shape, device)
 
     real_model = None
-    models, inference_memory = get_additional_models(positive, negative, model.model_dtype())
+    models, inference_memory = get_additional_models(converted_positive, converted_negative, model.model_dtype())
     comfy.model_management.load_models_gpu([model] + models, model.memory_required([noise_shape[0] * 2] + list(noise_shape[1:])) + inference_memory)
     real_model = model.model
 
-    return real_model, positive, negative, noise_mask, models
+    return real_model, converted_positive, converted_negative, noise_mask, models
 
 
 def sample(model: comfy.model_patcher.ModelPatcher,
@@ -143,8 +150,8 @@ def sample(model: comfy.model_patcher.ModelPatcher,
            cfg: float,
            sampler_name: str,
            scheduler: str,
-           positive: Conditioning,
-           negative: Conditioning,
+           positive: "Conditioning",
+           negative: "Conditioning",
            latent_image: torch.Tensor,
            denoise: float = 1.0,
            disable_noise: bool = False,

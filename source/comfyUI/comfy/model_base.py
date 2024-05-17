@@ -79,7 +79,7 @@ class BaseModel(torch.nn.Module):
                 operations = comfy.ops.disable_weight_init
             self.diffusion_model = unet_model(**unet_config, device=device, operations=operations)
         self.model_type = model_type
-        self.model_sampling = model_sampling(model_config, model_type)
+        self.model_sampling: EPS = model_sampling(model_config, model_type)
 
         self.adm_channels = unet_config.get("adm_in_channels", None)
         if self.adm_channels is None:
@@ -90,7 +90,7 @@ class BaseModel(torch.nn.Module):
             ComfyUILogger.print("model_type", model_type.name)
             ComfyUILogger.print("adm", self.adm_channels)
 
-    def apply_model(self, x, t, c_concat=None, c_crossattn=None, control=None, transformer_options={}, **kwargs):
+    def apply_model(self, x: torch.Tensor, t: torch.Tensor, c_concat=None, c_crossattn=None, control=None, transformer_options={}, **kwargs):
         # x.shape = ((pos + neg condition count) * batch_size, 4, 64, 64)
         # this method will be called in `comfy.samplers.calc_cond_uncond_batch`
         sigma = t

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .hidden import PROMPT
     from .basic import IMAGE
     from .node_base import ComfyUINode
+    from comfy.conds import CONDRegular
 
 
 _CT = TypeVar('_CT')
@@ -324,28 +325,38 @@ Items:
     - outputs_to_execute (node ids to be e)
 '''
 
-ConvertedConditioning: TypeAlias = List[Dict[str, Any]]
-"""
-The ConvertedConditioning datatype is a return representation from convert_cond() function in sample.py
-It has the following structure:
-[
-    {
+class ConvertedCondition(Dict[str, Any]):
+    '''
+    Type hints for single converted conditioning in `comfyUI/comfy/sample.py/convert_cond` function.
+    It was known to have the following structure:
+    { 
         "some_output_a": Any, 
         "cross_attn": cond_tensor_a,
         "model_conds": {
-            "c_crossattn": comfy.conds.CONDCrossAttn(cond_tensor_a)
+            "c_crossattn": comfy.conds.CONDCrossAttn(cond_tensor_a),
+            ...
         }
-    },
-    {
-        "some_output_b": Any, 
-        "cross_attn": cond_tensor_b,
-        "model_conds": {
-            "c_crossattn": comfy.conds.CONDCrossAttn(cond_tensor_b)
-        }
-    },  
-]
-Refer to CONDITIONING datatype or convert_cond() docstrings for more information.
-"""
+    }
+    Refer to CONDITIONING datatype or convert_cond() docstrings for more information.
+    '''
+    @property
+    def cross_attn(self):
+        '''The cross attention tensor'''
+        return self['cross_attn']
+    
+    @property
+    def pooled_output(self):
+        '''
+        The pooled output tensor
+        Not sure what is the actual meaning of this.
+        '''
+        return self['pooled_output']
+    
+    @property
+    def model_conds(self)->Dict[str, "CONDRegular"]:
+        '''The model conditions'''
+        return self['model_conds']
+    
 
 class RecursiveExecuteResult(NamedTuple):
     '''result return type for _recursive_execute in execution.py'''
@@ -598,7 +609,7 @@ __all__ = ['InferenceOutput', 'SamplingCallbackContext', 'SamplerCallback', 'VAE
                 
             'ComfyCacheDict', 'NodePool', 'NodeBindingParam', 'NodeInputs', 
             
-            'StatusMsgEvent', 'StatusMsgs', 'QueueTask', 'ConvertedConditioning', 
+            'StatusMsgEvent', 'StatusMsgs', 'QueueTask', 'ConvertedCondition', 
             
             'RecursiveExecuteResult', 'ValidateInputsResult', 'ValidatePromptResult',
             

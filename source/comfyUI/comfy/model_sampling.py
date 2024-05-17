@@ -5,7 +5,12 @@ from comfy.ldm.modules.diffusionmodules.util import make_beta_schedule
 
 
 class EPS:
-    def calculate_input(self, sigma, noise):
+    
+    sigma_data: float = 1.0
+    
+    def calculate_input(self, sigma: torch.Tensor, noise: torch.Tensor):
+        if len(sigma) != len(noise):
+            sigma = sigma[:noise.shape[0]]
         sigma = sigma.view(sigma.shape[:1] + (1,) * (noise.ndim - 1))
         return noise / (sigma ** 2 + self.sigma_data ** 2) ** 0.5
 

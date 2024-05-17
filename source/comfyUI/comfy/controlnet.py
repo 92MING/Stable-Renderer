@@ -46,6 +46,9 @@ class ControlBase(ABC):
             device = comfy.model_management.get_torch_device()
         self.device = device
         self.previous_controlnet = None
+        
+    @abstractmethod
+    def get_control(self, x_noisy, t, cond, batched_number)->dict[str, list[Any]]: ...
 
     def set_cond_hint(self, cond_hint, strength=1.0, timestep_percent_range=(0.0, 1.0)):
         self.cond_hint_original = cond_hint

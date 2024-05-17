@@ -5,14 +5,13 @@ from common_utils.global_utils import is_dev_mode, is_verbose_mode
 from common_utils.debug_utils import ComfyUILogger
 
 if TYPE_CHECKING:
-    from comfyUI.comfy.sd import CLIP
     from common_utils.stable_render_utils import SpriteInfos, Sprite
     from engine.static.corrmap import IDMap
 
 def _set_cond_strength(cond, strength: float=1.0):
     cond[1]['strength'] = strength
 
-def _text_encode(clip: 'CLIP', text: str, weight: float=1.0):
+def _text_encode(clip: CLIP, text: str, weight: float=1.0):
     tokens = clip.tokenize(text)
     cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
     ret_cond = [cond, {"pooled_output": pooled}]
@@ -77,13 +76,6 @@ class MaskedTextEncode(StableRenderingNode):
         return [_mask_text_encode(clip, text, mask, inverse_mask, strength, mode),] # type: ignore
 
 class SceneTextEncode(StableRenderingNode):
-    '''
-    Nodes for encoding all objects within the current scene, e.g. sprite, background, ...
-    This is for the composition of baked result and environment.
-    If you don't want area masking, plz leave `IDMap` as None.
-    
-    Note: if `IDMap` is given, only 1 frame is allowed as input(since it is not for baking).
-    '''
     
     Category = "conditioning"
     
@@ -103,31 +95,67 @@ class SceneTextEncode(StableRenderingNode):
                  clip: 'CLIP',
                  sprite_infos: "SpriteInfos", 
                  env_prompts: Optional[EnvPrompts]=None, 
-                 idmap: Optional["IDMap"]=None
+                 merge: bool=True,
+                 idmap: Optional["IDMap"]=None,
                  )->tuple[
                      Named["CONDITIONING", 'pos'],  # type: ignore
                      Named["CONDITIONING", 'neg'],  # type: ignore
                  ]:
+        '''
+        Nodes for encoding all objects within the current scene, e.g. sprite, background, ...
+        This is for the composition of baked result and environment.
+        If you don't want area masking, plz leave `IDMap` as None.
+        
+        Note: if `IDMap` is given, only 1 frame is allowed as input(since it is not for baking).
+        
+        Args:
+            - clip: CLIP model
+            - sprite_infos: SpriteInfos object
+            - env_prompts: Environment prompts
+            - merge: If True, merge all the conditions into pos/neg. In that case, mask will not be applied, and weight to be set to 1 for all.         
+            - idmap: IDMap object. If None, no area masking is applied.
+        '''
         conds = []
         neg_conds = []
         
-        for sprite in sprite_infos.values():
-            # when idmap is None, do normal prompt encode (means all area is included).
-            if idmap is None:
-                conds += _text_encode(clip, sprite.prompt, sprite.weight)   # type: ignore
-            else:
-                mask = self._get_sprite_mask(sprite, idmap)
-                if mask is not None:    
-                    # when the sprite is not occurred in the scene, mask is None.
-                    conds.append(_mask_text_encode(clip, sprite.prompt))
-        
-        if env_prompts:
-            for env_prompt in env_prompts:
-                if env_prompt.prompt is not None:
-                    conds.append(_text_encode(clip=clip, text=env_prompt.prompt, weight=env_prompt.weight))
-                if env_prompt.negative_prompt is not None:  # empty string will also do the encoding, since ComfyUI must have a neg prompt.
-                    neg_conds.append(_text_encode(clip=clip, text=env_prompt.negative_prompt, weight=env_prompt.negative_weight))
-        
+        if not merge:
+            for sprite in sprite_infos.values():
+                # when idmap is None, do normal prompt encode (means all area is included).
+                for cond, weight in [(sprite.prompt, sprite.prompt_weight), (sprite.neg_prompt, sprite.neg_prompt_weight)]:
+                    if not cond or weight==0:
+                        continue
+                    if idmap is None:
+                        conds += _text_encode(clip, cond, weight)   # type: ignore
+                    else:
+                        mask = self._get_sprite_mask(sprite, idmap)
+                        if mask is not None:    
+                            # when the sprite is not occurred in the scene, mask is None.
+                            conds.append(_mask_text_encode(clip, cond, mask, strength=weight))
+            
+            if env_prompts:
+                for env_prompt in env_prompts:
+                    if env_prompt.prompt and env_prompt.weight!=0:
+                        conds.append(_text_encode(clip=clip, text=env_prompt.prompt, weight=env_prompt.weight))
+                    if env_prompt.negative_prompt and env_prompt.negative_weight!=0:
+                        neg_conds.append(_text_encode(clip=clip, text=env_prompt.negative_prompt, weight=env_prompt.negative_weight))
+            if not neg_conds:
+                neg_conds.append(_text_encode(clip=clip, text="", weight=1.0))
+        else:
+            pos_prompt, neg_prompt = "", ""
+            for sprite in sprite_infos.values():
+                if sprite.prompt and sprite.prompt_weight!=0:
+                    pos_prompt += sprite.prompt + ", "
+                if sprite.neg_prompt and sprite.neg_prompt_weight!=0:
+                    neg_prompt += sprite.neg_prompt + ", "
+            if env_prompts:
+                for env_prompt in env_prompts:
+                    if env_prompt.prompt and env_prompt.weight!=0:
+                        pos_prompt += env_prompt.prompt + ", "
+                    if env_prompt.negative_prompt and env_prompt.negative_weight!=0:
+                        neg_prompt += env_prompt.negative_prompt + ", "
+            conds.append(_text_encode(clip, pos_prompt, 1.0))
+            neg_conds.append(_text_encode(clip, neg_prompt, 1.0))
+            
         if is_dev_mode() and is_verbose_mode():
             ComfyUILogger.print('SceneTextEncode finished. conds count={}, neg_conds count={}'.format(len(conds), len(neg_conds)))
         
