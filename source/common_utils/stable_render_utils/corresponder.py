@@ -193,7 +193,52 @@ class OverlapCorresponder:
         return origin_values
     
     def step_finished(self, engine_data: "EngineData", sampling_context: "SamplingCallbackContext"):
-        pass
+        correspond_maps = engine_data.correspond_maps
+        if not correspond_maps:
+            raise ValueError('Correspond maps not found.')
+        if len(correspond_maps) > 1:
+            raise NotImplemented('Multiple correspond maps not supported yet.')
+
+        vertex_screen_info = None
+        for (spriteID, materialID), corrmap in correspond_maps.items():
+            corrmap.load_vertex_screen_info(
+                id_map=engine_data.id_maps,
+            )
+            vertex_screen_info = corrmap.vertex_screen_info
+        
+        unique_vertex_indices = torch.unique(vertex_screen_info[:, 3])
+
+        noise_copy = sampling_context.noise.clone()
+
+        for vertex_index in unique_vertex_indices:
+            # Extract the screen positions of the current vertex
+            vertex_mask = vertex_screen_info[:, 3] == vertex_index
+            current_vertex_screen_info = vertex_screen_info[vertex_mask]
+
+            # Extract the noise values of the current vertex
+            current_vertex_screen_x_coords = current_vertex_screen_info[:, 4]
+            current_vertex_screen_y_coords = current_vertex_screen_info[:, 5]
+            current_vertex_screen_frame_indices = current_vertex_screen_info[:, 6]
+
+            corresponding_noises = noise_copy[current_vertex_screen_frame_indices,
+                                              :,
+                                              current_vertex_screen_y_coords,
+                                              current_vertex_screen_x_coords,]
+
+            # TODO: Change to strategy design pattern
+            # Calculate the average noise value
+            average_noise = corresponding_noises.mean(dim=0)
+
+            # Distribute back the average noise value to the corresponding pixels
+            sampling_context.noise[current_vertex_screen_frame_indices,
+                       :,
+                       current_vertex_screen_y_coords,
+                       current_vertex_screen_x_coords,] = average_noise
+
+
+
+
+
 
     
 __all__ = ['Corresponder', 'DefaultCorresponder', 'OverlapCorresponder']

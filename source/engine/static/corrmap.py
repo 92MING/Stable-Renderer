@@ -7,7 +7,8 @@ if __name__ == '__main__': # for debugging
     __package__ = 'engine.static'
 
 import torch
-import multiprocessing
+import multiprocessing as mp
+from multiprocessing import set_start_method
 import json
 import zipfile
 import taichi as ti
@@ -28,6 +29,9 @@ from typing import (
 from uuid import uuid4
 from functools import partial
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import threading
+from tqdm import tqdm
+from collections import defaultdict
 
 from common_utils.path_utils import TEMP_DIR, extract_index
 from common_utils.global_utils import is_dev_mode
@@ -187,6 +191,24 @@ class IDMap:
 
         return IDMap(frame_indices=frame_indices, tensor=t)
 
+    @classmethod
+    def from_tensor(cls,
+                    frame_indices: list,
+                    tensor: Tensor,) -> 'IDMap':
+        if len(tensor.shape) != 4:
+            raise ValueError(
+                f"Tensor should be in (B, H, W, C), got shape {tensor.shape}"
+            )
+        if len(frame_indices) != tensor.shape[0]:
+            raise ValueError(
+                f"Frame indices count should be equal to the batch size of the tensor, got {len(frame_indices)} and {tensor.shape[0]}"
+            )
+        if tensor.shape[-1] > 10:
+            EngineLogger.warn(
+                f"The channel count of the tensor {tensor.shape[-1]} is too large, it may be an invalid tensor."
+            )
+        return IDMap(frame_indices=frame_indices, tensor=tensor)
+
 
 init_taichi()
 
@@ -273,6 +295,8 @@ Mode to load vertex positions to CorrespondMap.
         vertex positions are Mesh vertices, position should be (x, y)
 '''
 
+frame_queue: Optional[mp.Queue] = None
+
 
 @attrs(repr=False, eq=False)
 class CorrespondMap(ResourcesObj):
@@ -299,17 +323,13 @@ class CorrespondMap(ResourcesObj):
     texID: Optional[int] = attrib(default=None, init=False)
     '''sampler2DArray's texture id in OpenGL. This is for rendering purpose.'''
 
-    vertex_screen_positions: dict[int, dict[int, list[tuple[int, float, float]]]] = attrib(factory=dict)
+    # TODO: Wrap this with another class
+    vertex_screen_info: Optional[torch.Tensor] = attrib(default=None, init=False)
     '''
     for runtime baking. structure:
-    {
-        vertexID: {
-            map_index: [
-                (frame_index, x_ratio, y_ratio),
-                ...
-            ]
-        }
-    }
+        Tensor in shape of (N, 7), where the 7 elements are 
+        (object_id, material_id, map_index, vertex_id, x, y, frame_index).
+    call load_vertex_screen_info to load the data.
     '''
     
     # ================= COLOR METHODS ================= # 
@@ -779,77 +799,68 @@ class CorrespondMap(ResourcesObj):
         
         return map
     
-
-    def load_vertex_screen_positions(self, id_map: IDMap):
+    def load_vertex_screen_info(self, id_map: IDMap):
         """
-        Load vertex screen positions to CorrespondMap from IDMaps(multiple frames can be included).
-        {
-            vertexID: {
-                map_index: [
-                    (frame_index, x_ratio, y_ratio),
-                    ...4
-                ]
-            }
-        }
+        Load vertex screen positions to CorrespondMap from IDMaps (multiple frames can be included).
+        The tensor is in shape of (N, 7), where the 7 elements are 
+        (object_id, material_id, map_index, vertex_id, x, y, frame_index).
         """
-        frame_indices = id_map.frame_indices
-        print("Loading vertex screen positions. Frame indices: ", frame_indices)
-        screen_pos_dicts = []
-        for i in range(len(frame_indices)):
-            screen_pos_dicts.append(multiprocessing.Manager().dict())
-        id_tensor = id_map.tensor
+        id_tensor, frame_indices = id_map.tensor, id_map.frame_indices
+        frames, height, width, id_elements = id_tensor.shape
 
-        processes = []
-        for i in range(len(frame_indices)):
-            v_pos_dict = screen_pos_dicts[i]
-            id_tensor = id_tensor[i].clone()
-            frame_index = frame_indices[i]
-            p = multiprocessing.Process(target=process_frame, args=(v_pos_dict, frame_index, id_tensor))
-            processes.append(p)
-            p.start()
+        y_coordinates_tensor = torch.arange(
+            width, device=id_tensor.device
+        ).view(1, -1).expand(
+            height, -1  # (H, W)
+        ).view(1, height, width, 1).expand(
+            frames, -1, -1, -1  # (B, H, W, 1)
+        )
+        # assert y_coordinates[1, 52, 12] == 12
 
-        for p in processes:
-            p.join()
+        x_coordinates_tensor = torch.arange(
+            height, device=id_tensor.device
+        ).view(-1, 1).expand(
+            -1, width  # (H, W)
+        ).view(1, height, width, 1).expand(
+            frames, -1, -1, -1  # (B, H, W, 1)
+        )
+        # assert x_coordinates[1, 52, 12] == 52
 
-        screen_pos_dicts = list(screen_pos_dicts)
+        frame_indices_tensor = torch.tensor(
+            frame_indices, device=id_tensor.device
+        ).view(-1, 1, 1, 1).expand(-1, height, width, 1)
+        # (B, H, W, 1), where values in (H, W, 1) equals the frame index
 
-        # Merge dicts
-        print("Merging dicts")
-        for vertex_screen_pos in screen_pos_dicts:
-            for vertex_id, map_indices in vertex_screen_pos.items():
-                if self.vertex_screen_positions.get(vertex_id) is None:
-                    self.vertex_screen_positions[vertex_id] = {}
-                for map_index, screen_poses in map_indices.items():
-                    if self.vertex_screen_positions[vertex_id].get(map_index) is None:
-                        self.vertex_screen_positions[vertex_id][map_index] = []
-                    self.vertex_screen_positions[vertex_id][map_index].extend(screen_poses)
+        vertex_screen_info = torch.cat(
+            [id_tensor, 
+             x_coordinates_tensor,
+             y_coordinates_tensor,
+             frame_indices_tensor], dim=-1
+        )
 
+        # flatten the vertex screen positions
+        flat_vertex_screen_info = vertex_screen_info.view(-1, id_elements + 3)
 
-from tqdm import tqdm
+        # Filter out map_index == 2048
+        flat_vertex_screen_info = flat_vertex_screen_info[flat_vertex_screen_info[..., 2] != 2048]
 
-def process_frame(my_vertex_screen_positions, frame_index, id_tensor):
-    pbar = tqdm(total=id_tensor.shape[0] * id_tensor.shape[1],
-                desc=f"Processing frame {frame_index}")
-    for i in range(id_tensor.shape[0]):
-        for j in range(id_tensor.shape[1]):
-            object_id, material_id, map_index, vertex_id = id_tensor[i, j]
+        # Filter out object_id == material_id == map_index == vertex_id == 0
+        flat_vertex_screen_info = flat_vertex_screen_info[
+            (flat_vertex_screen_info[..., 0] != 0) |
+            (flat_vertex_screen_info[..., 1] != 0) |
+            (flat_vertex_screen_info[..., 2] != 0) |
+            (flat_vertex_screen_info[..., 3] != 0)
+        ]
 
-            if map_index == 2048 or (object_id == material_id == map_index == vertex_id == 0):
-                pbar.update(1)
-                continue
+        self.vertex_screen_info = flat_vertex_screen_info
 
-            if my_vertex_screen_positions.get(vertex_id) is None:
-                my_vertex_screen_positions[vertex_id] = {}
-
-            if my_vertex_screen_positions[vertex_id].get(map_index) is None:
-                my_vertex_screen_positions[vertex_id][map_index] = []
-
-            my_vertex_screen_positions[vertex_id][map_index].append(
-                (frame_index, (j / id_tensor.shape[1], i / id_tensor.shape[0]))
-            )
-            pbar.update(1)
-    print(frame_index, " done")
-
+        EngineLogger.info(f"Loaded vertex screen info from IDMap.")
+    
+    @property
+    def unique_vertex_ids(self) -> torch.Tensor:
+        assert self.vertex_screen_info is not None, "Vertex screen positions are not loaded."
+        return self.vertex_screen_info[..., 3].unique()
+    
 
 
 __all__ = ['IDMap', 'UpdateMode', 'CorrespondMap']
@@ -885,18 +896,18 @@ if __name__ == '__main__':  # for debug
         id_map = IDMap.from_directory(dir_path,0, 16)
         print(id_map)
     
-    def load_vertex_positions_test():
+    def load_vertex_screen_info_test():
         dir_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'resources', 'example-map-outputs', 'miku-sphere', 'id')
         dir_path = os.path.abspath(dir_path)
         print('loading from:', dir_path)
         id_map = IDMap.from_directory(dir_path,0, 4)
         
         m = CorrespondMap(name='test', k=3)
-        m.load_vertex_screen_positions(id_map)
-        print(m.vertex_screen_positions)
+        m.load_vertex_screen_info(id_map)
+        print(len(m.vertex_screen_info))
         
     # dump_test()
     # load_test()
     # update_test()
     # load_id_map_test()
-    load_vertex_positions_test()
+    load_vertex_screen_info_test()
