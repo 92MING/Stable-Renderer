@@ -1,10 +1,28 @@
-from typing import Tuple, TYPE_CHECKING
+from typing import Tuple, TYPE_CHECKING, Optional
 from comfyUI.types import *
 from common_utils.debug_utils import ComfyUILogger
 from common_utils.global_utils import is_dev_mode, is_verbose_mode
+from engine.static import CorrespondMap
 if TYPE_CHECKING:
     from common_utils.stable_render_utils import SpriteInfos
     from engine.static.corrmap import IDMap
+
+class EmptyCorrMaps(StableRenderingNode):
+    '''
+    Create empty corrmaps.
+    Ids will be started from 1, to `create_count`+1.
+    '''
+    
+    def __call__(self, 
+                 k: int=3,
+                 width: int=512,
+                 height: int=512,
+                 create_count: int=1,
+                 )->CorrespondMaps:
+        maps = CorrespondMaps()
+        for i in range(create_count):
+            maps[i+1, 0] = CorrespondMap(k=k, width=width, height=height)
+        return maps
 
 class EngineDataNode(StableRenderingNode):
     '''
@@ -50,7 +68,42 @@ class EngineDataNode(StableRenderingNode):
             return      # no need return anything for checking when engine is not running
         return Engine.Instance().RuntimeManager.FrameCount  # use frame count to determine if the frame data is changed
 
+class VirtualEngineDataNode(StableRenderingNode):
+    '''for creating engine data when running comfyUI without engine.'''
 
+    PriorNode = True
+    '''this node should be executed before any other output nodes in the graph.'''
+
+    def __call__(self,
+                 color_maps: Optional[IMAGE]=None,
+                 id_maps: Optional["IDMap"]=None,
+                    pos_maps: Optional[IMAGE]=None,
+                    normal_maps: Optional[IMAGE]=None,
+                    depth_maps: Optional[IMAGE]=None,
+                    canny_maps: Optional[IMAGE]=None,
+                    noise_maps: Optional[LATENT]=None,
+                    masks: Optional[MASK]=None,
+                    correspond_maps: Optional[CorrespondMaps]=None,
+                    sprites: Optional["SpriteInfos"]=None,
+                    env_prompt: Optional[EnvPrompts]=None,
+                    )->EngineData:
+        from comfyUI.execution import PromptExecutor
+        latest_context = PromptExecutor.instance.latest_context # type: ignore
+        if latest_context is None:
+            return
+        latest_context.engine_data = EngineData(color_maps=color_maps,
+                                                id_maps=id_maps,
+                                                pos_maps=pos_maps,
+                                                normal_maps=normal_maps,
+                                                depth_maps=depth_maps,
+                                                canny_maps=canny_maps,
+                                                noise_maps=noise_maps,
+                                                masks=masks,
+                                                correspond_maps=correspond_maps,
+                                                sprite_infos=sprites,
+                                                env_prompts=env_prompt)
+        return latest_context.engine_data
+        
 class InferenceOutputNode(StableRenderingNode):
     '''
     This is the node type defining the output data passing to `RenderManager` as rendering result.

@@ -4,6 +4,7 @@ import numpy as np
 
 import torch
 import torch.nn.functional as F
+from pathlib import Path
 from torchvision.io import read_image, ImageReadMode
 
 from comfyUI.types import *
@@ -40,6 +41,7 @@ class ImageSequenceLoader(StableRenderingNode):
         Returns:
             torch.Tensor: Tensor of shape (num_frames, height, width, channels)
         """
+        directory = directory.replace('\\', '/').strip()
         if not os.path.exists(directory):
             raise FileNotFoundError(f"Directory {directory} not found")
         if frame_start < 0:
@@ -83,6 +85,11 @@ class NoiseSequenceLoader(StableRenderingNode):
                  sd_version: Literal['SD15', "SDXL"] = 'SD15',
                  ) -> LATENT:
         '''load sequence of noise from img or directly from npy.'''
+        old_directory = directory
+        directory = directory.replace('\\', '/').strip()
+        path_dir = Path(directory)
+        print(directory, old_directory)
+        print(os.path.exists(directory), os.path.exists(old_directory), path_dir.exists())
         if not os.path.exists(directory):
             raise FileNotFoundError(f"Directory {directory} not found")
         if frame_start < 0:
@@ -157,6 +164,7 @@ class IDSequenceLoader(StableRenderingNode):
                  num_frames: INT(min=1) = 16,  # type: ignore
     ) -> IDMap:
         '''Load ID files from img or directly from npy.'''
+        directory = directory.replace('\\', '/')
         return IDMap.from_directory(directory, frame_start, num_frames)
 
 

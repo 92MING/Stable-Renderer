@@ -11,7 +11,7 @@ from common_utils.stable_render_utils import (
 )
 from common_utils.global_utils import is_dev_mode, is_engine_looping
 from common_utils.debug_utils import ComfyUILogger
-from engine.static import UpdateMode
+from engine.static import UpdateMode, IDMap
 
 _default_sampler = COMFY_SAMPLERS.__args__[0]   # type: ignore
 _default_scheduler = COMFY_SCHEDULERS.__args__[0]   # type: ignore

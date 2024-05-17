@@ -79,6 +79,7 @@ class LegacyNoiseSequenceLoader(StableRenderingNode):
         reordered_data_paths = sorted(data_paths, key=lambda x: extract_index(x, data_paths.index(x)))
 
         tensors = []
+        reordered_data_paths = [str(p) for p in reordered_data_paths]
         for data_path in reordered_data_paths:
             if not os.path.exists(data_path):
                 continue

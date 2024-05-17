@@ -480,11 +480,12 @@ class PromptExecutor:
                     output_is_list = [False] * len(results[0])
 
             # merge node execution results
-            for i, is_list in zip(range(len(results[0])), output_is_list):
-                if is_list:
-                    output.append([x for o in results for x in o[i]])
-                else:
-                    output.append([o[i] for o in results])
+            if results[0] is not None:
+                for i, is_list in zip(range(len(results[0])), output_is_list):
+                    if is_list:
+                        output.append([x for o in results for x in o[i]])
+                    else:
+                        output.append([o[i] for o in results])
         
         context.outputs[current_node_id] = output
         if not is_engine_looping(): # when engine is looping, ui outputs is not required
@@ -1100,8 +1101,14 @@ class PromptExecutor:
                                  broadcast=False,
                                  level="info")
             
+            for node_id in prompt:
+                node_type_name = prompt[node_id]['class_type']
+                node_cls = get_node_cls_by_name(node_type_name)
+                if node_cls and hasattr(node_cls, 'PRIOR_NODE') and node_cls.PRIOR_NODE:
+                    current_context.to_be_executed.append((0, str(node_id)))
+                
             for node_id in list(node_ids_to_be_ran):
-                current_context.to_be_executed.append((0, str(node_id)))
+                current_context.to_be_executed.append((1, str(node_id)))
 
             while len(current_context.to_be_executed) > 0:
                 # always execute the output that depends on the least amount of unexecuted nodes first

@@ -37,8 +37,18 @@ def calc_map_mean_std(feat:torch.Tensor, eps=1e-5):
     assert (len(size) == 4)
     N, C = size[:2]
     feat_var = feat.view(N, C, -1).var(dim=2) + eps
+    
+    change_back = False
+    if feat_var.dtype == torch.float16:
+        feat_var = feat_var.float()
+        change_back = True
+    
     feat_std = feat_var.sqrt().view(N, C, 1, 1)
     feat_mean = feat.view(N, C, -1).mean(dim=2).view(N, C, 1, 1)
+    
+    if change_back:
+        feat_var = feat_var.half()
+        feat_std = feat_std.half()
     return feat_mean, feat_std
 
 # from https://github.com/naoto0804/pytorch-AdaIN/blob/master/function.py

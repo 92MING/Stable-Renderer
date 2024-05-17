@@ -64,6 +64,9 @@ class ComfyUINode(Protocol, metaclass=_ComfyUINodeMeta):
     If you are not defining, this value will be passed to the node class during initialization.
     The default value is ""(empty string).
     '''
+    PRIOR_NODE: bool = False
+    '''If true, this node will be executed before any other nodes.'''
+    
     
     FUNCTION: str
     '''the target function name of the node. If not define, will try to use the only function it have.'''
@@ -200,6 +203,8 @@ class AdvancedNodeBase(ABC):
     '''Whether this node is unique or not. If True, only one instance of this node can be created.'''
     IsOutputNode: ClassVar[bool] = False
     '''Refers to `OUTPUT_NODE` in `ComfyUINode`'''
+    PriorNode: ClassVar[bool] = False
+    '''If true, this node will be executed before any other nodes.'''
     
     _CallSig: ClassVar[Signature]
     '''The signature of `__call__` method. This is for registration.'''
@@ -432,6 +437,7 @@ class AdvancedNodeBase(ABC):
         setattr(newcls, 'NAMESPACE', cls.NameSpace if hasattr(cls, 'NameSpace') else "")
         setattr(newcls, 'UNIQUE', cls.Unique)
         setattr(newcls, 'RETURN_TYPES', tuple(cls._ComfyOutputTypes))
+        setattr(newcls, 'PRIOR_NODE', cls.PriorNode)
         
         def newcls_init(newcls_self):
             # create the real instance of this node cls when the newcls instance is created
