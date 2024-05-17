@@ -3,7 +3,7 @@ if __name__ == '__main__': # for debugging
     import sys
     proj_path = os.path.join(os.path.dirname(__file__), '..', '..')
     sys.path.insert(0, proj_path)
-    __package__ = 'common_utils.stable_render_utils'
+    __package__ = 'engine.static'
 
 import torch
 import json
@@ -17,9 +17,17 @@ from PIL import Image
 from pathlib import Path
 from attr import attrs, attrib
 from torch import Tensor
-from typing import Literal, TypeAlias, Optional, TYPE_CHECKING
+from torchvision.io import read_image, ImageReadMode
+from einops import rearrange
+from typing import (
+    Literal, TypeAlias, Optional, 
+    get_args, TYPE_CHECKING
+)
 from uuid import uuid4
-from common_utils.path_utils import TEMP_DIR
+from functools import partial
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+from common_utils.path_utils import TEMP_DIR, extract_index
 from common_utils.global_utils import is_dev_mode
 from common_utils.debug_utils import EngineLogger
 from common_utils.decorators import Overload
@@ -98,6 +106,62 @@ class IDMap:
         m = IDMap(frame_indices=self.frame_indices, tensor=tensor, masks=masks) # type: ignore
         return m
 
+    @classmethod
+    def from_directory(cls,
+                       directory: str,
+                       frame_start: int,
+                       num_frames: int) -> 'IDMap':
+        '''
+        Load the IDMap from a directory.
+
+        Args:
+            - directory: the directory that contains the id data.
+            - frame_start: the start frame index.
+            - num_frames: the number of frames to load.
+        
+        Returns:
+            - IDMap object.
+        '''
+        assert os.path.exists(directory)
+        assert frame_start >= 0 and num_frames > 0
+
+        file_filter = lambda fname: fname.endswith(".npy") \
+            and os.path.exists(os.path.join(directory, fname))
+
+        filenames = list(filter(file_filter, os.listdir(directory)))
+        reordered_filenames = sorted(
+            filenames, key=lambda x: extract_index(x, filenames.index(x)))
+        
+        print(f"Reordered filenames: {reordered_filenames}")
+
+        frame_indices = list(
+            map(partial(extract_index, i=-1), reordered_filenames)
+        )[frame_start: frame_start+num_frames]
+        assert all(i != -1 for i in frame_indices), "Illegal filename(s) found."
+
+        id_tensors = [] 
+        for filename in reordered_filenames[frame_start: frame_start+num_frames]:
+            data_path = os.path.join(directory, filename)
+
+            id_tensor = torch.from_numpy(np.load(data_path)).squeeze()
+            if not len(id_tensor.shape) == 3:
+                raise ValueError(f"Invalid shape of id tensor: {id_tensor.shape}.")
+            if not (id_tensor.shape[-1] == 4 or id_tensor.shape[1] == 4): # not chw or hwc
+                raise ValueError(f"Invalid id tensor shape: {id_tensor.shape}.")
+            if id_tensor.shape[-1] == 4:
+                id_tensor = rearrange(id_tensor, 'h w c -> c h w')
+
+            id_tensors.append(id_tensor)
+
+        if any(t.shape != id_tensors[0].shape for t in id_tensors):
+            raise ValueError(f"Tensor data has inconsistent shapes.")
+
+        if len(id_tensors) == 0:
+            return None
+        t = torch.stack(id_tensors, dim=0)
+
+        return IDMap(frame_indices=frame_indices, tensor=t)
+
 
 init_taichi()
 
@@ -174,6 +238,15 @@ Mode to update the value in the map.
         only update the value if the old cell in not written. 
         But if there are multiple values for the same cell in this update process, average them.
 '''
+LoadVertexPositionMode:TypeAlias = Literal['UV', 'Mesh']
+'''
+Mode to load vertex positions to CorrespondMap.
+
+    - UV:
+        vertex positions are from UV Map, position should be y = 1 - v, x = u
+    - Mesh:
+        vertex positions are Mesh vertices, position should be (x, y)
+'''
 
 
 @attrs(repr=False, eq=False)
@@ -201,12 +274,21 @@ class CorrespondMap(ResourcesObj):
     texID: Optional[int] = attrib(default=None, init=False)
     '''sampler2DArray's texture id in OpenGL. This is for rendering purpose.'''
 
-    vertex_screen_poses: dict[int, dict[int, list[tuple[float, float]]]] = attrib(factory=dict)
+    vertex_screen_positions: dict[int, tuple[int, dict[int, list[tuple[float, float]]]]] = attrib(factory=dict)
     '''
     for runtime baking.
-    {vertexID: {map_index: [(x ratio, y ratio), ...]}}
+    {
+      vertexID: {
+        (
+          frame_index,
+          map_index: [(x ratio, y ratio), ...]
+        )
+      }
+    }
     '''
     
+    # ================= COLOR METHODS ================= # 
+
     def __attrs_post_init__(self):
         self._values = torch.zeros(self.k*self.k, self.height * self.width, self.channel_count, dtype=torch.float16)
         self._writtens = torch.zeros(self.k*self.k, self.height * self.width, dtype=torch.bool)
@@ -223,12 +305,6 @@ class CorrespondMap(ResourcesObj):
         return self._values[index]
     
     # region runtime
-    def _calc_screen_poses_by_ID(self, vertexID: int)->tuple[float, float]:
-        # since vertexID = y * width * height + x * width, we can get x, y directly from vertexID
-        x = vertexID % self.width
-        y = vertexID // self.width
-        return x / self.width, y / self.height
-    
     def save_vertex_screen_poses(self, vertexID: int, map_index: int, screen_poses: list[tuple[float, float]]):
         ...
     # endregion
@@ -515,7 +591,7 @@ class CorrespondMap(ResourcesObj):
             id_map, color_frame = _find_dup_index_and_treat(id_map, color_frame, mode)  # type: ignore
 
         # update the values
-        self._values[id_map[..., 1], id_map[..., 2]] = color_frame[..., 1:]
+        self._values[id_map[..., 1], id_map[..., 2]] = color_frame[..., 1:].to(self._values.dtype)
         self._writtens[id_map[..., 1], id_map[..., 2]] = True
     
     def dump(self, path: str|Path, name: Optional[str]=None, zip=False):
@@ -628,6 +704,77 @@ class CorrespondMap(ResourcesObj):
             os.rmdir(real_path)
         
         return map
+    
+
+    def load_vertex_screen_positions(self, id_map: IDMap):
+        """
+        {
+            vertexID: {
+                map_index: [
+                    (frame_index, (x_ratio, y_ratio)),
+                    ...
+                ]
+            }
+        }
+        """
+        import multiprocessing
+
+        frame_indices = id_map.frame_indices
+        id_tensors = rearrange(id_map.tensor, "f c h w -> f h w c")
+
+        subprocess_vertex_screen_pos_dicts = multiprocessing.Manager().list([{} for _ in range(len(frame_indices))])
+
+        processes = []
+        for i in range(len(frame_indices)):
+            v_pos_dict = subprocess_vertex_screen_pos_dicts[i]
+            id_tensor = id_tensors[i]
+            frame_index = frame_indices[i]
+            p = multiprocessing.Process(target=process_frame, args=(v_pos_dict, frame_index, id_tensor))
+            processes.append(p)
+            p.start()
+
+        for p in processes:
+            p.join()
+
+        subprocess_vertex_screen_pos_dicts = list(subprocess_vertex_screen_pos_dicts)
+
+        # Merge dicts
+        print("Merging dicts")
+        for vertex_screen_pos in subprocess_vertex_screen_pos_dicts:
+            for vertex_id, map_indices in vertex_screen_pos.items():
+                if self.vertex_screen_positions.get(vertex_id) is None:
+                    self.vertex_screen_positions[vertex_id] = {}
+                for map_index, screen_poses in map_indices.items():
+                    if self.vertex_screen_positions[vertex_id].get(map_index) is None:
+                        self.vertex_screen_positions[vertex_id][map_index] = []
+                    self.vertex_screen_positions[vertex_id][map_index].extend(screen_poses)
+
+
+from tqdm import tqdm
+
+def process_frame(my_vertex_screen_positions, frame_index, id_tensor):
+    pbar = tqdm(total=id_tensor.shape[0] * id_tensor.shape[1],
+                desc=f"Processing frame {frame_index}")
+    for i in range(id_tensor.shape[0]):
+        for j in range(id_tensor.shape[1]):
+            object_id, material_id, map_index, vertex_id = id_tensor[i, j]
+
+            if map_index == 2048 or (object_id == material_id == map_index == vertex_id == 0):
+                pbar.update(1)
+                continue
+
+            if my_vertex_screen_positions.get(vertex_id) is None:
+                my_vertex_screen_positions[vertex_id] = {}
+
+            if my_vertex_screen_positions[vertex_id].get(map_index) is None:
+                my_vertex_screen_positions[vertex_id][map_index] = []
+
+            my_vertex_screen_positions[vertex_id][map_index].append(
+                (frame_index, (j / id_tensor.shape[1], i / id_tensor.shape[0]))
+            )
+            pbar.update(1)
+    print(frame_index, " done")
+
 
 
 __all__ = ['IDMap', 'UpdateMode', 'CorrespondMap']
@@ -656,7 +803,23 @@ if __name__ == '__main__':  # for debug
         id_map[..., 3] = torch.arange(512*512).view(512, 512)   # vertexID
         m.update(fully_red, id_map)
         m.dump(TEMP_DIR, name='update_test')
+    
+    def load_id_map_test():
+        id_map = IDMap.from_directory(
+            "/mnt/disk2/Stable-Renderer-Previous/Stable-Renderer/resources/example-map-outputs/miku-sphere/id", 
+            0, 16)
+        print(id_map)
+    
+    def load_vertex_positions_test():
+        id_map = IDMap.from_directory(
+            "/mnt/disk2/Stable-Renderer-Previous/Stable-Renderer/resources/example-map-outputs/miku-sphere/id", 
+            0, 16)
+        m = CorrespondMap(name='test', k=3)
+        m.load_vertex_screen_positions(id_map)
+        print(m.vertex_screen_positions)
         
     # dump_test()
     # load_test()
-    update_test()
+    # update_test()
+    # load_id_map_test()
+    load_vertex_positions_test()

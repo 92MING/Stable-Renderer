@@ -4,7 +4,11 @@ from functools import partial
 from comfyUI.types import *
 from comfyUI.nodes import custom_ksampler
 from common_utils.type_utils import is_empty_method
-from common_utils.stable_render_utils import Corresponder, DefaultCorresponder as _DefaultCorresponder
+from common_utils.stable_render_utils import (
+    Corresponder,
+    DefaultCorresponder as _DefaultCorresponder,
+    OverlapCorresponder as _OverlapCorresponder,
+)
 from common_utils.global_utils import is_dev_mode, is_engine_looping
 from common_utils.debug_utils import ComfyUILogger
 from engine.static import UpdateMode
@@ -47,6 +51,57 @@ class DefaultCorresponder(StableRenderingNode):
             - post_attn_inject_ratio: The ratio for injecting post-attention values. Defaults to 0.6.
         '''
         corresponder = _DefaultCorresponder(update_corrmap=update_corrmap, 
+                                            update_corrmap_mode=update_mode,
+                                            post_attn_inject_ratio=post_attn_inject_ratio)
+        
+        if hasattr(corresponder, "finished") and not is_empty_method(corresponder.finished):
+            if is_dev_mode() and is_engine_looping():
+                def vae_callback(images: "IMAGE"):
+                    UIImage(images, force_saving=True, animated=True)  
+                    # for debug, since the output is not saved in the engine loop
+                    # this will save the gifs to the output folder
+                    corresponder.finished(engine_data, images)
+            else:
+                vae_callback = partial(corresponder.finished, engine_data)
+        else:
+            vae_callback = lambda *args, **kwargs: None # do nothing
+        return corresponder, vae_callback   # type: ignore
+
+
+class OverlapCorresponder(StableRenderingNode):
+    
+    Category = "sampling"
+
+    def __call__(self, 
+                 engine_data: EngineData,   # this is hidden value, will hide on UI
+                 update_corrmap: bool=True, 
+                 update_mode: UpdateMode = 'first_avg',
+                 post_attn_inject_ratio: float = 0.6,
+                 )->tuple[
+                     Corresponder,
+                     VAEDecodeCallback
+                 ]:
+        '''
+        Create the general corresponder that uses the equal contribution method, 
+        i.e. assume each pixel contributes equally to the cell it belongs to when calculating overlapping ratio.
+        
+        Args:
+            - engine_data: The current engine data, which packs several frame's data together.
+            - update_corrmap: Whether to update the correspondence map. Defaults to True.
+            - update_mode: The mode for updating the correspondence map. Defaults to 'first_avg'.
+                            possible choices:
+                                - replace: 
+                                    replace the old value with the new value
+                                - replace_avg: 
+                                    average the old value with the new value, and put back
+                                - first: 
+                                    only update the value if the old cell in not written
+                                - first_avg: 
+                                    only update the value if the old cell in not written. 
+                                    But if there are multiple values for the same cell in this update process, average them.
+            - post_attn_inject_ratio: The ratio for injecting post-attention values. Defaults to 0.6.
+        '''
+        corresponder = _OverlapCorresponder(update_corrmap=update_corrmap, 
                                             update_corrmap_mode=update_mode,
                                             post_attn_inject_ratio=post_attn_inject_ratio)
         
@@ -112,6 +167,7 @@ class CorrespondSampler(StableRenderingNode):
             def print_progress(context: SamplingCallbackContext):
                 ComfyUILogger.info(f"Step {context.step_index+1}/{context.total_steps} finished.")
             callback.append(print_progress) # type: ignore
+        
 
         if latent is None:
             if engine_data is not None:

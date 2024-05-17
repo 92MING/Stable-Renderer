@@ -14,6 +14,17 @@ if TYPE_CHECKING:
 
 class Corresponder(Protocol):
     '''object that defines the correspond function for treating the related values across frames'''
+    layer_range: tuple[int, ...]
+    '''
+    Define the layers that the correspond function will be applied to.
+    Default is the 6th layer(the middle layer of the whole unet).
+    '''
+    update_corrmap: bool
+    '''whether to update the correspondence map'''
+    update_corrmap_mode: "UpdateMode"
+    '''the mode for updating the correspondence map'''
+    post_attn_inject_ratio: float
+    '''final attn value = cached value * post_attn_inject_ratio + origin value * (1 - post_attn_inject_ratio)'''
     
     @abstractmethod
     def prepare(self, engine_data: "EngineData"):
@@ -143,6 +154,45 @@ class DefaultCorresponder:
                     masks=this_masks
                 )
     
+
+@attrs
+class OverlapCorresponder:
+    """Implements the Corresponder interface"""
+    '''The default implementation of `Corresponder`'''
     
+    layer_range: tuple[int, ...] = attrib(default=(6,))
+    '''
+    Define the layers that the correspond function will be applied to.
+    Default is the 6th layer(the middle layer of the whole unet).
+    '''
+    update_corrmap: bool = attrib(default=True)
+    '''whether to update the correspondence map'''
+    update_corrmap_mode: "UpdateMode" = attrib(default='first_avg')
+    '''the mode for updating the correspondence map'''
+    post_attn_inject_ratio: float = attrib(default=0.6)
+    '''final attn value = cached value * post_attn_inject_ratio + origin value * (1 - post_attn_inject_ratio)'''
+
+    def prepare(self, engine_data: "EngineData"):
+        pass
+
+    def pre_atten_inject(self, 
+                         block: "BasicTransformerBlock", 
+                         engine_data: "EngineData",
+                         q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
+                         layer: int
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return q, k, v
     
-__all__ = ['Corresponder', 'DefaultCorresponder']
+    def post_atten_inject(self, 
+                          block: "BasicTransformerBlock", 
+                          engine_data: "EngineData",
+                          origin_values: torch.Tensor,
+                          layer: int
+        ) -> torch.Tensor:
+        return origin_values
+    
+    def step_finished(self, engine_data: "EngineData", sampling_context: "SamplingCallbackContext"):
+        pass
+
+    
+__all__ = ['Corresponder', 'DefaultCorresponder', 'OverlapCorresponder']
