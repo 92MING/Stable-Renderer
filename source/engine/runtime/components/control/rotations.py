@@ -7,9 +7,9 @@ class EqualIntervalRotation(Component):
                  enable=True, 
                  interval: int = 18,
                  axis: Literal['x', 'y', 'z'] = 'y',
-                 update_mode: Literal['fixed_update', 'update'] = 'update'):
+                 update_mode: Literal['fixed_update', 'update'] = 'fixed_update'):
         super().__init__(gameObj, enable)
-        self.rotation_interval = 360 // interval
+        self.rotation_interval = 360 / interval
         self.rotation_axis = axis
         self.update_mode = update_mode
         

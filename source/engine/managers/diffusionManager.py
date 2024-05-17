@@ -53,6 +53,8 @@ class DiffusionManager(Manager):
         self._saveSDColorOutput = saveSDColorOutput
         self._needOutputAICannyMap = outputAICannyMap
         self._baking_interval = baking_interval
+        EngineLogger.debug(f'DiffusionManager: baking interval is set to {baking_interval}')
+        EngineLogger.debug(f'DiffusionManager: map saving interval is set to {mapSavingInterval}')
         
         if not threadPoolSize:
             threadPoolSize = multiprocessing.cpu_count()

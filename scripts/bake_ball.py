@@ -17,22 +17,23 @@ if __name__ == '__main__':
     class Sample(Engine):
         
         def beforePrepare(self):
-            mikuPath = os.path.join(EXAMPLE_3D_MODEL_DIR, 'miku')
-            mikuMesh = Mesh.Load(os.path.join(mikuPath, 'miku.obj'), alias='miku', cullback=False) 
-            mikuMaterials = Material_MTL.Load(os.path.join(mikuPath, 'miku.mtl')) # dict of materials
+            sphere_mesh = Mesh.Sphere()
+            mat = Material.DefaultOpaqueMaterial()
+            tex= Texture.Load(r'D:\Stable-Renderer\resources\example-3d-models\debug\debug_uv_texture.jpg'.replace('\\', '/'))
+            mat.addDefaultTexture(tex, DefaultTextureType.DiffuseTex)
             
             camera = GameObject('Camera', position=[0, 0.68, 2.3])
             camera.addComponent(Camera, bgPrompt='no background')
             camera.transform.lookAt([0, 0.68, 0])
             #camera.addComponent(CameraController, defaultPos=[0, 0.68, 2.3], defaultLookAt=[0, 0.68, 0])
             
-            miku = GameObject('miku', position=[0, 0.02, 0], scale=0.065)
-            meshRenderer = miku.addComponent(MeshRenderer, mesh=mikuMesh)
-            meshRenderer.load_MTL_Materials(mikuMaterials)
+            ball = GameObject('ball', position=[0, 0.68, 0], scale=0.70)
+            meshRenderer = ball.addComponent(MeshRenderer, mesh=sphere_mesh)
+            meshRenderer.addMaterial(mat)
             
             rotation_interval = 360
             
-            miku.addComponent(EqualIntervalRotation, interval=rotation_interval)
+            ball.addComponent(EqualIntervalRotation, interval=rotation_interval)
             
             self.corrmap = CorrespondMap(k=6)
             win_width, win_height = self.WindowManager.WindowSize
@@ -51,15 +52,13 @@ if __name__ == '__main__':
             mat = Material.DefaultTransparentMaterial()
             mat.addDefaultTexture(tex, DefaultTextureType.NoiseTex)
             
-            sphere_mesh = Mesh.Sphere(512)
-            
             corrmap_obj = GameObject('corrmap', position=[0, 0.68, 0], scale=0.85)
-            corrmap_obj.addComponent(SpriteInfo, auto_spriteID=True, prompt='miku, 1 girl, long blue hair, waifu, white dresses')
-            corrmap_obj.addComponent(CorrMapRenderer, corrmaps=self.corrmap, materials=[mat,], mesh=sphere_mesh, use_texcoord_id=False)
+            corrmap_obj.addComponent(SpriteInfo, auto_spriteID=True, prompt='')
+            corrmap_obj.addComponent(CorrMapRenderer, corrmaps=self.corrmap, materials=[mat,], use_texcoord_id=True)
             corrmap_obj.addComponent(EqualIntervalRotation, interval=rotation_interval)
             
         def beforeFrameBegin(self):    
-            if self.RuntimeManager.FrameCount == 180:
+            if self.RuntimeManager.FrameCount == 360:
                 self.Exit()
         
         def beforeRelease(self):

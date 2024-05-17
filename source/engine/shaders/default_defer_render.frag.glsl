@@ -52,7 +52,7 @@ void main() {
                     col.g = 0.0;
                     col.b = 1.0 - (ratio - 5.0 / 6.0) * 6.0;
                 }
-                col = mix(FragColor.rgb, col, ratio) * ratio * 2.0;
+                col = mix(FragColor.rgb, col, 0.1);
                 FragColor = vec4(col, 1.0);
             }
         }

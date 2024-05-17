@@ -966,6 +966,7 @@ class RenderManager(Manager):
         
         # output map data for debugging
         if self.engine.DiffusionManager.ShouldOutputFrame:
+            EngineLogger.info(f"Output frame data for frame {self.engine.RuntimeManager.FrameCount}")
             colorData = self._colorFboTexForShaderBinding.numpy_data(flipY=True)
             idData = self._idFboTexForShaderBinding.numpy_data(flipY=True)
             posData = self._posFboTexForShaderBinding.numpy_data(flipY=True)
@@ -1000,8 +1001,7 @@ class RenderManager(Manager):
                 if 'id_maps' in self.data_to_be_added_to_engineData:
                     if not isinstance(self.data_to_be_added_to_engineData['id_maps'], IDMap):
                         self.data_to_be_added_to_engineData['id_maps'] = IDMap(frame_indices=self.data_to_be_added_to_engineData['frame_indices'], 
-                                                                               tensor=self.data_to_be_added_to_engineData['id_maps'],
-                                                                               masks=self.data_to_be_added_to_engineData['masks'])
+                                                                               tensor=self.data_to_be_added_to_engineData['id_maps'])
                 from comfyUI.types import LATENT
                 if 'noise_maps' in self.data_to_be_added_to_engineData:
                     if not isinstance(self.data_to_be_added_to_engineData['noise_maps'], LATENT):

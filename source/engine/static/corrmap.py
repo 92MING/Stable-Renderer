@@ -52,7 +52,8 @@ class IDMap:
     '''
     The real data of this id-map.
     You can also use a Texture object here, it will be converted to tensor automatically.
-    id struct: (spriteID, materialID, map_index, vertexID), where vertexID = width * y + x
+    
+    shape = (N, H, W, 4), cell = (spriteID, materialID, map_index, vertexID), where vertexID = width * y + x
     '''
 
     frame_indices: list[int] = attrib(default=None)
@@ -71,8 +72,10 @@ class IDMap:
 
     masks: torch.Tensor = attrib(default=None)
     '''
-    Mask for the id-map. shape = (N, height, width), 1 means ignore, 0 means not ignore.
-    Note that there could be multiple frames' masks in this map.
+    Mask for the id-map. shape = (N, height, width).
+    Note:
+        - that there could be multiple frames' masks in this map.
+        - IDMap.masks is not the same as EngineData.masks. The former is for the id-map(no id places = 1), while the latter is for the color(no color places = 1).
     '''
     
     @property
@@ -110,7 +113,13 @@ class IDMap:
             self.tensor = torch.stack([self.tensor, ] * len(self.frame_indices), dim=0)
         
         if self.masks is None:
-            self.masks = torch.zeros(self.frame_count, self.tensor.shape[-2], self.tensor.shape[-1], dtype=torch.float32)
+            if self.tensor is not None:
+                pixels_with_2048_map_index = self.tensor[..., 2] == 2048
+                pixels_with_all_zeros = torch.all(self.tensor == 0, dim=-1)
+                no_id_pixels = torch.logical_or(pixels_with_2048_map_index, pixels_with_all_zeros)
+                self.masks = no_id_pixels.to(torch.float32)
+            else:
+                self.masks = torch.zeros(self.frame_count, self.tensor.shape[-2], self.tensor.shape[-1], dtype=torch.float32)
         else:
             if len(self.masks.shape) == 2:  # (H, W)
                 # add batch dim(frame count)
@@ -124,9 +133,9 @@ class IDMap:
 
     @classmethod
     def from_directory(cls,
-                       directory: str,
-                       frame_start: int,
-                       num_frames: int) -> 'IDMap':
+                       directory: str|Path,
+                       frame_start: int|None=None,
+                       num_frames: int|None=None) -> 'IDMap':
         '''
         Load the IDMap from a directory.
 
@@ -139,8 +148,8 @@ class IDMap:
             - IDMap object.
         '''
         assert os.path.exists(directory)
-        assert frame_start >= 0 and num_frames > 0
-
+        
+        frame_start = frame_start or 0
         file_filter = lambda fname: fname.endswith(".npy") \
             and os.path.exists(os.path.join(directory, fname))
 
@@ -152,7 +161,9 @@ class IDMap:
 
         frame_indices = list(
             map(partial(extract_index, i=-1), reordered_filenames)
-        )[frame_start: frame_start+num_frames]
+        )
+        num_frames = num_frames or len(frame_indices)
+        frame_indices = frame_indices[frame_start: frame_start+num_frames]
         assert all(i != -1 for i in frame_indices), "Illegal filename(s) found."
 
         id_tensors = [] 
@@ -171,7 +182,7 @@ class IDMap:
             raise ValueError(f"Tensor data has inconsistent shapes.")
 
         if len(id_tensors) == 0:
-            return None
+            raise ValueError("No valid id data found.")
         t = torch.stack(id_tensors, dim=0)
 
         return IDMap(frame_indices=frame_indices, tensor=t)
@@ -361,24 +372,24 @@ class CorrespondMap(ResourcesObj):
         else:
             raise ValueError("Unsupported channel count: ", self.channel_count)
 
-        data =self._values.cpu().numpy().tobytes()
-        
         gl.glTexStorage3D(gl.GL_TEXTURE_2D_ARRAY, 
                           1, 
                           internalformat, 
                           self.width, self.height, self.k*self.k)
-        gl.glTexSubImage3D(
-            gl.GL_TEXTURE_2D_ARRAY,
-            0,
-            0, 0, 0,
-            self.width, self.height, self.k*self.k,
-            format,
-            gl.GL_HALF_FLOAT,
-            data
-        )
+        for i in range(self.k*self.k):
+            data = self.get_map(i, order='whc').cpu().numpy().astype(np.float16)
+            gl.glTexSubImage3D(
+                gl.GL_TEXTURE_2D_ARRAY,
+                0,
+                0, 0, i,
+                self.width, self.height, 1,
+                format,
+                gl.GL_HALF_FLOAT,
+                data.tobytes()
+            )
         
-        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
         gl.glTexParameteri(gl.GL_TEXTURE_2D_ARRAY, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
         
@@ -429,18 +440,23 @@ class CorrespondMap(ResourcesObj):
         '''return the numpy data of the map_index-th map.'''
         return self.get_map(map_index, height, width).cpu().numpy().astype(dtype)
     
-    def get_map(self, index: int, height:int|None=None, width:int|None=None, ):
+    def get_map(self, index: int, height:int|None=None, width:int|None=None, order: Literal['whc', 'hwc']='hwc'):
         '''
         Return the color map of the index-th view direction. (height, width, channel_count).
         The returning map will reshape to the given width and height if they are not None, otherwise, it will keep the original size.
         '''
-        if height is None:
-            height = self.height
-        if width is None:
-            width = self.width
+        height = height or self.height
+        width = width or self.width
+        
+        assert height * width <= self.height * self.width, "The given size is larger than the original size."
+        
         if height*width < self.height * self.width:   # means only the first part of the map is used
             return self._values[index, :width*height].view(height, width, self.channel_count)
-        return self._values[index].view(height, width, self.channel_count)
+        
+        data = self._values[index].view(height, width, self.channel_count)
+        if order == 'whc':
+            data = rearrange(data, 'h w c -> w h c')
+        return data
     
     def get_maps(self, height:int|None=None, width:int|None=None):
         '''return (k*k, height, width, channel_count)'''
@@ -474,6 +490,7 @@ class CorrespondMap(ResourcesObj):
                materialID: int|None = None,
                mode: UpdateMode = 'first_avg',
                masks: list[Tensor]|Tensor|None=None,
+               inverse_masks: bool=False,
                ignore_obj_mat_id: bool=False):
         '''
         Args:
@@ -492,6 +509,7 @@ class CorrespondMap(ResourcesObj):
                     only update the value if the old cell in not written. 
                     But if there are multiple values for the same cell in this update process, average them.
             - masks: shape = (h, w), the region to ignore.
+            - inverse_masks: if True, masks = 1 - masks 
             - ignore_obj_mat_id: if True, still update even if the spriteID and materialID are not matching to this map.
             
         Note:
@@ -499,44 +517,54 @@ class CorrespondMap(ResourcesObj):
         '''
         if isinstance(color_frames, Tensor):
             if len(color_frames.shape) == 4: # frames are concatenated as a tensor, split them
-                color_frames = torch.split(color_frames, 1, dim=0)
+                color_frames = [c.squeeze() for c in color_frames.split(1, dim=0)]
             elif len(color_frames.shape) == 3:
                 color_frames = [color_frames, ]
             else:
                 raise ValueError("The shape of color_frames is invalid. Got: ", color_frames.shape)
-            
-        if isinstance(id_maps, Tensor):
-            if len(id_maps.shape) == 4: # maps are concatenated as a tensor, split them
-                id_maps = torch.split(id_maps, 1, dim=0)    # type: ignore
-            elif len(id_maps.shape) == 3:
-                id_maps = [id_maps, ]
-            else:
-                raise ValueError("The shape of id_maps is invalid. Got: ", id_maps.shape)
-        elif isinstance(id_maps, IDMap):
-            id_maps = [id_maps.tensor, ]
         
+        all_id_maps = []
+        if isinstance(id_maps, IDMap):
+            id_maps = id_maps.tensor
+        if isinstance(id_maps, Tensor):
+            id_maps = [id_maps,]
+        if isinstance(id_maps, list):
+            for id_map in id_maps:
+                if isinstance(id_map, IDMap):
+                    id_map = id_map.tensor
+                if len(id_map.shape) == 4: # maps are concatenated as a tensor, split them
+                    all_id_maps.extend([i.squeeze() for i in id_map.split(1, dim=0)])
+                elif len(id_map.shape) == 3:
+                    id_maps.append(id_map)
+                else:
+                    raise ValueError("The shape of id_maps is invalid. Got: ", id_map.shape)
+        id_maps = all_id_maps
+
         if masks is None:
             masks = [None] * len(color_frames)  # type: ignore
-        elif masks is not None:
-            if isinstance(masks, Tensor):
-                if len(masks.shape) == 4 and masks.shape[-1] == 1:  # not yet squeezed
-                    masks = torch.split(masks.squeeze(-1), 1, dim=0)
-                elif len(masks.shape) == 3:
-                    masks = torch.split(masks, 1, dim=0)
-                elif len(masks.shape) == 2:
-                    masks = [masks,]
+        elif isinstance(masks, Tensor):
+            if len(masks.shape) == 4 and masks.shape[-1] == 1:  # not yet squeezed + not yet split
+                masks = [m.squeeze() for m in torch.split(masks.squeeze(-1), 1, dim=0)]
+            elif len(masks.shape) == 3:
+                if masks.shape[-1] == 1:    # not yet squeezed
+                    masks = [masks.squeeze(),]
                 else:
-                    raise ValueError("The shape of masks is invalid. Got: ", masks.shape)
+                    masks = [m.squeeze() for m in torch.split(masks, 1, dim=0)]
+            elif len(masks.shape) == 2: # normal mask
+                masks = [masks,]
+            else:
+                raise ValueError("The shape of masks is invalid. Got: ", masks.shape)
+        else:
+            raise ValueError("Invalid type of masks. Got: ", type(masks))
+        if inverse_masks:
+            for i, mask in enumerate(masks):
+                if mask is not None:
+                    masks[i] = 1 - mask
         
         if len(color_frames) != len(id_maps):   # type: ignore
-            raise ValueError("The length of color_frames and id_maps should be the same.")
+            raise ValueError(f"The length of color_frames and id_maps should be the same, but got: {len(color_frames)} and {len(id_maps)}")
         if len(masks) != len(color_frames): # type: ignore
-            raise ValueError("The length of masks should be the same as color_frames.")
-        
-        for i in range(len(id_maps)):   # type: ignore
-            m = id_maps[i]  # type: ignore
-            if isinstance(m, IDMap):
-                id_maps[i] = m.tensor   # type: ignore
+            raise ValueError(f"The length of masks should be the same as color_frames, but got: {len(masks)} and {len(color_frames)}")
         
         for color_frame, id_map, mask in zip(color_frames, id_maps, masks): # type: ignore
             self._update(color_frame=color_frame, 
@@ -546,6 +574,8 @@ class CorrespondMap(ResourcesObj):
                          mode=mode, 
                          mask=mask, 
                          ignore_obj_mat_id=ignore_obj_mat_id)  # type: ignore
+            
+        EngineLogger.debug(f"Done Update CorrespondMap: {self.name}, mode: {mode}, spriteID: {spriteID}, materialID: {materialID}")
     
     def _update(self: "CorrespondMap", 
                 color_frame: Tensor, 
@@ -561,6 +591,11 @@ class CorrespondMap(ResourcesObj):
         elif self.channel_count == 4 and color_frame.shape[-1] == 3:    # add alpha channel
             color_frame = torch.cat([color_frame, torch.ones_like(color_frame[..., :1])], dim=-1)
         
+        EngineLogger.debug(f"Start CorrespondMap: {self.name}, mode: {mode}, spriteID: {spriteID}, materialID: {materialID}, ignore_obj_mat_id: {ignore_obj_mat_id}")
+        EngineLogger.debug(f"Start CorrespondMap. color_frame: {color_frame.shape}, id_map: {id_map.shape}, mask: {mask.shape if mask is not None else None}")
+        
+        # e.g. initial id_map shape = 512,512,4, initial color_frame shape = 512,512,4, initial mask shape = 512,512
+        
         # flatten maps
         indices = torch.arange(id_map.shape[0]*id_map.shape[1], device=id_map.device).view(-1, 1)
         id_map = id_map.view(-1, id_map.shape[-1])
@@ -572,10 +607,12 @@ class CorrespondMap(ResourcesObj):
         color_frame = torch.cat([indices, color_frame], dim=-1)
         # shape = (height * width, channel_count + 1)
         # cell = (i, r, g, b, a)
+        EngineLogger.debug(f"added indices. now color_frame: {color_frame.shape}, id_map: {id_map.shape}")
         
         if mask is not None:
-            mask = mask.view(-1, 1) # shape = (height * width), flatten
-            id_map = id_map[mask[..., 0]<1]     # 1 means ignore
+            mask = mask.view(-1) # shape = (height * width), flatten
+            EngineLogger.debug(f"mask flatten shape: {mask.shape}")
+            id_map = id_map[mask>0]     # ignore 0
             color_frame = color_frame[id_map[..., 0]]
         
         if not ignore_obj_mat_id:
@@ -590,47 +627,79 @@ class CorrespondMap(ResourcesObj):
         
         if mode in ['first', 'first_avg']:  # only choose cells that are not written
             # self._writtens's shape = (k^2(map_index), width * height(vertex id), 1(bool))
+            print(self._writtens.shape)
             written = self._writtens[id_map[..., 1], id_map[..., 2]]
             id_map = id_map[~written]
             color_frame = color_frame[~written]
         
-        elif mode in ['replace', 'replace_avg']:
-            id_map = id_map.contiguous()
-            color_frame = color_frame.contiguous()
-            id_map, color_frame = _find_dup_index_and_treat(id_map, color_frame, mode)  # type: ignore
+        if mode in ['replace', 'first_avg', 'replace_avg']:
+            # TODO
+            ...
+            # id_map = id_map.contiguous()
+            # color_frame = color_frame.contiguous()
+            # id_map, color_frame = _find_dup_index_and_treat(id_map, color_frame, mode)  # type: ignore
 
         # update the values
         self._values[id_map[..., 1], id_map[..., 2]] = color_frame[..., 1:].to(self._values.dtype)
         self._writtens[id_map[..., 1], id_map[..., 2]] = True
     
-    def dump(self, path: str|Path, name: Optional[str]=None, zip=False):
+    def dump(self, path: str|Path, name: Optional[str]=None, zip=False, force=False):
+        '''
+        Args:
+            - path: the path to save the map. It should be a folder or a zip file.
+            - name: the name of the map. If not given, it will use the name in the object.
+            - zip: whether to zip the map.
+            - force: whether to overwrite the existing map.
+        '''
         name = name or self.name
-        real_name = name
-        count = 1
-        while os.path.exists(os.path.join(path, real_name)):
-            real_name = f"{name}_{count}"
-            count += 1
+        real_name: str = name
+        working_path: str = None
+        real_path: str = None
         
-        if zip:
-            random_name = str(uuid4()).replace('-', '')
-            real_path = TEMP_DIR / f"{random_name}.zip"
+        suffix = '.zip' if zip else ''
+        if not force:
+            count = 1
+            while os.path.exists(os.path.join(path, real_name + suffix)):
+                real_name = f"{name}_{count}"
+                count += 1
+            if zip:
+                random_name = str(uuid4()).replace('-', '')
+                working_path = TEMP_DIR / f"{random_name}"
+                real_path = os.path.join(path, real_name+suffix)
+            else:
+                working_path = real_path = os.path.join(path, real_name)
         else:
-            real_path = os.path.join(path, real_name)
+            if os.path.exists(os.path.join(path, real_name+suffix)):
+                if os.path.isdir(os.path.join(path, real_name+suffix)):
+                    if zip:     # will not delete the whole file if zip mode
+                        raise ValueError(f"Folder with the same name {real_name+suffix} already exists in {path}. It is not allowed to delete a whole folder in zip mode.")
+                    for f in os.listdir(os.path.join(path, real_name+suffix)):
+                        os.remove(os.path.join(path, real_name+suffix, f))
+                    os.rmdir(os.path.join(path, real_name+suffix))
+                else:
+                    os.remove(os.path.join(path, real_name+suffix))
+        
         os.makedirs(real_path, exist_ok=True)
+        os.makedirs(working_path, exist_ok=True)
             
         for i in range(self.k*self.k):
             map_data = self.get_map(i)
             
             img = 255. * map_data.cpu().numpy()
-            img = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
-            img.save(os.path.join(real_path, f"{i}.png"))
+            mode_map = {
+                1: 'L',
+                3: 'RGB',
+                4: 'RGBA'
+            }
+            img = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), mode=mode_map[self.channel_count])
+            img.save(os.path.join(working_path, f"{i}.png"))
 
             # also output as img, for easy debug & check. 
             # white means written, black means not written
             written = self.get_written_flag_map(i)
             img = 255. * written.cpu().numpy()
             img = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), mode='L')
-            img.save(os.path.join(real_path, f"{i}_written.png"))
+            img.save(os.path.join(working_path, f"{i}_written.png"))
         
         meta = {    # spriteID & matID will not be saved, since it will be generated when loading
             "k": self.k,
@@ -639,28 +708,24 @@ class CorrespondMap(ResourcesObj):
             "channel_count": self.channel_count,
             "name": name
         }
-        with open(os.path.join(real_path, 'meta.json'), 'w') as f:
+        with open(os.path.join(working_path, 'meta.json'), 'w') as f:
             json.dump(meta, f)
         
         if zip:
-            count = 1
-            real_name = name
-            while os.path.exists(os.path.join(path, f"{real_name}.zip")):
-                real_name = f"{name}_{count}"
-                count += 1
-            saving_path = os.path.join(path, f"{real_name}.zip")
-            
-            with zipfile.ZipFile(saving_path, 'w') as z:
+            with zipfile.ZipFile(real_path, 'w') as z:
                 for i in range(self.k*self.k):
                     z.write(os.path.join(real_path, f"{i}.png"), f"{i}.png")
                     z.write(os.path.join(real_path, f"{i}_written.png"), f"{i}_written.png")
-                    os.remove(os.path.join(real_path, f"{i}.png"))
-                    os.remove(os.path.join(real_path, f"{i}_written.png"))
+                    os.remove(os.path.join(working_path, f"{i}.png"))
+                    os.remove(os.path.join(working_path, f"{i}_written.png"))
                     
                 z.write(os.path.join(real_path, 'meta.json'), 'meta.json')
-                os.remove(os.path.join(real_path, 'meta.json'))
+                os.remove(os.path.join(working_path, 'meta.json'))
                 z.close()
-            os.rmdir(real_path) # will only remove when the folder is empty
+            os.rmdir(working_path) # will only remove when the folder is empty
+        
+        EngineLogger.debug(f"CorrespondMap {name} dumped to {real_path}.")
+        return real_path
     
     @classmethod
     def Load(cls, path: str|Path, name: Optional[str]=None):

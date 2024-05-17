@@ -186,15 +186,15 @@ void main() {
 			if (hasCorrMap == 1){
 				vec3 corrmap_uv;
 				if (useTexcoordAsID == 1){
-					corrmap_uv = vec3(uv, map_index);
+					// int vID = int(uv.y * 512 * 512 + uv.x * 512);
+					// float x = float(vID % 512) / float(512);
+					// float y = float(vID / 512) / float(512);
+					//corrmap_uv = vec3(uv.y, uv.x, map_index);
+					corrmap_uv = vec3(uv.y, uv.x, map_index);
 				}
 				else{
-					// ivec3 corrmap_size = textureSize(correspond_map, 0);
-					ivec3 corrmap_size = ivec3(512, 512, corrmap_k * corrmap_k);
-					int corrmap_width = corrmap_size.x;
-					int corrmap_height = corrmap_size.y;
-					float u = float(vertexID % corrmap_width) / float(corrmap_width);
-					float v = float(vertexID / corrmap_width) / float(corrmap_height);
+					float u = float(vertexID % 512) / float(512);	// 512 is the default size
+					float v = float(vertexID / 512) / float(512);
 					corrmap_uv = vec3(u, v, map_index);
 				}
 				outColor = texture(correspond_map, corrmap_uv).rgba;

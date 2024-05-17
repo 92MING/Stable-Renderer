@@ -2,6 +2,7 @@ import os
 import torch
 import numpy as np
 
+from pathlib import Path
 from typing import List, Literal
 from torchvision.io import read_image, ImageReadMode
 from einops import rearrange
@@ -18,7 +19,7 @@ class LegacyImageSequenceLoader(StableRenderingNode):
                                  accept_multiple=True, 
                                  to_folder='temp',
                                  accept_types=[".jpeg", ".png", ".bmp", ".jpg"])],    # type: ignore
-                 ) -> IMAGE:
+                 ) -> tuple[IMAGE, MASK]:
         """Load image sequence from a given folder
 
         Note: The filename of images should contain a number, indicating its frame index in
@@ -37,18 +38,23 @@ class LegacyImageSequenceLoader(StableRenderingNode):
             elif img.split('_')[0].isdigit():   # e.g. 0_depth.png
                 return int(img.split('_')[0])
             return i    # default to the original order
-        reordered_imgs = sorted(imgs, key=lambda x: extract_index(x, imgs.index(x)))
+        reordered_imgs: list[Path] = sorted(imgs, key=lambda x: extract_index(x, imgs.index(x)))
         
         # Read images as tensor from filenames
         tensor_images = []
+        tensor_masks = []
         for img_path in reordered_imgs:
             if not os.path.exists(img_path):
                 continue
-            tensor_img = read_image(str(img_path), mode=ImageReadMode.RGB)
-            tensor_img = tensor_img.permute(1, 2, 0).unsqueeze(0) / 255.0
-            tensor_images.append(tensor_img)
+            tensor_img = read_image(str(img_path), mode=ImageReadMode.RGB_ALPHA)  # will read as CHW
+            tensor_img = tensor_img.permute(1, 2, 0).unsqueeze(0) / 255.0   # back to HWC
+            tensor_images.append(tensor_img[..., :3])  # RGB
+            mask = (1 - tensor_img[..., -1]).squeeze()
+            if len(mask.shape) == 2:
+                mask = mask.unsqueeze(0)    # add batch dim
+            tensor_masks.append(mask)
 
-        return torch.cat(tensor_images, dim=0) 
+        return torch.cat(tensor_images, dim=0), torch.cat(tensor_masks, dim=0)
 
 
 class LegacyNoiseSequenceLoader(StableRenderingNode):

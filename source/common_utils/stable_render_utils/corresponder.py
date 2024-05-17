@@ -1,3 +1,8 @@
+if __name__ == '__main__':
+    import sys, os
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    __package__ = 'common_utils.stable_render_utils'
+
 import torch
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Protocol, Any
@@ -98,7 +103,7 @@ class Corresponder(Protocol):
 class DefaultCorresponder:
     '''The default implementation of `Corresponder`'''
     
-    layer_range: tuple[int, ...] = attrib(default=(1,))
+    layer_range: tuple[int, ...] = attrib(default=(6,))
     '''
     Define the layers that the correspond function will be applied to.
     Default is the 6th layer(the middle layer of the whole unet).
@@ -109,6 +114,7 @@ class DefaultCorresponder:
     '''the mode for updating the correspondence map'''
     post_attn_inject_ratio: float = attrib(default=0.6)
     '''final attn value = cached value * post_attn_inject_ratio + origin value * (1 - post_attn_inject_ratio)'''
+    ignore_obj_mat_id_when_update: bool = attrib(default=False)
     
     def post_atten_inject(self,
                           block: "BasicTransformerBlock",
@@ -130,30 +136,25 @@ class DefaultCorresponder:
         '''
         if not self.update_corrmap or images is None or engine_data.id_maps is None:
             return
-        exit()
-        id_maps = engine_data.id_maps
-        final_colors = images
-        masks = engine_data.masks
+        
+        id_maps = engine_data.id_maps.tensor
+        masks = engine_data.id_maps.masks   # here is id_maps.masks, not engine_data.masks
+        if masks is None:
+            masks = torch.ones(id_maps.shape[:-1], dtype=torch.bool, device=id_maps.device)
         corrmaps = engine_data.correspond_maps
         
         if corrmaps:
             for (spriteID, materialID), corrmap in corrmaps.items():    # but suppose there should be only 1 corrmap in baking mode
-                if masks is not None:
-                    this_masks = masks.clone()
-                    if spriteID is not None:
-                        this_masks[id_maps.tensor[0, ...] != spriteID] = 1 # 1 means should not include
-                    if materialID is not None:
-                        this_masks[id_maps.tensor[0, ...] != materialID] = 1
-                else:
-                    this_masks = None
-                
                 corrmap.update(
-                    color_frames=final_colors.clone(),
+                    color_frames=images,
                     id_maps=id_maps,
                     mode=self.update_corrmap_mode,
-                    masks=this_masks
+                    masks=masks,
+                    spriteID=spriteID,
+                    materialID=materialID,
+                    ignore_obj_mat_id = self.ignore_obj_mat_id_when_update,  # ignore the object ID
+                    inverse_masks=True  # update the pixels that are not masked
                 )
-    
 
 @attrs
 class OverlapCorresponder:
@@ -167,7 +168,7 @@ class OverlapCorresponder:
     '''
     update_corrmap: bool = attrib(default=True)
     '''whether to update the correspondence map'''
-    update_corrmap_mode: "UpdateMode" = attrib(default='first_avg')
+    update_corrmap_mode: "UpdateMode" = attrib(default='first')
     '''the mode for updating the correspondence map'''
     post_attn_inject_ratio: float = attrib(default=0.6)
     '''final attn value = cached value * post_attn_inject_ratio + origin value * (1 - post_attn_inject_ratio)'''
@@ -196,3 +197,50 @@ class OverlapCorresponder:
 
     
 __all__ = ['Corresponder', 'DefaultCorresponder', 'OverlapCorresponder']
+
+
+if __name__ == '__main__':
+    # test the default corresponder's `finished` method
+    import os
+    from comfyUI.types import EngineData, CorrespondMaps
+    from common_utils.path_utils import RESOURCES_DIR, TEMP_DIR
+    from engine.static.corrmap import IDMap, CorrespondMap
+    from comfyUI.stable_rendering import LegacyImageSequenceLoader
+    import numpy as np
+    from PIL import Image
+    from pathlib import Path
+    
+    # data_dir = RESOURCES_DIR / 'example-map-outputs' / 'miku-sphere'
+    # data_dir = r'D:\Stable-Renderer\output\runtime_map\2024-05-17_6'.replace('\\', '/')
+    data_dir = r'D:\Stable-Renderer\output\runtime_map\2024-05-17_11'.replace('\\', '/')
+    data_dir = Path(data_dir)
+    color_dir = data_dir / 'color'
+    id_dir = data_dir / 'id'
+    output_dir = TEMP_DIR
+    
+    id_maps = IDMap.from_directory(id_dir) 
+    first_id_mask = id_maps.masks[0].unsqueeze(-1).squeeze(0)
+    first_id_mask = 1 - torch.cat([first_id_mask, ] * 3, dim=-1)
+    Image.fromarray((first_id_mask * 255).numpy().astype(np.uint8)).save(output_dir / 'first_id_mask.png')
+    
+    color_imgs = [os.path.join(color_dir, img) for img in os.listdir(color_dir) if img.endswith('.png')]
+    color_maps, color_masks = LegacyImageSequenceLoader()(color_imgs)
+    color_masks = color_masks.unsqueeze(-1)
+    color_masks = torch.cat([color_masks, ] * 3, dim=-1)
+    final_colors = torch.cat([color_maps, 1 - color_masks], dim=-1)
+    print('color_maps shape:', color_maps.shape, 'color_masks shape:', color_masks.shape, 'final_colors shape:', final_colors.shape)
+    
+    corrmap = CorrespondMap(name='miku_k=6', k=6)
+    
+    engineData = EngineData(
+        frame_indices=[i for i in range(len(id_maps))],
+        id_maps=id_maps,
+        correspond_maps=CorrespondMaps({(1, 0): corrmap})
+    )
+    
+    corresponder = DefaultCorresponder(ignore_obj_mat_id_when_update=True)
+    corresponder.finished(engineData, final_colors)
+    real_dump_path = corrmap.dump(TEMP_DIR / 'test_corresponder_finished')
+    
+    corrmap2 = CorrespondMap.Load(real_dump_path, name='test_load')
+    print('equal:', torch.all(corrmap2._values == corrmap._values), torch.all(corrmap2._writtens == corrmap._writtens))
