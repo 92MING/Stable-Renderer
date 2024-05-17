@@ -25,6 +25,11 @@ class Sprite:
     '''The prompt of the sprite.'''
     prompt_weight: float = attrib(default=1.0)
     '''The weight of the prompt.'''
+    
+    neg_prompt: str = attrib(default="")
+    '''The negative prompt of the sprite.'''
+    neg_prompt_weight: float = attrib(default=1.0)
+    '''The weight of the negative prompt.'''
 
 
 class SpriteInfos(dict[int, Sprite]):

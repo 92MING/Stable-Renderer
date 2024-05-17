@@ -2,10 +2,12 @@ import os
 if __name__ == '__main__': # for debugging
     import sys
     proj_path = os.path.join(os.path.dirname(__file__), '..', '..')
+    proj_path = os.path.abspath(proj_path)
     sys.path.insert(0, proj_path)
     __package__ = 'engine.static'
 
 import torch
+import multiprocessing
 import json
 import zipfile
 import taichi as ti
@@ -32,8 +34,8 @@ from common_utils.global_utils import is_dev_mode
 from common_utils.debug_utils import EngineLogger
 from common_utils.decorators import Overload
 from common_utils.math_utils import init_taichi
-from .resources_obj import ResourcesObj
-from .enums import TextureFormat
+from engine.static.resources_obj import ResourcesObj
+from engine.static.enums import TextureFormat
 
 if TYPE_CHECKING:
     from engine.static.shader import Shader
@@ -46,7 +48,14 @@ class IDMap:
     Note: there could be cases that the idmap obj contains more than 1 frames' id data, e.g. on baking process.
     '''
     
-    frame_indices: list[int] = attrib()
+    tensor: torch.Tensor = attrib()
+    '''
+    The real data of this id-map.
+    You can also use a Texture object here, it will be converted to tensor automatically.
+    id struct: (spriteID, materialID, map_index, vertexID), where vertexID = width * y + x
+    '''
+
+    frame_indices: list[int] = attrib(default=None)
     '''the frame indices of this map. Note that there could be multiple frames' data in this map, so it is a list of int.'''
     @property
     def frame_count(self)->int:
@@ -60,12 +69,6 @@ class IDMap:
     def __len__(self):
         return self.frame_count
 
-    tensor: torch.Tensor = attrib()
-    '''
-    The real data of this id-map.
-    You can also use a Texture object here, it will be converted to tensor automatically.
-    '''
-    
     masks: torch.Tensor = attrib(default=None)
     '''
     Mask for the id-map. shape = (N, height, width), 1 means ignore, 0 means not ignore.
@@ -85,7 +88,20 @@ class IDMap:
     def __attrs_post_init__(self):
         from engine.static import Texture
         
-        if isinstance(self.frame_indices, int):
+        if self.frame_indices is None and self.tensor is not None:
+            if isinstance(self.tensor, Texture):
+                frame_count = 1
+            elif isinstance(self.tensor, torch.Tensor):
+                if len(self.tensor.shape) == 4:
+                    frame_count = self.tensor.shape[0]
+                elif len(self.tensor.shape) == 3:
+                    frame_count = 1
+                else:
+                    raise ValueError("Invalid shape of real ID tensor.")
+            else:
+                raise ValueError("Invalid type of real ID tensor.")
+            self.frame_indices = list(range(frame_count))
+        elif isinstance(self.frame_indices, int):
             self.frame_indices = [self.frame_indices,]
         
         if isinstance(self.tensor, Texture):
@@ -132,7 +148,7 @@ class IDMap:
         reordered_filenames = sorted(
             filenames, key=lambda x: extract_index(x, filenames.index(x)))
         
-        print(f"Reordered filenames: {reordered_filenames}")
+        EngineLogger.debug(f"Reordered filenames: {reordered_filenames}")
 
         frame_indices = list(
             map(partial(extract_index, i=-1), reordered_filenames)
@@ -148,8 +164,6 @@ class IDMap:
                 raise ValueError(f"Invalid shape of id tensor: {id_tensor.shape}.")
             if not (id_tensor.shape[-1] == 4 or id_tensor.shape[1] == 4): # not chw or hwc
                 raise ValueError(f"Invalid id tensor shape: {id_tensor.shape}.")
-            if id_tensor.shape[-1] == 4:
-                id_tensor = rearrange(id_tensor, 'h w c -> c h w')
 
             id_tensors.append(id_tensor)
 
@@ -274,16 +288,16 @@ class CorrespondMap(ResourcesObj):
     texID: Optional[int] = attrib(default=None, init=False)
     '''sampler2DArray's texture id in OpenGL. This is for rendering purpose.'''
 
-    vertex_screen_positions: dict[int, tuple[int, dict[int, list[tuple[float, float]]]]] = attrib(factory=dict)
+    vertex_screen_positions: dict[int, dict[int, list[tuple[int, float, float]]]] = attrib(factory=dict)
     '''
-    for runtime baking.
+    for runtime baking. structure:
     {
-      vertexID: {
-        (
-          frame_index,
-          map_index: [(x ratio, y ratio), ...]
-        )
-      }
+        vertexID: {
+            map_index: [
+                (frame_index, x_ratio, y_ratio),
+                ...
+            ]
+        }
     }
     '''
     
@@ -303,11 +317,6 @@ class CorrespondMap(ResourcesObj):
         This is an alias of `self._values[index]`.
         '''
         return self._values[index]
-    
-    # region runtime
-    def save_vertex_screen_poses(self, vertexID: int, map_index: int, screen_poses: list[tuple[float, float]]):
-        ...
-    # endregion
     
     # region gl texture related
     def clear(self):
@@ -708,26 +717,27 @@ class CorrespondMap(ResourcesObj):
 
     def load_vertex_screen_positions(self, id_map: IDMap):
         """
+        Load vertex screen positions to CorrespondMap from IDMaps(multiple frames can be included).
         {
             vertexID: {
                 map_index: [
-                    (frame_index, (x_ratio, y_ratio)),
-                    ...
+                    (frame_index, x_ratio, y_ratio),
+                    ...4
                 ]
             }
         }
         """
-        import multiprocessing
-
         frame_indices = id_map.frame_indices
-        id_tensors = rearrange(id_map.tensor, "f c h w -> f h w c")
-
-        subprocess_vertex_screen_pos_dicts = multiprocessing.Manager().list([{} for _ in range(len(frame_indices))])
+        print("Loading vertex screen positions. Frame indices: ", frame_indices)
+        screen_pos_dicts = []
+        for i in range(len(frame_indices)):
+            screen_pos_dicts.append(multiprocessing.Manager().dict())
+        id_tensor = id_map.tensor
 
         processes = []
         for i in range(len(frame_indices)):
-            v_pos_dict = subprocess_vertex_screen_pos_dicts[i]
-            id_tensor = id_tensors[i]
+            v_pos_dict = screen_pos_dicts[i]
+            id_tensor = id_tensor[i].clone()
             frame_index = frame_indices[i]
             p = multiprocessing.Process(target=process_frame, args=(v_pos_dict, frame_index, id_tensor))
             processes.append(p)
@@ -736,11 +746,11 @@ class CorrespondMap(ResourcesObj):
         for p in processes:
             p.join()
 
-        subprocess_vertex_screen_pos_dicts = list(subprocess_vertex_screen_pos_dicts)
+        screen_pos_dicts = list(screen_pos_dicts)
 
         # Merge dicts
         print("Merging dicts")
-        for vertex_screen_pos in subprocess_vertex_screen_pos_dicts:
+        for vertex_screen_pos in screen_pos_dicts:
             for vertex_id, map_indices in vertex_screen_pos.items():
                 if self.vertex_screen_positions.get(vertex_id) is None:
                     self.vertex_screen_positions[vertex_id] = {}
@@ -805,15 +815,17 @@ if __name__ == '__main__':  # for debug
         m.dump(TEMP_DIR, name='update_test')
     
     def load_id_map_test():
-        id_map = IDMap.from_directory(
-            "/mnt/disk2/Stable-Renderer-Previous/Stable-Renderer/resources/example-map-outputs/miku-sphere/id", 
-            0, 16)
+        dir_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'resources', 'example-map-outputs', 'miku-sphere', 'id')
+        dir_path = os.path.abspath(dir_path)
+        id_map = IDMap.from_directory(dir_path,0, 16)
         print(id_map)
     
     def load_vertex_positions_test():
-        id_map = IDMap.from_directory(
-            "/mnt/disk2/Stable-Renderer-Previous/Stable-Renderer/resources/example-map-outputs/miku-sphere/id", 
-            0, 16)
+        dir_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'resources', 'example-map-outputs', 'miku-sphere', 'id')
+        dir_path = os.path.abspath(dir_path)
+        print('loading from:', dir_path)
+        id_map = IDMap.from_directory(dir_path,0, 4)
+        
         m = CorrespondMap(name='test', k=3)
         m.load_vertex_screen_positions(id_map)
         print(m.vertex_screen_positions)
