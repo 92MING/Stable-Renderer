@@ -180,6 +180,24 @@ class IDMap:
 
         return IDMap(frame_indices=frame_indices, tensor=t)
 
+    @classmethod
+    def from_tensor(cls,
+                    frame_indices: list,
+                    tensor: Tensor,) -> 'IDMap':
+        if len(tensor.shape) != 4:
+            raise ValueError(
+                f"Tensor should be in (B, H, W, C), got shape {tensor.shape}"
+            )
+        if len(frame_indices) != tensor.shape[0]:
+            raise ValueError(
+                f"Frame indices count should be equal to the batch size of the tensor, got {len(frame_indices)} and {tensor.shape[0]}"
+            )
+        if tensor.shape[-1] > 10:
+            EngineLogger.warn(
+                f"The channel count of the tensor {tensor.shape[-1]} is too large, it may be an invalid tensor."
+            )
+        return IDMap(frame_indices=frame_indices, tensor=tensor)
+
 
 init_taichi()
 
@@ -294,12 +312,13 @@ class CorrespondMap(ResourcesObj):
     texID: Optional[int] = attrib(default=None, init=False)
     '''sampler2DArray's texture id in OpenGL. This is for rendering purpose.'''
 
-    vertex_screen_positions: Optional[torch.Tensor] = attrib(default=None, init=False)
+    # TODO: Wrap this with another class
+    vertex_screen_info: Optional[torch.Tensor] = attrib(default=None, init=False)
     '''
     for runtime baking. structure:
         Tensor in shape of (N, 7), where the 7 elements are 
         (object_id, material_id, map_index, vertex_id, x, y, frame_index).
-    call load_vertex_screen_positions to load the data.
+    call load_vertex_screen_info to load the data.
     '''
     
     # ================= COLOR METHODS ================= # 
@@ -715,7 +734,7 @@ class CorrespondMap(ResourcesObj):
         
         return map
     
-    def load_vertex_screen_positions(self, id_map: IDMap):
+    def load_vertex_screen_info(self, id_map: IDMap):
         """
         Load vertex screen positions to CorrespondMap from IDMaps (multiple frames can be included).
         The tensor is in shape of (N, 7), where the 7 elements are 
@@ -768,14 +787,14 @@ class CorrespondMap(ResourcesObj):
             (flat_vertex_screen_info[..., 3] != 0)
         ]
 
-        self.vertex_screen_positions = flat_vertex_screen_info
+        self.vertex_screen_info = flat_vertex_screen_info
 
-        EngineLogger.info(f"Loaded vertex screen positions from IDMap.")
+        EngineLogger.info(f"Loaded vertex screen info from IDMap.")
     
     @property
     def unique_vertex_ids(self) -> torch.Tensor:
-        assert self.vertex_screen_positions is not None, "Vertex screen positions are not loaded."
-        return self.vertex_screen_positions[..., 3].unique()
+        assert self.vertex_screen_info is not None, "Vertex screen positions are not loaded."
+        return self.vertex_screen_info[..., 3].unique()
     
 
 
@@ -812,18 +831,18 @@ if __name__ == '__main__':  # for debug
         id_map = IDMap.from_directory(dir_path,0, 16)
         print(id_map)
     
-    def load_vertex_positions_test():
+    def load_vertex_screen_info_test():
         dir_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'resources', 'example-map-outputs', 'miku-sphere', 'id')
         dir_path = os.path.abspath(dir_path)
         print('loading from:', dir_path)
         id_map = IDMap.from_directory(dir_path,0, 4)
         
         m = CorrespondMap(name='test', k=3)
-        m.load_vertex_screen_positions(id_map)
-        print(len(m.vertex_screen_positions))
+        m.load_vertex_screen_info(id_map)
+        print(len(m.vertex_screen_info))
         
     # dump_test()
     # load_test()
     # update_test()
     # load_id_map_test()
-    load_vertex_positions_test()
+    load_vertex_screen_info_test()
