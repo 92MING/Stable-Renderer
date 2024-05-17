@@ -328,7 +328,8 @@ class CorrespondMap(ResourcesObj):
     '''
     for runtime baking. structure:
         Tensor in shape of (N, 7), where the 7 elements are 
-        (object_id, material_id, map_index, vertex_id, x, y, frame_index).
+        (object_id, material_id, map_index, vertex_id, x_ratio, y_ratio, frame_index).
+    x_ratio is computed by x_coordinates / width, y_ratio is computed by y_coordinates / height.
     call load_vertex_screen_info to load the data.
     '''
     
@@ -803,7 +804,7 @@ class CorrespondMap(ResourcesObj):
         """
         Load vertex screen positions to CorrespondMap from IDMaps (multiple frames can be included).
         The tensor is in shape of (N, 7), where the 7 elements are 
-        (object_id, material_id, map_index, vertex_id, x, y, frame_index).
+        (object_id, material_id, map_index, vertex_id, x_ratio, y_ratio, frame_index).
         """
         id_tensor, frame_indices = id_map.tensor, id_map.frame_indices
         frames, height, width, id_elements = id_tensor.shape
@@ -816,6 +817,7 @@ class CorrespondMap(ResourcesObj):
             frames, -1, -1, -1  # (B, H, W, 1)
         )
         # assert y_coordinates[1, 52, 12] == 12
+        y_ratio_tensor = y_coordinates_tensor / height
 
         x_coordinates_tensor = torch.arange(
             height, device=id_tensor.device
@@ -825,16 +827,17 @@ class CorrespondMap(ResourcesObj):
             frames, -1, -1, -1  # (B, H, W, 1)
         )
         # assert x_coordinates[1, 52, 12] == 52
+        x_ratio_tensor = x_coordinates_tensor / width
 
         frame_indices_tensor = torch.tensor(
             frame_indices, device=id_tensor.device
-        ).view(-1, 1, 1, 1).expand(-1, height, width, 1)
+        ).view(-1, 1, 1, 1).expand(-1, height, width, 1).to(torch.int)
         # (B, H, W, 1), where values in (H, W, 1) equals the frame index
 
         vertex_screen_info = torch.cat(
             [id_tensor, 
-             x_coordinates_tensor,
-             y_coordinates_tensor,
+             x_ratio_tensor,
+             y_ratio_tensor,
              frame_indices_tensor], dim=-1
         )
 

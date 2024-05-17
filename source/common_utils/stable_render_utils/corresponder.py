@@ -5,7 +5,9 @@ if __name__ == '__main__':
 
 import torch
 from abc import abstractmethod
+from tqdm import tqdm
 from typing import TYPE_CHECKING, Protocol, Any
+
 from .corr_utils import *
 from attr import attrs, attrib
 from common_utils.global_utils import is_dev_mode
@@ -206,19 +208,24 @@ class OverlapCorresponder:
             )
             vertex_screen_info = corrmap.vertex_screen_info
         
-        unique_vertex_indices = torch.unique(vertex_screen_info[:, 3])
+        unique_vertex_indices, inverse_indices = torch.unique(
+            vertex_screen_info[:, 3], return_inverse=True)
 
         noise_copy = sampling_context.noise.clone()
+        batch, channels, height, width = noise_copy.shape
 
-        for vertex_index in unique_vertex_indices:
+        # Convert from x, y ratios to x, y coordinates
+        vertex_screen_info[:, 4] = (vertex_screen_info[:, 4] * width).to(torch.int)
+        vertex_screen_info[:, 5] = (vertex_screen_info[:, 5] * height).to(torch.int)
+
+        for vertex_index in tqdm(unique_vertex_indices, total=len(unique_vertex_indices)):
             # Extract the screen positions of the current vertex
             vertex_mask = vertex_screen_info[:, 3] == vertex_index
             current_vertex_screen_info = vertex_screen_info[vertex_mask]
 
-            # Extract the noise values of the current vertex
-            current_vertex_screen_x_coords = current_vertex_screen_info[:, 4]
-            current_vertex_screen_y_coords = current_vertex_screen_info[:, 5]
-            current_vertex_screen_frame_indices = current_vertex_screen_info[:, 6]
+            current_vertex_screen_x_coords = current_vertex_screen_info[:, 4].to(torch.int)
+            current_vertex_screen_y_coords = current_vertex_screen_info[:, 5].to(torch.int)
+            current_vertex_screen_frame_indices = current_vertex_screen_info[:, 6].to(torch.int)
 
             corresponding_noises = noise_copy[current_vertex_screen_frame_indices,
                                               :,
@@ -236,11 +243,6 @@ class OverlapCorresponder:
                        current_vertex_screen_x_coords,] = average_noise
 
 
-
-
-
-
-    
 __all__ = ['Corresponder', 'DefaultCorresponder', 'OverlapCorresponder']
 
 
