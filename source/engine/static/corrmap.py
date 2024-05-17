@@ -7,7 +7,8 @@ if __name__ == '__main__': # for debugging
     __package__ = 'engine.static'
 
 import torch
-import multiprocessing
+import multiprocessing as mp
+from multiprocessing import set_start_method
 import json
 import zipfile
 import taichi as ti
@@ -28,6 +29,9 @@ from typing import (
 from uuid import uuid4
 from functools import partial
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import threading
+from tqdm import tqdm
+from collections import defaultdict
 
 from common_utils.path_utils import TEMP_DIR, extract_index
 from common_utils.global_utils import is_dev_mode
@@ -262,6 +266,8 @@ Mode to load vertex positions to CorrespondMap.
         vertex positions are Mesh vertices, position should be (x, y)
 '''
 
+frame_queue: Optional[mp.Queue] = None
+
 
 @attrs(repr=False, eq=False)
 class CorrespondMap(ResourcesObj):
@@ -299,6 +305,12 @@ class CorrespondMap(ResourcesObj):
             ]
         }
     }
+    '''
+    vertex_screen_positions_cache_folder_name: Optional[str] = attrib(
+        default="corremap_vertex_screen_positions", kw_only=True
+    )
+    '''
+    cache path for vertex screen positions.
     '''
     
     # ================= COLOR METHODS ================= # 
@@ -715,75 +727,80 @@ class CorrespondMap(ResourcesObj):
         return map
     
 
-    def load_vertex_screen_positions(self, id_map: IDMap):
+    def _load_vertex_screen_positions_from_id_map(self, id_map: IDMap):
         """
-        Load vertex screen positions to CorrespondMap from IDMaps(multiple frames can be included).
+        Load vertex screen positions to CorrespondMap from IDMaps (multiple frames can be included).
         {
             vertexID: {
                 map_index: [
                     (frame_index, x_ratio, y_ratio),
-                    ...4
+                    ...
                 ]
             }
         }
         """
-        frame_indices = id_map.frame_indices
-        print("Loading vertex screen positions. Frame indices: ", frame_indices)
-        screen_pos_dicts = []
-        for i in range(len(frame_indices)):
-            screen_pos_dicts.append(multiprocessing.Manager().dict())
-        id_tensor = id_map.tensor
+        self.vertex_screen_positions = dict()
+        frame_indices, id_tensors = id_map.frame_indices, id_map.tensor
 
-        processes = []
-        for i in range(len(frame_indices)):
-            v_pos_dict = screen_pos_dicts[i]
-            id_tensor = id_tensor[i].clone()
-            frame_index = frame_indices[i]
-            p = multiprocessing.Process(target=process_frame, args=(v_pos_dict, frame_index, id_tensor))
-            processes.append(p)
-            p.start()
+        for id_tensor, frame_index in zip(id_tensors, frame_indices):
+            pbar = tqdm(total=id_tensor.shape[0] * id_tensor.shape[1],
+                        desc=f"Loading vertex screen positions from frame {frame_index}")
 
-        for p in processes:
-            p.join()
+            for i in range(id_tensor.shape[0]):
+                for j in range(id_tensor.shape[1]):
+                    object_id, material_id, map_index, vertex_id = id_tensor[i, j]
 
-        screen_pos_dicts = list(screen_pos_dicts)
+                    if map_index == 2048 or (object_id == material_id == map_index == vertex_id == 0):
+                        pbar.update(1)
+                        continue
 
-        # Merge dicts
-        print("Merging dicts")
-        for vertex_screen_pos in screen_pos_dicts:
-            for vertex_id, map_indices in vertex_screen_pos.items():
-                if self.vertex_screen_positions.get(vertex_id) is None:
-                    self.vertex_screen_positions[vertex_id] = {}
-                for map_index, screen_poses in map_indices.items():
-                    if self.vertex_screen_positions[vertex_id].get(map_index) is None:
-                        self.vertex_screen_positions[vertex_id][map_index] = []
-                    self.vertex_screen_positions[vertex_id][map_index].extend(screen_poses)
+                    if vertex_id not in self.vertex_screen_positions:
+                        self.vertex_screen_positions[vertex_id] = dict()
+                    if map_index not in self.vertex_screen_positions[vertex_id]:
+                        self.vertex_screen_positions[vertex_id][map_index] = list()
 
+                    self.vertex_screen_positions[vertex_id][map_index].append(
+                        (frame_index, (j / id_tensor.shape[1], i / id_tensor.shape[0]))
+                    )
+                    pbar.update(1)
+            pbar.close()
+        EngineLogger.info(f"Loaded vertex screen positions from IDMap.")
+    
+    def _load_vertex_screen_positions_from_cache(self,
+                                                 cache_root: str = TEMP_DIR,):
+        assert os.path.exists(cache_root, self.vertex_screen_positions_cache_folder_name)
+        assert self.vertex_screen_positions is None
 
-from tqdm import tqdm
+        import pickle
+        load_dir = os.path.join(cache_root, self.vertex_screen_positions_cache_folder_name)
 
-def process_frame(my_vertex_screen_positions, frame_index, id_tensor):
-    pbar = tqdm(total=id_tensor.shape[0] * id_tensor.shape[1],
-                desc=f"Processing frame {frame_index}")
-    for i in range(id_tensor.shape[0]):
-        for j in range(id_tensor.shape[1]):
-            object_id, material_id, map_index, vertex_id = id_tensor[i, j]
+        with open(os.path.join(load_dir, f"{self.name}.pkl"), "rb") as f:
+            self.vertex_screen_positions = pickle.load(f)
+        
+        EngineLogger.info(f"Loaded vertex screen positions from cache: {load_dir}")
 
-            if map_index == 2048 or (object_id == material_id == map_index == vertex_id == 0):
-                pbar.update(1)
-                continue
+    def _save_vertex_screen_positions_to_cache(self,
+                                               cache_root: str = TEMP_DIR,):
+        assert self.vertex_screen_positions is not None
+        assert os.path.exists(cache_root)
 
-            if my_vertex_screen_positions.get(vertex_id) is None:
-                my_vertex_screen_positions[vertex_id] = {}
+        import pickle
+        save_dir = os.path.join(cache_root, self.vertex_screen_positions_cache_folder_name)
 
-            if my_vertex_screen_positions[vertex_id].get(map_index) is None:
-                my_vertex_screen_positions[vertex_id][map_index] = []
-
-            my_vertex_screen_positions[vertex_id][map_index].append(
-                (frame_index, (j / id_tensor.shape[1], i / id_tensor.shape[0]))
-            )
-            pbar.update(1)
-    print(frame_index, " done")
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        
+        with open(os.path.join(save_dir, f"{self.name}.pkl"), "wb") as f:
+            pickle.dump(self.vertex_screen_positions, f)
+        
+        EngineLogger.info(f"Saved vertex screen positions to cache: {save_dir}")
+    
+    def load_vertex_screen_positions(self, id_map: IDMap, cache_root: str = TEMP_DIR):
+        if os.path.exists(os.path.join(cache_root, self.vertex_screen_positions_cache_folder_name)):
+            self._load_vertex_screen_positions_from_cache(cache_root)
+        else:
+            self._load_vertex_screen_positions_from_id_map(id_map)
+            self._save_vertex_screen_positions_to_cache(cache_root)
 
 
 
@@ -828,7 +845,7 @@ if __name__ == '__main__':  # for debug
         
         m = CorrespondMap(name='test', k=3)
         m.load_vertex_screen_positions(id_map)
-        print(m.vertex_screen_positions)
+        print(len(m.vertex_screen_positions))
         
     # dump_test()
     # load_test()
