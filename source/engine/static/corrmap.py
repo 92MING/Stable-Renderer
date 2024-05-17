@@ -294,23 +294,12 @@ class CorrespondMap(ResourcesObj):
     texID: Optional[int] = attrib(default=None, init=False)
     '''sampler2DArray's texture id in OpenGL. This is for rendering purpose.'''
 
-    vertex_screen_positions: dict[int, dict[int, list[tuple[int, float, float]]]] = attrib(factory=dict)
+    vertex_screen_positions: Optional[torch.Tensor] = attrib(default=None, init=False)
     '''
     for runtime baking. structure:
-    {
-        vertexID: {
-            map_index: [
-                (frame_index, x_ratio, y_ratio),
-                ...
-            ]
-        }
-    }
-    '''
-    vertex_screen_positions_cache_folder_name: Optional[str] = attrib(
-        default="corremap_vertex_screen_positions", kw_only=True
-    )
-    '''
-    cache path for vertex screen positions.
+        Tensor in shape of (N, 7), where the 7 elements are 
+        (object_id, material_id, map_index, vertex_id, x, y, frame_index).
+    call load_vertex_screen_positions to load the data.
     '''
     
     # ================= COLOR METHODS ================= # 
@@ -726,82 +715,68 @@ class CorrespondMap(ResourcesObj):
         
         return map
     
-
-    def _load_vertex_screen_positions_from_id_map(self, id_map: IDMap):
+    def load_vertex_screen_positions(self, id_map: IDMap):
         """
         Load vertex screen positions to CorrespondMap from IDMaps (multiple frames can be included).
-        {
-            vertexID: {
-                map_index: [
-                    (frame_index, x_ratio, y_ratio),
-                    ...
-                ]
-            }
-        }
+        The tensor is in shape of (N, 7), where the 7 elements are 
+        (object_id, material_id, map_index, vertex_id, x, y, frame_index).
         """
-        self.vertex_screen_positions = dict()
-        frame_indices, id_tensors = id_map.frame_indices, id_map.tensor
+        id_tensor, frame_indices = id_map.tensor, id_map.frame_indices
+        frames, height, width, id_elements = id_tensor.shape
 
-        for id_tensor, frame_index in zip(id_tensors, frame_indices):
-            pbar = tqdm(total=id_tensor.shape[0] * id_tensor.shape[1],
-                        desc=f"Loading vertex screen positions from frame {frame_index}")
+        y_coordinates_tensor = torch.arange(
+            width, device=id_tensor.device
+        ).view(1, -1).expand(
+            height, -1  # (H, W)
+        ).view(1, height, width, 1).expand(
+            frames, -1, -1, -1  # (B, H, W, 1)
+        )
+        # assert y_coordinates[1, 52, 12] == 12
 
-            for i in range(id_tensor.shape[0]):
-                for j in range(id_tensor.shape[1]):
-                    object_id, material_id, map_index, vertex_id = id_tensor[i, j]
+        x_coordinates_tensor = torch.arange(
+            height, device=id_tensor.device
+        ).view(-1, 1).expand(
+            -1, width  # (H, W)
+        ).view(1, height, width, 1).expand(
+            frames, -1, -1, -1  # (B, H, W, 1)
+        )
+        # assert x_coordinates[1, 52, 12] == 52
 
-                    if map_index == 2048 or (object_id == material_id == map_index == vertex_id == 0):
-                        pbar.update(1)
-                        continue
+        frame_indices_tensor = torch.tensor(
+            frame_indices, device=id_tensor.device
+        ).view(-1, 1, 1, 1).expand(-1, height, width, 1)
+        # (B, H, W, 1), where values in (H, W, 1) equals the frame index
 
-                    if vertex_id not in self.vertex_screen_positions:
-                        self.vertex_screen_positions[vertex_id] = dict()
-                    if map_index not in self.vertex_screen_positions[vertex_id]:
-                        self.vertex_screen_positions[vertex_id][map_index] = list()
+        vertex_screen_info = torch.cat(
+            [id_tensor, 
+             x_coordinates_tensor,
+             y_coordinates_tensor,
+             frame_indices_tensor], dim=-1
+        )
 
-                    self.vertex_screen_positions[vertex_id][map_index].append(
-                        (frame_index, (j / id_tensor.shape[1], i / id_tensor.shape[0]))
-                    )
-                    pbar.update(1)
-            pbar.close()
+        # flatten the vertex screen positions
+        flat_vertex_screen_info = vertex_screen_info.view(-1, id_elements + 3)
+
+        # Filter out map_index == 2048
+        flat_vertex_screen_info = flat_vertex_screen_info[flat_vertex_screen_info[..., 2] != 2048]
+
+        # Filter out object_id == material_id == map_index == vertex_id == 0
+        flat_vertex_screen_info = flat_vertex_screen_info[
+            (flat_vertex_screen_info[..., 0] != 0) |
+            (flat_vertex_screen_info[..., 1] != 0) |
+            (flat_vertex_screen_info[..., 2] != 0) |
+            (flat_vertex_screen_info[..., 3] != 0)
+        ]
+
+        self.vertex_screen_positions = flat_vertex_screen_info
+
         EngineLogger.info(f"Loaded vertex screen positions from IDMap.")
     
-    def _load_vertex_screen_positions_from_cache(self,
-                                                 cache_root: str = TEMP_DIR,):
-        assert os.path.exists(cache_root, self.vertex_screen_positions_cache_folder_name)
-        assert self.vertex_screen_positions is None
-
-        import pickle
-        load_dir = os.path.join(cache_root, self.vertex_screen_positions_cache_folder_name)
-
-        with open(os.path.join(load_dir, f"{self.name}.pkl"), "rb") as f:
-            self.vertex_screen_positions = pickle.load(f)
-        
-        EngineLogger.info(f"Loaded vertex screen positions from cache: {load_dir}")
-
-    def _save_vertex_screen_positions_to_cache(self,
-                                               cache_root: str = TEMP_DIR,):
-        assert self.vertex_screen_positions is not None
-        assert os.path.exists(cache_root)
-
-        import pickle
-        save_dir = os.path.join(cache_root, self.vertex_screen_positions_cache_folder_name)
-
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        
-        with open(os.path.join(save_dir, f"{self.name}.pkl"), "wb") as f:
-            pickle.dump(self.vertex_screen_positions, f)
-        
-        EngineLogger.info(f"Saved vertex screen positions to cache: {save_dir}")
+    @property
+    def unique_vertex_ids(self) -> torch.Tensor:
+        assert self.vertex_screen_positions is not None, "Vertex screen positions are not loaded."
+        return self.vertex_screen_positions[..., 3].unique()
     
-    def load_vertex_screen_positions(self, id_map: IDMap, cache_root: str = TEMP_DIR):
-        if os.path.exists(os.path.join(cache_root, self.vertex_screen_positions_cache_folder_name)):
-            self._load_vertex_screen_positions_from_cache(cache_root)
-        else:
-            self._load_vertex_screen_positions_from_id_map(id_map)
-            self._save_vertex_screen_positions_to_cache(cache_root)
-
 
 
 __all__ = ['IDMap', 'UpdateMode', 'CorrespondMap']
