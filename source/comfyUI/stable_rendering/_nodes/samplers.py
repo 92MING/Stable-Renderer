@@ -77,6 +77,7 @@ class OverlapCorresponder(StableRenderingNode):
                  update_corrmap: bool=True, 
                  update_mode: UpdateMode = 'first_avg',
                  post_attn_inject_ratio: float = 0.6,
+                 step_finished_inject_ratio: FLOAT(min=0, max=1, step=0.1, round=0.01)=0.5,  # type: ignore
                  )->tuple[
                      Corresponder,
                      VAEDecodeCallback
@@ -103,7 +104,8 @@ class OverlapCorresponder(StableRenderingNode):
         '''
         corresponder = _OverlapCorresponder(update_corrmap=update_corrmap, 
                                             update_corrmap_mode=update_mode,
-                                            post_attn_inject_ratio=post_attn_inject_ratio)
+                                            post_attn_inject_ratio=post_attn_inject_ratio,
+                                            step_finished_inject_ratio=step_finished_inject_ratio)
         
         if hasattr(corresponder, "finished") and not is_empty_method(corresponder.finished):
             if is_dev_mode() and is_engine_looping():

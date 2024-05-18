@@ -79,10 +79,96 @@ def adaptive_instance_normalization(content_feat: torch.Tensor,
         size)) / content_std.expand(size)
     return normalized_feat * style_std.expand(size) + style_mean.expand(size)
 
-__all__ .extend(['calc_map_mean_std', 'adaptive_instance_normalization'])
+
+def tensor_group_by_then_average(t: torch.Tensor,
+                     index_column: int,
+                     value_columns: list[int],
+                     return_unique: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Groups the values in a tensor by the unique values in a specified index column,
+    and calculates the average of the corresponding values in the specified value columns.
+
+    Args:
+        t (torch.Tensor): The input tensor, where the last dimension contains the index and value columns.
+        index_column (int): The index column to group by.
+        value_columns (list[int]): The value columns to calculate the average of.
+        return_unique (bool, optional): Whether to return the unique values. Defaults to False.
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor]: If `return_unique` is True, returns a tuple containing
+            the unique values and the corresponding average values. If `return_unique` is False,
+            returns only the average values.
+    
+    Example:
+    ```python
+    >>>> t = torch.tensor([[2, 1, 4],
+                           [2, 9, 12],
+                           [6, 4, 4],
+                           [7, 3, 99],
+                           [8, 1, 3]])
+    >>> tensor_group_by_average(t, index_column=0, value_columns=[1, 2])
+    tensor([[ 5.,  8.],
+        [ 5.,  8.],
+        [ 4.,  4.],
+        [ 3., 99.],
+        [ 1.,  3.]])
+    >>> tensor_group_by_average(t, index_column=1, value_columns=[0], return_unique=True)
+    (tensor([[5.],
+            [2.],
+            [6.],
+            [7.],
+            [5.]]), tensor([1, 3, 4, 9]))
+    ```
+    """
+
+    if index_column >= t.shape[-1]:
+        raise ValueError(f"Index column {index_column} is out of range.")
+    if any([col >= t.shape[-1] for col in value_columns]):
+        raise ValueError(f"Value columns {value_columns} contain out of range values.")
+    
+    # Get unique values and their corresponding inverse indices
+    unique_values, inverse_indices = t[:, index_column].unique(return_inverse=True)
+
+    expanded_unique_values = unique_values.unsqueeze(1).expand(-1, len(value_columns))
+    expanded_inverse_indices = inverse_indices.unsqueeze(1).expand(-1, len(value_columns))
+
+    # Use scatter_add to sum the second column values based on the unique values
+    sum_values = torch.zeros_like(
+        expanded_unique_values, dtype=torch.float
+    ).scatter_add_(0, expanded_inverse_indices, t[:, value_columns].to(torch.float))
+
+    # Count occurrences of each unique value
+    counts = torch.zeros_like(
+        expanded_unique_values, dtype=torch.float
+    ).scatter_add_(0, expanded_inverse_indices, torch.ones_like(t[:, value_columns], dtype=torch.float))
+
+    # Calculate the average by dividing the summed values by their counts
+    average_values = sum_values / counts
+
+    # Expand average values to the original tensor
+    expanded_average_values = average_values[inverse_indices]
+
+    if return_unique:
+        return expanded_average_values, unique_values
+    else:
+        return expanded_average_values
+
+
+__all__ .extend(['calc_map_mean_std', 'adaptive_instance_normalization', 'tensor_group_by_then_average'])
 
 
 if __name__ == '__main__':
-    x = torch.randn(1,4,64,64)
-    y = torch.randn(1,4,512,512)
-    print(adaptive_instance_normalization(x, y).shape)
+    def test_adaptive_instance_normalization():
+        x = torch.randn(1,4,64,64)
+        y = torch.randn(1,4,512,512)
+        print(adaptive_instance_normalization(x, y).shape)
+    def test_tensor_group_by_average():
+        t = torch.tensor([[2, 1, 4],
+                          [2, 9, 12],
+                          [6, 4, 4],
+                          [7, 3, 99],
+                          [8, 1, 3]])
+        print(tensor_group_by_then_average(t, index_column=0, value_columns=[1, 2]))
+        print(tensor_group_by_then_average(t, index_column=1, value_columns=[0], return_unique=True))
+    
+    test_tensor_group_by_average()

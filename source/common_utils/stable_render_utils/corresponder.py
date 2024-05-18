@@ -5,13 +5,13 @@ if __name__ == '__main__':
 
 import torch
 from abc import abstractmethod
-from tqdm import tqdm
 from typing import TYPE_CHECKING, Protocol, Any
 
 from .corr_utils import *
 from attr import attrs, attrib
 from common_utils.global_utils import is_dev_mode
 from common_utils.debug_utils import EngineLogger
+from common_utils.math_utils import tensor_group_by_then_average
 
 if TYPE_CHECKING:
     from comfyUI.types import SamplingCallbackContext, IMAGE, EngineData
@@ -174,6 +174,7 @@ class OverlapCorresponder:
     '''the mode for updating the correspondence map'''
     post_attn_inject_ratio: float = attrib(default=0.6)
     '''final attn value = cached value * post_attn_inject_ratio + origin value * (1 - post_attn_inject_ratio)'''
+    step_finished_inject_ratio: float = attrib(default=0.1)
 
     def prepare(self, engine_data: "EngineData"):
         pass
@@ -199,48 +200,55 @@ class OverlapCorresponder:
         if not correspond_maps:
             raise ValueError('Correspond maps not found.')
         if len(correspond_maps) > 1:
-            raise NotImplemented('Multiple correspond maps not supported yet.')
+            raise NotImplementedError('Multiple correspond maps not supported yet.')
 
         vertex_screen_info = None
-        for (spriteID, materialID), corrmap in correspond_maps.items():
+        for _, corrmap in correspond_maps.items():
             corrmap.load_vertex_screen_info(
                 id_map=engine_data.id_maps,
             )
             vertex_screen_info = corrmap.vertex_screen_info
         
-        unique_vertex_indices, inverse_indices = torch.unique(
-            vertex_screen_info[:, 3], return_inverse=True)
-
         noise_copy = sampling_context.noise.clone()
+        vertex_screen_info = vertex_screen_info.to(noise_copy.device)
         batch, channels, height, width = noise_copy.shape
 
-        # Convert from x, y ratios to x, y coordinates
-        vertex_screen_info[:, 4] = (vertex_screen_info[:, 4] * width).to(torch.int)
-        vertex_screen_info[:, 5] = (vertex_screen_info[:, 5] * height).to(torch.int)
+        screen_x_coords = (vertex_screen_info[:, 4] * width).to(torch.int)
+        screen_y_coords = (vertex_screen_info[:, 5] * height).to(torch.int)
+        screen_frame_indices = vertex_screen_info[:, 6].to(torch.int)
+        
+        # (num_vertex_screen_info, channels)
+        if noise_copy.dtype == torch.float16:
+            noise_copy = noise_copy.to(torch.float32)
 
-        for vertex_index in tqdm(unique_vertex_indices, total=len(unique_vertex_indices)):
-            # Extract the screen positions of the current vertex
-            vertex_mask = vertex_screen_info[:, 3] == vertex_index
-            current_vertex_screen_info = vertex_screen_info[vertex_mask]
+        corresponding_noises = noise_copy[
+            screen_frame_indices,
+            :,
+            screen_y_coords,
+            screen_x_coords,
+        ]
 
-            current_vertex_screen_x_coords = current_vertex_screen_info[:, 4].to(torch.int)
-            current_vertex_screen_y_coords = current_vertex_screen_info[:, 5].to(torch.int)
-            current_vertex_screen_frame_indices = current_vertex_screen_info[:, 6].to(torch.int)
+        indexed_corr_noises = torch.cat([
+            corresponding_noises,
+            vertex_screen_info[:, 3].unsqueeze(-1)
+        ], dim=1)
 
-            corresponding_noises = noise_copy[current_vertex_screen_frame_indices,
-                                              :,
-                                              current_vertex_screen_y_coords,
-                                              current_vertex_screen_x_coords,]
+        # (num_vertex_screen_info, channels + 1)
+        averaged_noises = tensor_group_by_then_average(
+            indexed_corr_noises,
+            index_column=-1,
+            value_columns=[i for i in range(channels)]
+        )
 
-            # TODO: Change to strategy design pattern
-            # Calculate the average noise value
-            average_noise = corresponding_noises.mean(dim=0)
+        alpha_weighted_avereage_noises = (1 - self.step_finished_inject_ratio) * corresponding_noises + \
+            self.step_finished_inject_ratio * averaged_noises.to(corresponding_noises.dtype)
 
-            # Distribute back the average noise value to the corresponding pixels
-            sampling_context.noise[current_vertex_screen_frame_indices,
-                       :,
-                       current_vertex_screen_y_coords,
-                       current_vertex_screen_x_coords,] = average_noise
+        sampling_context.noise[
+            screen_frame_indices,
+            :,
+            screen_y_coords,
+            screen_x_coords,
+        ] = alpha_weighted_avereage_noises.to(sampling_context.noise.dtype)
 
 
 __all__ = ['Corresponder', 'DefaultCorresponder', 'OverlapCorresponder']
