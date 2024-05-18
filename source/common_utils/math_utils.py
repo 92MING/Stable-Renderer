@@ -151,7 +151,7 @@ def tensor_group_by_then_average(t: torch.Tensor,
     if return_unique:
         return expanded_average_values, unique_values
     else:
-        return expanded_average_values
+        return (expanded_average_values, )
 
 
 __all__ .extend(['calc_map_mean_std', 'adaptive_instance_normalization', 'tensor_group_by_then_average'])

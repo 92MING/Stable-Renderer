@@ -221,34 +221,39 @@ class OverlapCorresponder:
         if noise_copy.dtype == torch.float16:
             noise_copy = noise_copy.to(torch.float32)
 
+        print("Corresponding noises shape:", noise_copy[screen_frame_indices, :, screen_x_coords, screen_y_coords].shape)
         corresponding_noises = noise_copy[
             screen_frame_indices,
             :,
-            screen_y_coords,
             screen_x_coords,
+            screen_y_coords,
         ]
 
         indexed_corr_noises = torch.cat([
             corresponding_noises,
             vertex_screen_info[:, 3].unsqueeze(-1)
         ], dim=1)
+        
+        print("Indexed corr noises shape:", indexed_corr_noises.shape)
 
         # (num_vertex_screen_info, channels + 1)
         averaged_noises = tensor_group_by_then_average(
             indexed_corr_noises,
             index_column=-1,
             value_columns=[i for i in range(channels)]
-        )
+        )[0]
+        
+        print("Averaged noises shape:", averaged_noises.shape)
 
-        alpha_weighted_avereage_noises = (1 - self.step_finished_inject_ratio) * corresponding_noises + \
+        alpha_weighted_average_noises = (1 - self.step_finished_inject_ratio) * corresponding_noises + \
             self.step_finished_inject_ratio * averaged_noises.to(corresponding_noises.dtype)
 
         sampling_context.noise[
             screen_frame_indices,
             :,
-            screen_y_coords,
             screen_x_coords,
-        ] = alpha_weighted_avereage_noises.to(sampling_context.noise.dtype)
+            screen_y_coords,
+        ] = alpha_weighted_average_noises.to(sampling_context.noise.dtype)
 
 
 __all__ = ['Corresponder', 'DefaultCorresponder', 'OverlapCorresponder']

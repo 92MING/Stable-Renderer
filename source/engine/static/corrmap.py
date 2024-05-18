@@ -139,7 +139,8 @@ class IDMap:
     def from_directory(cls,
                        directory: str|Path,
                        frame_start: int|None=None,
-                       num_frames: int|None=None) -> 'IDMap':
+                       num_frames: int|None=None,
+                       use_frame_indices_from_filename: bool = True) -> 'IDMap':
         '''
         Load the IDMap from a directory.
 
@@ -147,6 +148,7 @@ class IDMap:
             - directory: the directory that contains the id data.
             - frame_start: the start frame index.
             - num_frames: the number of frames to load.
+            - use_frame_indices_from_filename: whether to use the frame indices from the filename.
         
         Returns:
             - IDMap object.
@@ -163,9 +165,13 @@ class IDMap:
         
         EngineLogger.debug(f"Reordered filenames: {reordered_filenames}")
 
-        frame_indices = list(
-            map(partial(extract_index, i=-1), reordered_filenames)
-        )
+        if use_frame_indices_from_filename:
+            frame_indices = list(
+                map(partial(extract_index, i=-1), reordered_filenames)
+            )
+        else:
+            frame_indices = list(range(len(reordered_filenames)))
+        
         num_frames = num_frames or len(frame_indices)
         frame_indices = frame_indices[frame_start: frame_start+num_frames]
         assert all(i != -1 for i in frame_indices), "Illegal filename(s) found."

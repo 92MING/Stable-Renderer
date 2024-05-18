@@ -3,6 +3,7 @@ import os
 import numpy as np
 
 import torch
+from einops import rearrange
 import torch.nn.functional as F
 from torchvision.io import read_image, ImageReadMode
 
@@ -70,6 +71,8 @@ class ImageSequenceLoader(StableRenderingNode):
 
         if not tensor_images:
             return None # type: ignore
+        
+        ComfyUILogger.debug(f"Loaded image sequence with shape {tensor_images[0].shape}")
         return torch.cat(tensor_images, dim=0) 
 
 
@@ -157,7 +160,12 @@ class IDSequenceLoader(StableRenderingNode):
                  num_frames: INT(min=1) = 16,  # type: ignore
     ) -> IDMap:
         '''Load ID files from img or directly from npy.'''
-        return IDMap.from_directory(directory, frame_start, num_frames)
+        return IDMap.from_directory(
+            directory=directory, 
+            frame_start=frame_start,
+            num_frames=num_frames,
+            use_frame_indices_from_filename=False
+        )
 
 
 __all__ = ["ImageSequenceLoader", "NoiseSequenceLoader", "IDSequenceLoader"]
