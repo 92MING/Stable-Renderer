@@ -214,6 +214,66 @@ class IDMap:
                 f"The channel count of the tensor {tensor.shape[-1]} is too large, it may be an invalid tensor."
             )
         return IDMap(frame_indices=frame_indices, tensor=tensor)
+    
+    def create_vertex_screen_info(self,) -> torch.Tensor:
+        """
+        Load vertex screen positions to CorrespondMap from IDMaps (multiple frames can be included).
+        The tensor is in shape of (N, 7), where the 7 elements are 
+        (object_id, material_id, map_index, vertex_id, x_ratio, y_ratio, frame_index).
+        """
+        id_tensor, frame_indices = self.tensor, self.frame_indices
+        frames, height, width, id_elements = id_tensor.shape
+
+        x_coordinates_tensor = torch.arange(
+            width, device=id_tensor.device
+        ).view(1, -1).expand(
+            height, -1  # (H, W)
+        ).view(1, height, width, 1).expand(
+            frames, -1, -1, -1  # (B, H, W, 1)
+        )
+        # assert x_coordinates[1, 52, 12] == 12
+        x_ratio_tensor = x_coordinates_tensor / height
+
+        y_coordinates_tensor = torch.arange(
+            height, device=id_tensor.device
+        ).view(-1, 1).expand(
+            -1, width  # (H, W)
+        ).view(1, height, width, 1).expand(
+            frames, -1, -1, -1  # (B, H, W, 1)
+        )
+        # assert y_coordinates[1, 52, 12] == 52
+        y_ratio_tensor = y_coordinates_tensor / width
+
+        frame_indices_tensor = torch.tensor(
+            frame_indices, device=id_tensor.device
+        ).view(-1, 1, 1, 1).expand(-1, height, width, 1).to(torch.int)
+        # (B, H, W, 1), where values in (H, W, 1) equals the frame index
+
+        vertex_screen_info = torch.cat(
+            [id_tensor, 
+             x_ratio_tensor,
+             y_ratio_tensor,
+             frame_indices_tensor], dim=-1
+        )
+
+        # flatten the vertex screen positions
+        flat_vertex_screen_info = vertex_screen_info.view(-1, id_elements + 3)
+
+        # Filter out map_index == 2048
+        flat_vertex_screen_info = flat_vertex_screen_info[flat_vertex_screen_info[..., 2] != 2048]
+
+        # Filter out object_id == material_id == map_index == vertex_id == 0
+        flat_vertex_screen_info = flat_vertex_screen_info[
+            (flat_vertex_screen_info[..., 0] != 0) |
+            (flat_vertex_screen_info[..., 1] != 0) |
+            (flat_vertex_screen_info[..., 2] != 0) |
+            (flat_vertex_screen_info[..., 3] != 0)
+        ]
+
+        EngineLogger.info(f"Created vertex screen info from IDMap.")
+
+        return flat_vertex_screen_info
+
 
 
 init_taichi()
@@ -812,58 +872,7 @@ class CorrespondMap(ResourcesObj):
         The tensor is in shape of (N, 7), where the 7 elements are 
         (object_id, material_id, map_index, vertex_id, x_ratio, y_ratio, frame_index).
         """
-        id_tensor, frame_indices = id_map.tensor, id_map.frame_indices
-        frames, height, width, id_elements = id_tensor.shape
-
-        y_coordinates_tensor = torch.arange(
-            width, device=id_tensor.device
-        ).view(1, -1).expand(
-            height, -1  # (H, W)
-        ).view(1, height, width, 1).expand(
-            frames, -1, -1, -1  # (B, H, W, 1)
-        )
-        # assert y_coordinates[1, 52, 12] == 12
-        y_ratio_tensor = y_coordinates_tensor / height
-
-        x_coordinates_tensor = torch.arange(
-            height, device=id_tensor.device
-        ).view(-1, 1).expand(
-            -1, width  # (H, W)
-        ).view(1, height, width, 1).expand(
-            frames, -1, -1, -1  # (B, H, W, 1)
-        )
-        # assert x_coordinates[1, 52, 12] == 52
-        x_ratio_tensor = x_coordinates_tensor / width
-
-        frame_indices_tensor = torch.tensor(
-            frame_indices, device=id_tensor.device
-        ).view(-1, 1, 1, 1).expand(-1, height, width, 1).to(torch.int)
-        # (B, H, W, 1), where values in (H, W, 1) equals the frame index
-
-        vertex_screen_info = torch.cat(
-            [id_tensor, 
-             x_ratio_tensor,
-             y_ratio_tensor,
-             frame_indices_tensor], dim=-1
-        )
-
-        # flatten the vertex screen positions
-        flat_vertex_screen_info = vertex_screen_info.view(-1, id_elements + 3)
-
-        # Filter out map_index == 2048
-        flat_vertex_screen_info = flat_vertex_screen_info[flat_vertex_screen_info[..., 2] != 2048]
-
-        # Filter out object_id == material_id == map_index == vertex_id == 0
-        flat_vertex_screen_info = flat_vertex_screen_info[
-            (flat_vertex_screen_info[..., 0] != 0) |
-            (flat_vertex_screen_info[..., 1] != 0) |
-            (flat_vertex_screen_info[..., 2] != 0) |
-            (flat_vertex_screen_info[..., 3] != 0)
-        ]
-
-        self.vertex_screen_info = flat_vertex_screen_info
-
-        EngineLogger.info(f"Loaded vertex screen info from IDMap.")
+        self.vertex_screen_info = id_map.create_vertex_screen_info()
     
     @property
     def unique_vertex_ids(self) -> torch.Tensor:

@@ -12,7 +12,7 @@ from typing import Literal
 from engine.static.corrmap import IDMap
 
 from common_utils.path_utils import extract_index
-from common_utils.math_utils import adaptive_instance_normalization
+from common_utils.math_utils import adaptive_instance_normalization, tensor_group_by_then_randn_init
 from common_utils.debug_utils import ComfyUILogger
 
 
@@ -151,6 +151,126 @@ class NoiseSequenceLoader(StableRenderingNode):
         return LATENT(samples=torch.zeros_like(noise), noise=noise)
 
 
+class CreateNoiseSequenceFromIdMap(StableRenderingNode):
+    Category = "loader"
+
+    def __call__(self,
+                 id_map: IDMap,  # type: ignore
+                 seed: INT(0, 0xffffffffffffffff),  # type: ignore
+                 sd_version: Literal['SD15', "SDXL"] = 'SD15',
+                 downsample_option: Literal['mean', 'max', 'min', 'nearest'] = 'nearest',
+    ) -> LATENT:
+        '''Create noise sequence from ID map.'''
+        if sd_version not in ["SD15", "SDXL"]:
+            raise ValueError("sd_version should be either SD15 or SDXL")
+        if downsample_option not in ["mean", "max", "min", "nearest"]:
+            raise ValueError("downsample_option should be either mean, max, min, or nearest")
+        if not id_map:
+            raise ValueError("ID map is empty.")
+
+        # Initialize noise tensor
+        latent_generator = torch.manual_seed(seed)
+        noise_generator = torch.manual_seed(seed + 1)
+
+        if sd_version == "SD15":
+            height, width = 512, 512
+        elif sd_version == "SDXL":
+            height, width = 1024, 1024
+        else:
+            assert False
+        
+        latent = torch.randn([1, 4, height, width],
+                             device="cpu",  # generator need to run on cpu
+                             generator=latent_generator)
+        latent = latent.repeat(id_map.frame_count, 1, 1, 1).to('cuda')
+
+        noise = torch.randn([1, 4, height, width],
+                            device="cpu",
+                            generator=noise_generator)
+        noise = noise.repeat(id_map.frame_count, 1, 1, 1).to('cuda')
+
+        # Update latent tensor with vertex screen info
+        vertex_screen_info = id_map.create_vertex_screen_info().to('cuda')
+
+        screen_x_coords = (vertex_screen_info[:, 4] * width).long()
+        screen_y_coords = (vertex_screen_info[:, 5] * height).long()
+        screen_frame_indices = vertex_screen_info[:, 6].long()
+
+        corresponding_latents = latent[
+            screen_frame_indices,
+            :,
+            screen_y_coords,
+            screen_x_coords
+        ]
+
+        indexed_corresponding_latents = torch.cat([
+                corresponding_latents,
+                vertex_screen_info[:, 3].unsqueeze(-1)
+        ], dim=-1)
+
+        randn_init_latents, _ = tensor_group_by_then_randn_init(
+            indexed_corresponding_latents,
+            index_column=-1,
+            value_columns=[i for i in range(4)],
+            return_unique=True
+        )
+
+        latent[
+            screen_frame_indices,
+            :,
+            screen_y_coords,
+            screen_x_coords,
+        ] = randn_init_latents
+
+        # Update noise tensor with vertex screen info
+        corresponding_noises = noise[
+            screen_frame_indices,
+            :,
+            screen_y_coords,
+            screen_x_coords
+        ]
+
+        indexed_corresponding_noises = torch.cat([
+            corresponding_noises,
+            vertex_screen_info[:, 3].unsqueeze(-1)
+        ], dim=-1)
+
+        randn_init_noises, _ = tensor_group_by_then_randn_init(
+            indexed_corresponding_noises,
+            index_column=-1,
+            value_columns=[i for i in range(4)],
+            return_unique=True
+        )
+
+        noise[
+            screen_frame_indices,
+            :,
+            screen_y_coords,
+            screen_x_coords,
+        ] = randn_init_noises
+
+        if downsample_option == "nearest":
+            latent = F.interpolate(latent, size=(height//8, width//8), mode="nearest")
+            noise = F.interpolate(noise, size=(height//8, width//8), mode="nearest")
+            return LATENT(samples=latent, noise=noise)
+
+        if downsample_option == "mean":
+            latent = latent.view(-1, 4, 8, 8).mean(dim=(1, 2))
+            noise = noise.view(-1, 4, 8, 8).mean(dim=(1, 2))
+        elif downsample_option == "max":
+            latent = latent.view(-1, 4, 8, 8).amax(dim=(1, 2))
+            noise = noise.view(-1, 4, 8, 8).amax(dim=(1, 2))
+        elif downsample_option == "min":
+            latent = latent.view(-1, 4, 8, 8).amin(dim=(1, 2))
+            noise = noise.view(-1, 4, 8, 8).amin(dim=(1, 2))
+        else:
+            assert False
+        latent = latent.view(-1, 4, height//8, width//8)
+        noise = noise.view(-1, 4, height//8, width//8)
+
+        return LATENT(samples=torch.zeros_like(noise), noise=noise)
+    
+
 class IDSequenceLoader(StableRenderingNode):
     Category = "loader"
 
@@ -168,4 +288,4 @@ class IDSequenceLoader(StableRenderingNode):
         )
 
 
-__all__ = ["ImageSequenceLoader", "NoiseSequenceLoader", "IDSequenceLoader"]
+__all__ = ["ImageSequenceLoader", "NoiseSequenceLoader", "CreateNoiseSequenceFromIdMap", "IDSequenceLoader"]

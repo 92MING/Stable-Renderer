@@ -11,7 +11,11 @@ from .corr_utils import *
 from attr import attrs, attrib
 from common_utils.global_utils import is_dev_mode
 from common_utils.debug_utils import EngineLogger
-from common_utils.math_utils import tensor_group_by_then_average
+from common_utils.math_utils import (
+    tensor_group_by_then_average, 
+    tensor_group_by_then_set_first_occurance,
+    adaptive_instance_normalization
+)
 
 if TYPE_CHECKING:
     from comfyUI.types import SamplingCallbackContext, IMAGE, EngineData
@@ -175,6 +179,9 @@ class OverlapCorresponder:
     post_attn_inject_ratio: float = attrib(default=0.6)
     '''final attn value = cached value * post_attn_inject_ratio + origin value * (1 - post_attn_inject_ratio)'''
     step_finished_inject_ratio: float = attrib(default=0.1)
+    '''final attn value = cached value * step_finished_inject_ratio + averaged value * (1 - step_finished_inject_ratio)'''
+    step_finished_stop_inject_timestep: int = attrib(default=500) 
+    '''the timestep to stop the injection of the averaged value, default is 0, which means always inject the averaged value'''
 
     def prepare(self, engine_data: "EngineData"):
         pass
@@ -193,21 +200,20 @@ class OverlapCorresponder:
                           origin_values: torch.Tensor,
                           layer: int
         ) -> torch.Tensor:
+        # post attention values have shape (b, (h w), c)
+        print("At layer:", layer)
+        print(origin_values.shape)
         return origin_values
     
     def step_finished(self, engine_data: "EngineData", sampling_context: "SamplingCallbackContext"):
-        correspond_maps = engine_data.correspond_maps
-        if not correspond_maps:
-            raise ValueError('Correspond maps not found.')
-        if len(correspond_maps) > 1:
-            raise NotImplementedError('Multiple correspond maps not supported yet.')
+        timestep = sampling_context.timestep
+        EngineLogger.info(f'Current timestep: {timestep}')
+        if timestep < self.step_finished_stop_inject_timestep:
+            EngineLogger.info(f"Current timestep: {timestep}, stop injecting the averaged value at timestep {self.step_finished_stop_inject_timestep}.")
+            return
 
-        vertex_screen_info = None
-        for _, corrmap in correspond_maps.items():
-            corrmap.load_vertex_screen_info(
-                id_map=engine_data.id_maps,
-            )
-            vertex_screen_info = corrmap.vertex_screen_info
+        id_map = engine_data.id_maps
+        vertex_screen_info = id_map.create_vertex_screen_info()
         
         noise_copy = sampling_context.noise.clone()
         vertex_screen_info = vertex_screen_info.to(noise_copy.device)
@@ -221,39 +227,60 @@ class OverlapCorresponder:
         if noise_copy.dtype == torch.float16:
             noise_copy = noise_copy.to(torch.float32)
 
-        print("Corresponding noises shape:", noise_copy[screen_frame_indices, :, screen_x_coords, screen_y_coords].shape)
+        EngineLogger.debug(
+            f"Corresponding noises shape: {noise_copy[screen_frame_indices, :, screen_x_coords, screen_y_coords].shape}"
+        )
+
         corresponding_noises = noise_copy[
             screen_frame_indices,
             :,
-            screen_x_coords,
             screen_y_coords,
+            screen_x_coords,
         ]
 
         indexed_corr_noises = torch.cat([
             corresponding_noises,
-            vertex_screen_info[:, 3].unsqueeze(-1)
+            vertex_screen_info[:, 3].unsqueeze(-1)  # vector index
         ], dim=1)
         
-        print("Indexed corr noises shape:", indexed_corr_noises.shape)
+        EngineLogger.debug(f"Indexed corr noises shape: {indexed_corr_noises.shape}")
 
         # (num_vertex_screen_info, channels + 1)
-        averaged_noises = tensor_group_by_then_average(
+        averaged_noises, unique_indices = tensor_group_by_then_average(
             indexed_corr_noises,
             index_column=-1,
-            value_columns=[i for i in range(channels)]
-        )[0]
-        
-        print("Averaged noises shape:", averaged_noises.shape)
+            value_columns=[i for i in range(channels)],
+            return_unique=True
+        )
+        EngineLogger.debug(f"Unique indices shape: {unique_indices.shape}")
+        EngineLogger.debug(f"Averaged noises shape: {averaged_noises.shape}")
 
         alpha_weighted_average_noises = (1 - self.step_finished_inject_ratio) * corresponding_noises + \
             self.step_finished_inject_ratio * averaged_noises.to(corresponding_noises.dtype)
-
-        sampling_context.noise[
+        
+        noise_copy[
             screen_frame_indices,
             :,
-            screen_x_coords,
             screen_y_coords,
-        ] = alpha_weighted_average_noises.to(sampling_context.noise.dtype)
+            screen_x_coords,
+        ] = alpha_weighted_average_noises.to(noise_copy.dtype)
+
+        normalized_noise = adaptive_instance_normalization(
+            sampling_context.noise.clone(),
+            noise_copy
+        )
+        
+        # mask_out_background = torch.ones_like(normalized_noise)
+        # mask_out_background[
+        #     screen_frame_indices,
+        #     :,  
+        #     screen_y_coords,
+        #     screen_x_coords,
+        # ] = 0
+        # normalized_noise = normalized_noise * mask_out_background + noise_copy * (1 - mask_out_background)
+
+        for i, normalized_noise in enumerate(normalized_noise):
+            sampling_context.noise[i] = normalized_noise
 
 
 __all__ = ['Corresponder', 'DefaultCorresponder', 'OverlapCorresponder']
