@@ -560,34 +560,34 @@ class BasicTransformerBlock(nn.Module):
             if context_attn1 is None:
                 context_attn1 = n
                 value_attn1 = n
+
+            if do_stable_rendering: # pre attention injection
+                n, context_attn1, value_attn1 = corresponder.pre_atten_inject(
+                    self,
+                    engine_data,
+                    n, context_attn1, value_attn1,
+                    transformer_index,
+                )
             n = self.attn1.to_q(n)
             context_attn1 = self.attn1.to_k(context_attn1)
             value_attn1 = self.attn1.to_v(value_attn1)
             
-            if do_stable_rendering: # pre attention injection
-                n, context_attn1, value_attn1 = self._pre_self_attn_inject(corresponder, 
-                                                                            engine_data, 
-                                                                            n, context_attn1, value_attn1,
-                                                                            transformer_index, 
-                                                                            positive_cond_indices)
             n = attn1_replace_patch[block_attn1](n, context_attn1, value_attn1, extra_options)
             n = self.attn1.to_out(n)
         else:
-            q = self.attn1.to_q(n)
             context_attn1 = default(context_attn1, n)
-            k = self.attn1.to_k(context_attn1)
-            if value_attn1 is not None:
-                v = self.attn1.to_v(value_attn1)
-                del value_attn1
-            else:
-                v = self.attn1.to_v(context_attn1)
-            
+            value_attn1 = default(value_attn1, context_attn1)
+
             if do_stable_rendering:
-                q, k, v = self._pre_self_attn_inject(corresponder, 
-                                                     engine_data, 
-                                                     q, k, v,
-                                                     transformer_index, 
-                                                     positive_cond_indices)
+                n, context_attn1, value_attn1 = corresponder.pre_atten_inject(
+                    self,
+                    engine_data,
+                    n, context_attn1, value_attn1,
+                    transformer_index,
+                )
+            q = self.attn1.to_q(n)
+            k = self.attn1.to_k(context_attn1)
+            v = self.attn1.to_v(value_attn1)
  
             out = optimized_attention(q, k, v, self.attn1.heads)
             n = self.attn1.to_out(out)

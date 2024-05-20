@@ -76,6 +76,7 @@ class OverlapCorresponder(StableRenderingNode):
                  engine_data: EngineData,   # this is hidden value, will hide on UI
                  update_corrmap: bool=True, 
                  update_mode: UpdateMode = 'first_avg',
+                 pre_attn_inject_num_of_random_frames: int = 1,
                  post_attn_inject_ratio: float = 0.6,
                  step_finished_inject_ratio: FLOAT(min=0, max=1, step=0.1, round=0.01)=0.5,  # type: ignore
                  step_finished_stop_inject_timestep: INT(1, 1000, step=100)=500,  # type: ignore
@@ -105,6 +106,7 @@ class OverlapCorresponder(StableRenderingNode):
         '''
         corresponder = _OverlapCorresponder(update_corrmap=update_corrmap, 
                                             update_corrmap_mode=update_mode,
+                                            pre_attn_inject_num_random_frames=pre_attn_inject_num_of_random_frames,
                                             post_attn_inject_ratio=post_attn_inject_ratio,
                                             step_finished_inject_ratio=step_finished_inject_ratio,
                                             step_finished_stop_inject_timestep=step_finished_stop_inject_timestep)

@@ -27,7 +27,7 @@ from typing import (
     get_args, TYPE_CHECKING
 )
 from uuid import uuid4
-from functools import partial
+from functools import partial, lru_cache
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import threading
 from tqdm import tqdm
@@ -215,64 +215,69 @@ class IDMap:
             )
         return IDMap(frame_indices=frame_indices, tensor=tensor)
     
+    _vertex_screen_info_cache: torch.Tensor = attrib(default=None, init=False)
+
     def create_vertex_screen_info(self,) -> torch.Tensor:
         """
         Load vertex screen positions to CorrespondMap from IDMaps (multiple frames can be included).
         The tensor is in shape of (N, 7), where the 7 elements are 
         (object_id, material_id, map_index, vertex_id, x_ratio, y_ratio, frame_index).
         """
-        id_tensor, frame_indices = self.tensor, self.frame_indices
-        frames, height, width, id_elements = id_tensor.shape
+        if self._vertex_screen_info_cache is None:
+            id_tensor, frame_indices = self.tensor, self.frame_indices
 
-        x_coordinates_tensor = torch.arange(
-            width, device=id_tensor.device
-        ).view(1, -1).expand(
-            height, -1  # (H, W)
-        ).view(1, height, width, 1).expand(
-            frames, -1, -1, -1  # (B, H, W, 1)
-        )
-        # assert x_coordinates[1, 52, 12] == 12
-        x_ratio_tensor = x_coordinates_tensor / height
+            frames, height, width, id_elements = id_tensor.shape
 
-        y_coordinates_tensor = torch.arange(
-            height, device=id_tensor.device
-        ).view(-1, 1).expand(
-            -1, width  # (H, W)
-        ).view(1, height, width, 1).expand(
-            frames, -1, -1, -1  # (B, H, W, 1)
-        )
-        # assert y_coordinates[1, 52, 12] == 52
-        y_ratio_tensor = y_coordinates_tensor / width
+            x_coordinates_tensor = torch.arange(
+                width, device=id_tensor.device
+            ).view(1, -1).expand(
+                height, -1  # (H, W)
+            ).view(1, height, width, 1).expand(
+                frames, -1, -1, -1  # (B, H, W, 1)
+            )
+            # assert x_coordinates[1, 52, 12] == 12
+            x_ratio_tensor = x_coordinates_tensor / height
 
-        frame_indices_tensor = torch.tensor(
-            frame_indices, device=id_tensor.device
-        ).view(-1, 1, 1, 1).expand(-1, height, width, 1).to(torch.int)
-        # (B, H, W, 1), where values in (H, W, 1) equals the frame index
+            y_coordinates_tensor = torch.arange(
+                height, device=id_tensor.device
+            ).view(-1, 1).expand(
+                -1, width  # (H, W)
+            ).view(1, height, width, 1).expand(
+                frames, -1, -1, -1  # (B, H, W, 1)
+            )
+            # assert y_coordinates[1, 52, 12] == 52
+            y_ratio_tensor = y_coordinates_tensor / width
 
-        vertex_screen_info = torch.cat(
-            [id_tensor, 
-             x_ratio_tensor,
-             y_ratio_tensor,
-             frame_indices_tensor], dim=-1
-        )
+            frame_indices_tensor = torch.tensor(
+                frame_indices, device=id_tensor.device
+            ).view(-1, 1, 1, 1).expand(-1, height, width, 1).to(torch.int)
+            # (B, H, W, 1), where values in (H, W, 1) equals the frame index
 
-        # flatten the vertex screen positions
-        flat_vertex_screen_info = vertex_screen_info.view(-1, id_elements + 3)
+            vertex_screen_info = torch.cat(
+                [id_tensor, 
+                x_ratio_tensor,
+                y_ratio_tensor,
+                frame_indices_tensor], dim=-1
+            )
 
-        # Filter out map_index == 2048
-        flat_vertex_screen_info = flat_vertex_screen_info[flat_vertex_screen_info[..., 2] != 2048]
+            # flatten the vertex screen positions
+            flat_vertex_screen_info = vertex_screen_info.view(-1, id_elements + 3)
 
-        # Filter out object_id == material_id == map_index == vertex_id == 0
-        flat_vertex_screen_info = flat_vertex_screen_info[
-            (flat_vertex_screen_info[..., 0] != 0) |
-            (flat_vertex_screen_info[..., 1] != 0) |
-            (flat_vertex_screen_info[..., 2] != 0) |
-            (flat_vertex_screen_info[..., 3] != 0)
-        ]
+            # Filter out map_index == 2048
+            flat_vertex_screen_info = flat_vertex_screen_info[flat_vertex_screen_info[..., 2] != 2048]
 
-        EngineLogger.info(f"Created vertex screen info from IDMap.")
+            # Filter out object_id == material_id == map_index == vertex_id == 0
+            flat_vertex_screen_info = flat_vertex_screen_info[
+                (flat_vertex_screen_info[..., 0] != 0) |
+                (flat_vertex_screen_info[..., 1] != 0) |
+                (flat_vertex_screen_info[..., 2] != 0) |
+                (flat_vertex_screen_info[..., 3] != 0)
+            ]
+            print(flat_vertex_screen_info[:, 3])
+            EngineLogger.info(f"Created vertex screen info from IDMap.")
+            self._vertex_screen_info_cache = flat_vertex_screen_info
 
-        return flat_vertex_screen_info
+        return self._vertex_screen_info_cache
 
 
 

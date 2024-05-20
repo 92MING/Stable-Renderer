@@ -269,8 +269,46 @@ class CreateNoiseSequenceFromIdMap(StableRenderingNode):
         noise = noise.view(-1, 4, height//8, width//8)
 
         return LATENT(samples=torch.zeros_like(noise), noise=noise)
-    
 
+
+class CreateIdenticalNoiseSequence(StableRenderingNode):
+    Category = "loader"
+
+    def __call__(self,
+                 seed: INT(0, 0xffffffffffffffff),  # type: ignore
+                 num_frames: INT(0, 100000), # type: ignore
+                 sd_version: Literal['SD15', "SDXL"] = 'SD15',
+    ) -> LATENT:
+        '''Create noise sequence from ID map.'''
+        if sd_version not in ["SD15", "SDXL"]:
+            raise ValueError("sd_version should be either SD15 or SDXL")
+        if num_frames <= 0:
+            raise ValueError("num_frames should be larger than 0.")
+
+        # Initialize noise tensor
+        latent_generator = torch.manual_seed(seed)
+        noise_generator = torch.manual_seed(seed + 1)
+
+        if sd_version == "SD15":
+            height, width = 64, 64
+        elif sd_version == "SDXL":
+            height, width = 128, 128
+        else:
+            assert False
+        
+        latent = torch.randn([1, 4, height, width],
+                             device="cpu",  # generator need to run on cpu
+                             generator=latent_generator)
+        latent = latent.repeat(num_frames, 1, 1, 1).to('cuda')
+
+        noise = torch.randn([1, 4, height, width],
+                            device="cpu",
+                            generator=noise_generator)
+        noise = noise.repeat(num_frames, 1, 1, 1).to('cuda')
+
+        return LATENT(samples=latent, noise=noise)
+    
+    
 class IDSequenceLoader(StableRenderingNode):
     Category = "loader"
 
@@ -288,4 +326,4 @@ class IDSequenceLoader(StableRenderingNode):
         )
 
 
-__all__ = ["ImageSequenceLoader", "NoiseSequenceLoader", "CreateNoiseSequenceFromIdMap", "IDSequenceLoader"]
+__all__ = ["ImageSequenceLoader", "NoiseSequenceLoader", "CreateNoiseSequenceFromIdMap", "CreateIdenticalNoiseSequence", "IDSequenceLoader"]

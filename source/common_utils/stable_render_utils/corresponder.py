@@ -4,6 +4,9 @@ if __name__ == '__main__':
     __package__ = 'common_utils.stable_render_utils'
 
 import torch
+from einops import rearrange
+import torch.nn.functional as F
+
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Protocol, Any
 
@@ -25,17 +28,6 @@ if TYPE_CHECKING:
 
 class Corresponder(Protocol):
     '''object that defines the correspond function for treating the related values across frames'''
-    layer_range: tuple[int, ...]
-    '''
-    Define the layers that the correspond function will be applied to.
-    Default is the 6th layer(the middle layer of the whole unet).
-    '''
-    update_corrmap: bool
-    '''whether to update the correspondence map'''
-    update_corrmap_mode: "UpdateMode"
-    '''the mode for updating the correspondence map'''
-    post_attn_inject_ratio: float
-    '''final attn value = cached value * post_attn_inject_ratio + origin value * (1 - post_attn_inject_ratio)'''
     
     @abstractmethod
     def prepare(self, engine_data: "EngineData"):
@@ -50,25 +42,25 @@ class Corresponder(Protocol):
     def pre_atten_inject(self, 
                          block: "BasicTransformerBlock",
                          engine_data: "EngineData",
-                         q: torch.Tensor,
-                         k: torch.Tensor,
-                         v: torch.Tensor,
+                         q_context: torch.Tensor,
+                         k_context: torch.Tensor,
+                         v_context: torch.Tensor,
                          layer: int)->tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         '''
         This method will be called before an self-attention block is executed.
-        It is used for modifying the QKV values before the self-attention block.
+        It is used for modifying the qkv contexts before the self-attention block.
         
         Args:
             - block: the self-attention block instance
             - engine_data: the baking data containing the packed data from previous rendering frames, e.g id_maps, color_maps, ...
-            - q: the query tensor
-            - k: the key tensor
-            - v: the value tensor
+            - q_context: the query context tensor to be passed to the query weight
+            - k_context: the key context tensor to be passed to the key weight
+            - v_context: the value context tensor to be passed to the value weight
             - layer: the layer index of the current frame. This is for you to specify the layer you want to treat in the current frame,
                     e.g. the self-attention block `BasicTransformerBlock` has 16 layers
                     
         Returns:
-            - the modified q, k, v tensors
+            - the modified q_context, k_context, v_context tensors
         '''
     
     @abstractmethod
@@ -176,8 +168,15 @@ class OverlapCorresponder:
     '''whether to update the correspondence map'''
     update_corrmap_mode: "UpdateMode" = attrib(default='first')
     '''the mode for updating the correspondence map'''
+    pre_attn_inject_num_random_frames: int = attrib(default=1)
+    '''the number of random frames to inject before the attention block, disable by entering negative value.'''
+    _random_frame_indices: torch.Tensor = attrib(default=None, init=False)
+    '''the random frame indices to inject before the attention block, will be initialized after the
+    first pre_attn_inject call'''
+
     post_attn_inject_ratio: float = attrib(default=0.6)
     '''final attn value = cached value * post_attn_inject_ratio + origin value * (1 - post_attn_inject_ratio)'''
+
     step_finished_inject_ratio: float = attrib(default=0.1)
     '''final attn value = cached value * step_finished_inject_ratio + averaged value * (1 - step_finished_inject_ratio)'''
     step_finished_stop_inject_timestep: int = attrib(default=500) 
@@ -189,10 +188,36 @@ class OverlapCorresponder:
     def pre_atten_inject(self, 
                          block: "BasicTransformerBlock", 
                          engine_data: "EngineData",
-                         q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
+                         q_context: torch.Tensor,
+                         k_context: torch.Tensor,
+                         v_context: torch.Tensor,
                          layer: int
         ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return q, k, v
+        if self.pre_attn_inject_num_random_frames < 0:
+            EngineLogger.debug(f"Skipping pre attn inject for layer {layer}")
+            return q_context, k_context, v_context
+        
+        EngineLogger.debug(f"Layer {layer} pre attn inject")
+        EngineLogger.debug(f"Pre inject shapes: q_context={q_context.shape}, k_context={k_context.shape}, v_context={v_context.shape}")
+
+        if self._random_frame_indices is None:
+            self._random_frame_indices = torch.randint(1, k_context.shape[0], (self.pre_attn_inject_num_random_frames,))
+
+        # Extract random N frames' k v contexts
+        random_k = k_context[self._random_frame_indices]
+        random_v = v_context[self._random_frame_indices]
+
+        # Expand and merge the random N frames' k v contexts
+        expanded_random_k = torch.cat(
+            [k for k in random_k], dim=0).unsqueeze(0).expand(k_context.shape[0], -1, -1)
+        expanded_random_v = torch.cat(
+            [v for v in random_v], dim=0).unsqueeze(0).expand(v_context.shape[0], -1, -1)
+
+        k_context = expanded_random_k
+        v_context = expanded_random_v
+
+        EngineLogger.debug(f"Post inject shapes: q_context={q_context.shape}, k_context={k_context.shape}, v_context={v_context.shape}")
+        return q_context, k_context, v_context
     
     def post_atten_inject(self, 
                           block: "BasicTransformerBlock", 
@@ -200,10 +225,75 @@ class OverlapCorresponder:
                           origin_values: torch.Tensor,
                           layer: int
         ) -> torch.Tensor:
-        # post attention values have shape (b, (h w), c)
-        print("At layer:", layer)
-        print(origin_values.shape)
         return origin_values
+
+        EngineLogger.debug(f"Layer {layer} post attn inject")
+        # post atten inject does not seem effective
+        if layer in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]:
+            EngineLogger.debug(f"Skipping post attn inject for layer {layer}")
+            return origin_values
+        
+        # post attention values have shape (b, (h w), c)
+        b, hw, c = origin_values.shape
+        if pow(hw, 1/2) != int(pow(hw, 1/2)):
+            raise ValueError(f"Dimension hw={hw} is not a perfect square.")
+
+        h = w = int(pow(hw, 1/2))
+        rearranged_features = rearrange(origin_values, "b (h w) c -> b c h w", h=h, w=w)
+        EngineLogger.debug(f'Rearranged features {rearranged_features.shape}')
+
+        id_map = engine_data.id_maps
+        vertex_screen_info = id_map.create_vertex_screen_info().to(origin_values.device)
+
+        screen_x_coords = (vertex_screen_info[:, 4] * id_map.width).to(torch.int)
+        screen_y_coords = (vertex_screen_info[:, 5] * id_map.height).to(torch.int)
+        screen_frame_indices = vertex_screen_info[:, 6].to(torch.int)
+
+        # Upscale to match the size of the id map
+        upscaled_features = F.interpolate(rearranged_features, size=(id_map.height, id_map.width), mode='nearest')
+
+        corresponding_features = upscaled_features[
+            screen_frame_indices,
+            :,
+            screen_y_coords,
+            screen_x_coords,
+        ]
+
+        indexed_corr_features = torch.cat([
+            corresponding_features,
+            vertex_screen_info[:, 3].unsqueeze(-1)  # vector index
+        ], dim=1)
+
+        averaged_features, unique_indices = tensor_group_by_then_average(
+            indexed_corr_features,
+            index_column=-1,
+            value_columns=[i for i in range(c)],
+            return_unique=True
+        )
+
+        alpha_weighted_average_features = (1 - self.post_attn_inject_ratio) * corresponding_features + \
+            self.post_attn_inject_ratio * averaged_features.to(corresponding_features.dtype)
+        
+        upscaled_features[
+            screen_frame_indices,
+            :,
+            screen_y_coords,
+            screen_x_coords,
+        ] = alpha_weighted_average_features.to(upscaled_features.dtype)
+
+        downscaled_features = F.interpolate(upscaled_features, size=(h, w), mode='nearest')
+
+        EngineLogger.debug(f"Downscaled features {downscaled_features.shape}")
+
+        normalized_features = adaptive_instance_normalization(
+            rearranged_features,
+            downscaled_features
+        )
+
+        EngineLogger.debug(f"Normalized features {normalized_features.shape}")
+
+        return rearrange(normalized_features, "b c h w -> b (h w) c").contiguous()
+
     
     def step_finished(self, engine_data: "EngineData", sampling_context: "SamplingCallbackContext"):
         timestep = sampling_context.timestep
@@ -252,6 +342,9 @@ class OverlapCorresponder:
             value_columns=[i for i in range(channels)],
             return_unique=True
         )
+        print(indexed_corr_noises)
+        print(averaged_noises)
+        print(unique_indices)
         EngineLogger.debug(f"Unique indices shape: {unique_indices.shape}")
         EngineLogger.debug(f"Averaged noises shape: {averaged_noises.shape}")
 
@@ -269,7 +362,7 @@ class OverlapCorresponder:
             sampling_context.noise.clone(),
             noise_copy
         )
-        
+
         # mask_out_background = torch.ones_like(normalized_noise)
         # mask_out_background[
         #     screen_frame_indices,
